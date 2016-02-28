@@ -40,6 +40,7 @@ CHECK-NEXT:   pp_out_of_date_dependency
 CHECK-NEXT:   pp_poisoning_existing_macro
 CHECK-NEXT:   w_asm_qualifier_ignored
 CHECK-NEXT:   warn_accessor_property_type_mismatch
+CHECK-NEXT:   warn_apinotes_message
 CHECK-NEXT:   warn_arcmt_nsalloc_realloc
 CHECK-NEXT:   warn_asm_label_on_auto_decl
 CHECK-NEXT:   warn_c_kext
@@ -84,8 +85,7 @@ CHECK-NEXT:   warn_objc_property_copy_missing_on_block
 CHECK-NEXT:   warn_objc_protocol_qualifier_missing_id
 CHECK-NEXT:   warn_on_superclass_use
 CHECK-NEXT:   warn_partial_specs_not_deducible
-CHECK-NEXT:   warn_pp_convert_lhs_to_positive
-CHECK-NEXT:   warn_pp_convert_rhs_to_positive
+CHECK-NEXT:   warn_pp_convert_to_positive
 CHECK-NEXT:   warn_pp_expr_overflow
 CHECK-NEXT:   warn_pp_line_decimal
 CHECK-NEXT:   warn_pragma_pack_pop_identifer_and_alignment

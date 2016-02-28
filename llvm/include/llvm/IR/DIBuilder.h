@@ -158,7 +158,9 @@ namespace llvm {
 
     /// Create debugging information entry for a c++
     /// style reference or rvalue reference type.
-    DIDerivedType *createReferenceType(unsigned Tag, DIType *RTy);
+    DIDerivedType *createReferenceType(unsigned Tag, DIType *RTy,
+                                       uint64_t SizeInBits = 0,
+                                       uint64_t AlignInBits = 0);
 
     /// Create debugging information entry for a typedef.
     /// \param Ty          Original type.
@@ -514,7 +516,6 @@ namespace llvm {
     /// \param Flags         e.g. is this function prototyped or not.
     ///                      These flags are used to emit dwarf attributes.
     /// \param isOptimized   True if optimization is ON.
-    /// \param Fn            llvm::Function pointer.
     /// \param TParams       Function template parameters.
     DISubprogram *createFunction(DIScope *Scope, StringRef Name,
                                  StringRef LinkageName, DIFile *File,
@@ -562,7 +563,6 @@ namespace llvm {
     /// \param Flags         e.g. is this function prototyped or not.
     ///                      This flags are used to emit dwarf attributes.
     /// \param isOptimized   True if optimization is ON.
-    /// \param Fn            llvm::Function pointer.
     /// \param TParams       Function template parameters.
     DISubprogram *
     createMethod(DIScope *Scope, StringRef Name, StringRef LinkageName,

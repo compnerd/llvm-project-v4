@@ -691,6 +691,8 @@ DIE *DwarfUnit::getOrCreateContextDIE(const DIScope *Context) {
     return getOrCreateTypeDIE(T);
   if (auto *NS = dyn_cast<DINamespace>(Context))
     return getOrCreateNameSpace(NS);
+  if (auto *M = dyn_cast<DIModule>(Context))
+    return getOrCreateModule(M);
   if (auto *SP = dyn_cast<DISubprogram>(Context))
     return getOrCreateSubprogramDIE(SP);
   if (auto *M = dyn_cast<DIModule>(Context))
@@ -853,7 +855,9 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DIDerivedType *DTy) {
 
   // Add size if non-zero (derived types might be zero-sized.)
   if (Size && Tag != dwarf::DW_TAG_pointer_type
-           && Tag != dwarf::DW_TAG_ptr_to_member_type)
+           && Tag != dwarf::DW_TAG_ptr_to_member_type
+           && Tag != dwarf::DW_TAG_reference_type
+           && Tag != dwarf::DW_TAG_rvalue_reference_type)
     addUInt(Buffer, dwarf::DW_AT_byte_size, None, Size);
 
   if (Tag == dwarf::DW_TAG_ptr_to_member_type)
@@ -996,6 +1000,13 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DICompositeType *CTy) {
   if (!Name.empty())
     addString(Buffer, dwarf::DW_AT_name, Name);
 
+  // For Swift, mangled names are put into DW_AT_linkage_name; human-readable
+  // names are emitted put into DW_AT_name and the accelerator table.
+  if ((CTy->getRuntimeLang() == dwarf::DW_LANG_Swift ||
+       CTy->getRuntimeLang() == dwarf::DW_LANG_PLI) &&
+      CTy->getRawIdentifier())
+    addString(Buffer, dwarf::DW_AT_linkage_name, CTy->getIdentifier());
+
   if (Tag == dwarf::DW_TAG_enumeration_type ||
       Tag == dwarf::DW_TAG_class_type || Tag == dwarf::DW_TAG_structure_type ||
       Tag == dwarf::DW_TAG_union_type) {
@@ -1018,8 +1029,7 @@ void DwarfUnit::constructTypeDIE(DIE &Buffer, const DICompositeType *CTy) {
     // No harm in adding the runtime language to the declaration.
     unsigned RLang = CTy->getRuntimeLang();
     if (RLang)
-      addUInt(Buffer, dwarf::DW_AT_APPLE_runtime_class, dwarf::DW_FORM_data1,
-              RLang);
+      addUInt(Buffer, dwarf::DW_AT_APPLE_runtime_class, None, RLang);
   }
 }
 

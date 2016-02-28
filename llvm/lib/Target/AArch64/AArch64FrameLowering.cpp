@@ -170,7 +170,7 @@ void AArch64FrameLowering::eliminateCallFramePseudoInstr(
     unsigned Align = getStackAlignment();
 
     int64_t Amount = I->getOperand(0).getImm();
-    Amount = RoundUpToAlignment(Amount, Align);
+    Amount = alignTo(Amount, Align);
     if (!IsDestroy)
       Amount = -Amount;
 
@@ -186,7 +186,7 @@ void AArch64FrameLowering::eliminateCallFramePseudoInstr(
       // 2) For 12-bit <= offset <= 24-bit, we use two instructions. One uses
       // LSL #0, and the other uses LSL #12.
       //
-      // Mostly call frames will be allocated at the start of a function so
+      // Most call frames will be allocated at the start of a function so
       // this is OK, but it is a limitation that needs dealing with.
       assert(Amount > -0xffffff && Amount < 0xffffff && "call frame too large");
       emitFrameOffset(MBB, I, DL, AArch64::SP, AArch64::SP, Amount, TII);
@@ -275,14 +275,71 @@ static bool isCSSave(MachineInstr *MBBI) {
          MBBI->getOpcode() == AArch64::STPDpre;
 }
 
+// Find a scratch register that we can use at the start of the prologue to
+// re-align the stack pointer.  We avoid using callee-save registers since they
+// may appear to be free when this is called from canUseAsPrologue (during
+// shrink wrapping), but then no longer be free when this is called from
+// emitPrologue.
+//
+// FIXME: This is a bit conservative, since in the above case we could use one
+// of the callee-save registers as a scratch temp to re-align the stack pointer,
+// but we would then have to make sure that we were in fact saving at least one
+// callee-save register in the prologue, which is additional complexity that
+// doesn't seem worth the benefit.
+static unsigned findScratchNonCalleeSaveRegister(MachineBasicBlock *MBB) {
+  MachineFunction *MF = MBB->getParent();
+
+  // If MBB is an entry block, use X9 as the scratch register
+  if (&MF->front() == MBB)
+    return AArch64::X9;
+
+  RegScavenger RS;
+  RS.enterBasicBlock(MBB);
+
+  // Prefer X9 since it was historically used for the prologue scratch reg.
+  if (!RS.isRegUsed(AArch64::X9))
+    return AArch64::X9;
+
+  // Find a free non callee-save reg.
+  const AArch64Subtarget &Subtarget = MF->getSubtarget<AArch64Subtarget>();
+  const AArch64RegisterInfo *RegInfo = Subtarget.getRegisterInfo();
+  const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegs(MF);
+  BitVector CalleeSaveRegs(RegInfo->getNumRegs());
+  for (unsigned i = 0; CSRegs[i]; ++i)
+    CalleeSaveRegs.set(CSRegs[i]);
+
+  BitVector Available = RS.getRegsAvailable(&AArch64::GPR64RegClass);
+  for (int AvailReg = Available.find_first(); AvailReg != -1;
+       AvailReg = Available.find_next(AvailReg))
+    if (!CalleeSaveRegs.test(AvailReg))
+      return AvailReg;
+
+  return AArch64::NoRegister;
+}
+
+bool AArch64FrameLowering::canUseAsPrologue(
+    const MachineBasicBlock &MBB) const {
+  const MachineFunction *MF = MBB.getParent();
+  MachineBasicBlock *TmpMBB = const_cast<MachineBasicBlock *>(&MBB);
+  const AArch64Subtarget &Subtarget = MF->getSubtarget<AArch64Subtarget>();
+  const AArch64RegisterInfo *RegInfo = Subtarget.getRegisterInfo();
+
+  // Don't need a scratch register if we're not going to re-align the stack.
+  if (!RegInfo->needsStackRealignment(*MF))
+    return true;
+  // Otherwise, we can use any block as long as it has a scratch register
+  // available.
+  return findScratchNonCalleeSaveRegister(TmpMBB) != AArch64::NoRegister;
+}
+
 void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
                                         MachineBasicBlock &MBB) const {
   MachineBasicBlock::iterator MBBI = MBB.begin();
   const MachineFrameInfo *MFI = MF.getFrameInfo();
   const Function *Fn = MF.getFunction();
-  const AArch64RegisterInfo *RegInfo = static_cast<const AArch64RegisterInfo *>(
-      MF.getSubtarget().getRegisterInfo());
-  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  const AArch64Subtarget &Subtarget = MF.getSubtarget<AArch64Subtarget>();
+  const AArch64RegisterInfo *RegInfo = Subtarget.getRegisterInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   MachineModuleInfo &MMI = MF.getMMI();
   AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
   bool needsFrameMoves = MMI.hasDebugInfo() || Fn->needsUnwindTableEntry();
@@ -355,8 +412,8 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
   const bool NeedsRealignment = RegInfo->needsStackRealignment(MF);
   unsigned scratchSPReg = AArch64::SP;
   if (NumBytes && NeedsRealignment) {
-    // Use the first callee-saved register as a scratch register.
-    scratchSPReg = AArch64::X9;
+    scratchSPReg = findScratchNonCalleeSaveRegister(&MBB);
+    assert(scratchSPReg != AArch64::NoRegister);
   }
 
   // If we're a leaf function, try using the red zone.
@@ -515,33 +572,33 @@ static bool isCalleeSavedRegister(unsigned Reg, const MCPhysReg *CSRegs) {
   return false;
 }
 
-static bool isCSRestore(MachineInstr *MI, const MCPhysReg *CSRegs) {
+/// Checks whether the given instruction restores callee save registers
+/// and if so returns how many.
+static unsigned getNumCSRestores(MachineInstr &MI, const MCPhysReg *CSRegs) {
   unsigned RtIdx = 0;
-  if (MI->getOpcode() == AArch64::LDPXpost ||
-      MI->getOpcode() == AArch64::LDPDpost)
+  switch (MI.getOpcode()) {
+  case AArch64::LDPXpost:
+  case AArch64::LDPDpost:
     RtIdx = 1;
-
-  if (MI->getOpcode() == AArch64::LDPXpost ||
-      MI->getOpcode() == AArch64::LDPDpost ||
-      MI->getOpcode() == AArch64::LDPXi || MI->getOpcode() == AArch64::LDPDi) {
-    if (!isCalleeSavedRegister(MI->getOperand(RtIdx).getReg(), CSRegs) ||
-        !isCalleeSavedRegister(MI->getOperand(RtIdx + 1).getReg(), CSRegs) ||
-        MI->getOperand(RtIdx + 2).getReg() != AArch64::SP)
-      return false;
-    return true;
+    // FALLTHROUGH
+  case AArch64::LDPXi:
+  case AArch64::LDPDi:
+    if (!isCalleeSavedRegister(MI.getOperand(RtIdx).getReg(), CSRegs) ||
+        !isCalleeSavedRegister(MI.getOperand(RtIdx + 1).getReg(), CSRegs) ||
+        MI.getOperand(RtIdx + 2).getReg() != AArch64::SP)
+      return 0;
+    return 2;
   }
-
-  return false;
+  return 0;
 }
 
 void AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
                                         MachineBasicBlock &MBB) const {
   MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
   MachineFrameInfo *MFI = MF.getFrameInfo();
-  const AArch64InstrInfo *TII =
-      static_cast<const AArch64InstrInfo *>(MF.getSubtarget().getInstrInfo());
-  const AArch64RegisterInfo *RegInfo = static_cast<const AArch64RegisterInfo *>(
-      MF.getSubtarget().getRegisterInfo());
+  const AArch64Subtarget &Subtarget = MF.getSubtarget<AArch64Subtarget>();
+  const AArch64RegisterInfo *RegInfo = Subtarget.getRegisterInfo();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
   DebugLoc DL;
   bool IsTailCallReturn = false;
   if (MBB.end() != MBBI) {
@@ -587,7 +644,7 @@ void AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
   //      ---------------------|        ---           |
   //      |                    |         |            |
   //      |   CalleeSavedReg   |         |            |
-  //      | (NumRestores * 16) |         |            |
+  //      | (NumRestores * 8)  |         |            |
   //      |                    |         |            |
   //      ---------------------|         |         NumBytes
   //      |                    |     StackSize  (StackAdjustUp)
@@ -608,17 +665,17 @@ void AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
   // Move past the restores of the callee-saved registers.
   MachineBasicBlock::iterator LastPopI = MBB.getFirstTerminator();
   const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegs(&MF);
-  if (LastPopI != MBB.begin()) {
-    do {
-      ++NumRestores;
-      --LastPopI;
-    } while (LastPopI != MBB.begin() && isCSRestore(LastPopI, CSRegs));
-    if (!isCSRestore(LastPopI, CSRegs)) {
+  MachineBasicBlock::iterator Begin = MBB.begin();
+  while (LastPopI != Begin) {
+    --LastPopI;
+    unsigned Restores = getNumCSRestores(*LastPopI, CSRegs);
+    NumRestores += Restores;
+    if (Restores == 0) {
       ++LastPopI;
-      --NumRestores;
+      break;
     }
   }
-  NumBytes -= NumRestores * 16;
+  NumBytes -= NumRestores * 8;
   assert(NumBytes >= 0 && "Negative stack allocation size!?");
 
   if (!hasFP(MF)) {
@@ -636,7 +693,7 @@ void AArch64FrameLowering::emitEpilogue(MachineFunction &MF,
   // be able to save any instructions.
   if (NumBytes || MFI->hasVarSizedObjects())
     emitFrameOffset(MBB, LastPopI, DL, AArch64::SP, AArch64::FP,
-                    -(NumRestores - 1) * 16, TII, MachineInstr::NoFlags);
+                    -(NumRestores - 2) * 8, TII, MachineInstr::NoFlags);
 }
 
 /// getFrameIndexReference - Provide a base+offset reference to an FI slot for
@@ -723,31 +780,80 @@ static unsigned getPrologueDeath(MachineFunction &MF, unsigned Reg) {
   return getKillRegState(LRKill);
 }
 
+/// The register order of CSI list is controlled by getCalleeSavedRegs, and the
+/// frame index is controlled by getCalleeSavedRegsForLayout. We produce a
+/// vector of register pairs that need storing in the RegPairs argument. The
+/// value 0 indicates no register needs storing in a paired slot.
+static void
+getCSRPairs(const std::vector<CalleeSavedInfo> &CSI,
+            const AArch64RegisterInfo *RegInfo, const MachineFunction *MF,
+            SmallVectorImpl<std::pair<unsigned, unsigned>> &RegPairs) {
+  const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegsForLayout(MF);
+
+  auto CSIPos = CSI.begin();
+  auto CSIEnd = CSI.end();
+  // We assume that getCalleeSavedRegsForLayout has the same ordering as
+  // getCalleeSavedRegs. So we can advance CSI vector while advancing
+  // getCalleeSavedRegsForLayout.
+  for (unsigned i = 0; CSRegs[i]; i += 2) {
+    assert(CSRegs[i + 1] && "Odd number of callee-saved registers!");
+    auto FirstPos =
+        std::find_if(CSIPos, CSIEnd, [&](const CalleeSavedInfo &I) {
+          return I.getReg() == CSRegs[i];
+        });
+    auto SecondPos =
+        std::find_if(CSIPos, CSIEnd, [&](const CalleeSavedInfo &I) {
+          return I.getReg() == CSRegs[i + 1];
+        });
+    if (FirstPos == CSIEnd && SecondPos == CSIEnd)
+      // Neither of these regs need storing.
+      continue;
+
+    unsigned FirstReg = FirstPos == CSIEnd ? AArch64::XZR : CSRegs[i];
+    unsigned SecondReg = SecondPos == CSIEnd ? AArch64::XZR : CSRegs[i + 1];
+
+    if (FirstPos != CSIEnd && SecondPos != CSIEnd) {
+      // GPRs and FPRs are saved in pairs of 64-bit regs. We expect the CSI
+      // list to come in sorted by frame index so that we can issue the store
+      // pair instructions directly. Assert if we see anything otherwise.
+      assert(FirstPos->getFrameIdx() + 1 == SecondPos->getFrameIdx() &&
+             "Out of order callee saved regs!");
+    }
+
+    DEBUG(dbgs() << "CSR pair: (" << RegInfo->getName(FirstReg) << ", "
+                 << RegInfo->getName(SecondReg) << ") -> fi#("
+                 << (FirstPos == CSIEnd ? SecondPos->getFrameIdx()
+                                        : FirstPos->getFrameIdx())
+                  << ")\n");
+
+    RegPairs.push_back(std::make_pair(FirstReg, SecondReg));
+    CSIPos = SecondPos == CSIEnd ? FirstPos : SecondPos;
+  }
+}
+
 bool AArch64FrameLowering::spillCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     const std::vector<CalleeSavedInfo> &CSI,
     const TargetRegisterInfo *TRI) const {
   MachineFunction &MF = *MBB.getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
-  unsigned Count = CSI.size();
   DebugLoc DL;
-  assert((Count & 1) == 0 && "Odd number of callee-saved regs to spill!");
 
-  for (unsigned i = 0; i < Count; i += 2) {
-    unsigned idx = Count - i - 2;
-    unsigned Reg1 = CSI[idx].getReg();
-    unsigned Reg2 = CSI[idx + 1].getReg();
-    // GPRs and FPRs are saved in pairs of 64-bit regs. We expect the CSI
-    // list to come in sorted by frame index so that we can issue the store
-    // pair instructions directly. Assert if we see anything otherwise.
-    //
+  const AArch64RegisterInfo *RegInfo = static_cast<const AArch64RegisterInfo *>(
+      MF.getSubtarget().getRegisterInfo());
+  SmallVector<std::pair<unsigned, unsigned>, 4> RegPairs;
+
+  // First gather information about the paris we'd like to store.
+  getCSRPairs(CSI, RegInfo, &MF, RegPairs);
+  unsigned Count = RegPairs.size();
+
+  for (unsigned i = 0; i < Count; ++i) {
+    unsigned idx = Count - i - 1;
+    unsigned Reg1 = RegPairs[idx].first;
+    unsigned Reg2 = RegPairs[idx].second;
     // The order of the registers in the list is controlled by
     // getCalleeSavedRegs(), so they will always be in-order, as well.
-    assert(CSI[idx].getFrameIdx() + 1 == CSI[idx + 1].getFrameIdx() &&
-           "Out of order callee saved regs!");
     unsigned StrOpc;
-    assert((Count & 1) == 0 && "Odd number of callee-saved regs to spill!");
-    assert((i & 1) == 0 && "Odd index for callee-saved reg spill!");
     // Issue sequence of non-sp increment and pi sp spills for cs regs. The
     // first spill is a pre-increment that allocates the stack.
     // For example:
@@ -780,7 +886,7 @@ bool AArch64FrameLowering::spillCalleeSavedRegisters(
                  << ", " << CSI[idx + 1].getFrameIdx() << ")\n");
     // Compute offset: i = 0 => offset = -Count;
     //                 i = 2 => offset = -(Count - 2) + Count = 2 = i; etc.
-    const int Offset = (i == 0) ? -Count : i;
+    const int Offset = (i == 0) ? -2 * Count : 2 * i;
     assert((Offset >= -64 && Offset <= 63) &&
            "Offset out of bounds for STP immediate");
     MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(StrOpc));
@@ -804,21 +910,22 @@ bool AArch64FrameLowering::restoreCalleeSavedRegisters(
     const TargetRegisterInfo *TRI) const {
   MachineFunction &MF = *MBB.getParent();
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
-  unsigned Count = CSI.size();
   DebugLoc DL;
-  assert((Count & 1) == 0 && "Odd number of callee-saved regs to spill!");
 
   if (MI != MBB.end())
     DL = MI->getDebugLoc();
 
-  for (unsigned i = 0; i < Count; i += 2) {
-    unsigned Reg1 = CSI[i].getReg();
-    unsigned Reg2 = CSI[i + 1].getReg();
-    // GPRs and FPRs are saved in pairs of 64-bit regs. We expect the CSI
-    // list to come in sorted by frame index so that we can issue the store
-    // pair instructions directly. Assert if we see anything otherwise.
-    assert(CSI[i].getFrameIdx() + 1 == CSI[i + 1].getFrameIdx() &&
-           "Out of order callee saved regs!");
+  const AArch64RegisterInfo *RegInfo = static_cast<const AArch64RegisterInfo *>(
+      MF.getSubtarget().getRegisterInfo());
+  SmallVector<std::pair<unsigned, unsigned>, 4> RegPairs;
+
+  // First gather information about the paris we'd like to store.
+  getCSRPairs(CSI, RegInfo, &MF, RegPairs);
+  unsigned Count = RegPairs.size();
+
+  for (unsigned i = 0; i < Count; ++i) {
+    unsigned Reg1 = RegPairs[i].first;
+    unsigned Reg2 = RegPairs[i].second;
     // Issue sequence of non-sp increment and sp-pi restores for cs regs. Only
     // the last load is sp-pi post-increment and de-allocates the stack:
     // For example:
@@ -828,19 +935,17 @@ bool AArch64FrameLowering::restoreCalleeSavedRegisters(
     // Note: see comment in spillCalleeSavedRegisters()
     unsigned LdrOpc;
 
-    assert((Count & 1) == 0 && "Odd number of callee-saved regs to spill!");
-    assert((i & 1) == 0 && "Odd index for callee-saved reg spill!");
     if (AArch64::GPR64RegClass.contains(Reg1)) {
       assert(AArch64::GPR64RegClass.contains(Reg2) &&
              "Expected GPR64 callee-saved register pair!");
-      if (i == Count - 2)
+      if (i == Count - 1)
         LdrOpc = AArch64::LDPXpost;
       else
         LdrOpc = AArch64::LDPXi;
     } else if (AArch64::FPR64RegClass.contains(Reg1)) {
       assert(AArch64::FPR64RegClass.contains(Reg2) &&
              "Expected FPR64 callee-saved register pair!");
-      if (i == Count - 2)
+      if (i == Count - 1)
         LdrOpc = AArch64::LDPDpost;
       else
         LdrOpc = AArch64::LDPDi;
@@ -852,7 +957,7 @@ bool AArch64FrameLowering::restoreCalleeSavedRegisters(
 
     // Compute offset: i = 0 => offset = Count - 2; i = 2 => offset = Count - 4;
     // etc.
-    const int Offset = (i == Count - 2) ? Count : Count - i - 2;
+    const int Offset = (i == Count - 1) ? 2 * Count : 2 * (Count - i - 1);
     assert((Offset >= -64 && Offset <= 63) &&
            "Offset out of bounds for LDP immediate");
     MachineInstrBuilder MIB = BuildMI(MBB, MI, DL, TII.get(LdrOpc));
@@ -903,7 +1008,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   bool ExtraCSSpill = false;
   bool CanEliminateFrame = true;
   DEBUG(dbgs() << "*** determineCalleeSaves\nUsed CSRs:");
-  const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegs(&MF);
+  const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegsForLayout(&MF);
 
   // Check pairs of consecutive callee-saved registers.
   for (unsigned i = 0; CSRegs[i]; i += 2) {
@@ -1009,4 +1114,62 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
                    << " as the emergency spill slot.\n");
     }
   }
+}
+
+bool AArch64FrameLowering::assignCalleeSavedSpillSlots(
+    MachineFunction &MF, const TargetRegisterInfo *TRI,
+    std::vector<CalleeSavedInfo> &CSI,
+    unsigned &MinCSFrameIndex, unsigned &MaxCSFrameIndex) const {
+  const AArch64RegisterInfo *RegInfo = static_cast<const AArch64RegisterInfo *>(
+      MF.getSubtarget().getRegisterInfo());
+
+  if (!MF.getFunction()->getAttributes().hasAttrSomewhere(
+            Attribute::SwiftError))
+    return false;
+
+  if (CSI.empty())
+    return true; // Early exit if no callee saved registers are modified!
+
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+
+  // Simplify the logic here since AArch64 does not have fixed or reserved
+  // spill slots.
+
+  // Now that we know which registers need to be saved and restored, allocate
+  // stack slots according to getCalleeSavedRegsForLayout.
+  const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegsForLayout(&MF);
+
+  for (unsigned i = 0; CSRegs[i]; ++i) {
+    unsigned Reg = CSRegs[i];
+
+    // Find the corresponding entry in CSI for Reg.
+    std::vector<CalleeSavedInfo>::iterator CSInfo, E;
+    for (CSInfo = CSI.begin(), E = CSI.end(); CSInfo != E; ++CSInfo)
+      if (CSInfo->getReg() == Reg)
+        break;
+    // Assign a slot for functions which call __builtin_unwind_init.
+    if (CSInfo == CSI.end() && !MF.getMMI().callsUnwindInit())
+      continue;
+
+    DEBUG(dbgs() << "try to allocate stack slot for reg " << Reg << '\n');
+    const TargetRegisterClass *RC = RegInfo->getMinimalPhysRegClass(Reg);
+
+    // Just spill it anywhere convenient.
+    unsigned Align = RC->getAlignment();
+    unsigned StackAlign = getStackAlignment();
+
+    // We may not be able to satisfy the desired alignment specification of
+    // the TargetRegisterClass if the stack alignment is smaller. Use the
+    // min.
+    Align = std::min(Align, StackAlign);
+    int FrameIdx = MFI->CreateStackObject(RC->getSize(), Align, true);
+    if ((unsigned)FrameIdx < MinCSFrameIndex) MinCSFrameIndex = FrameIdx;
+    if ((unsigned)FrameIdx > MaxCSFrameIndex) MaxCSFrameIndex = FrameIdx;
+
+    // Find the corresponding entry in CSI for Reg.
+    if (CSInfo != CSI.end())
+      CSInfo->setFrameIdx(FrameIdx);
+  }
+
+  return true;
 }

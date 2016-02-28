@@ -394,7 +394,7 @@ void CodeGenFunction::EmitStaticVarDecl(const VarDecl &D,
   // Emit global variable debug descriptor for static vars.
   CGDebugInfo *DI = getDebugInfo();
   if (DI &&
-      CGM.getCodeGenOpts().getDebugInfo() >= CodeGenOptions::LimitedDebugInfo) {
+      CGM.getCodeGenOpts().getDebugInfo() >= codegenoptions::LimitedDebugInfo) {
     DI->setLocation(D.getLocation());
     DI->EmitGlobalVariable(var, &D);
   }
@@ -600,12 +600,15 @@ static bool isAccessedBy(const ValueDecl *decl, const Expr *e) {
 
 static bool tryEmitARCCopyWeakInit(CodeGenFunction &CGF,
                                    const LValue &destLV, const Expr *init) {
+  bool needsCast = false;
+
   while (auto castExpr = dyn_cast<CastExpr>(init->IgnoreParens())) {
     switch (castExpr->getCastKind()) {
     // Look through casts that don't require representation changes.
     case CK_NoOp:
     case CK_BitCast:
     case CK_BlockPointerToObjCPointerCast:
+      needsCast = true;
       break;
 
     // If we find an l-value to r-value cast from a __weak variable,
@@ -618,12 +621,19 @@ static bool tryEmitARCCopyWeakInit(CodeGenFunction &CGF,
       // Emit the source l-value.
       LValue srcLV = CGF.EmitLValue(srcExpr);
 
+      // Handle a formal type change to avoid asserting.
+      auto srcAddr = srcLV.getAddress();
+      if (needsCast) {
+        srcAddr = CGF.Builder.CreateElementBitCast(srcAddr,
+                                         destLV.getAddress().getElementType());
+      }
+
       // If it was an l-value, use objc_copyWeak.
       if (srcExpr->getValueKind() == VK_LValue) {
-        CGF.EmitARCCopyWeak(destLV.getAddress(), srcLV.getAddress());
+        CGF.EmitARCCopyWeak(destLV.getAddress(), srcAddr);
       } else {
         assert(srcExpr->getValueKind() == VK_XValue);
-        CGF.EmitARCMoveWeak(destLV.getAddress(), srcLV.getAddress());
+        CGF.EmitARCMoveWeak(destLV.getAddress(), srcAddr);
       }
       return true;
     }
@@ -705,8 +715,7 @@ void CodeGenFunction::EmitScalarInit(const Expr *init, const ValueDecl *D,
     llvm_unreachable("present but none");
 
   case Qualifiers::OCL_ExplicitNone:
-    // nothing to do
-    value = EmitScalarExpr(init);
+    value = EmitARCUnsafeUnretainedScalarExpr(init);
     break;
 
   case Qualifiers::OCL_Strong: {
@@ -1076,8 +1085,8 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
   // Emit debug info for local var declaration.
   if (HaveInsertPoint())
     if (CGDebugInfo *DI = getDebugInfo()) {
-      if (CGM.getCodeGenOpts().getDebugInfo()
-            >= CodeGenOptions::LimitedDebugInfo) {
+      if (CGM.getCodeGenOpts().getDebugInfo() >=
+          codegenoptions::LimitedDebugInfo) {
         DI->setLocation(D.getLocation());
         DI->EmitDeclareOfAutoVariable(&D, address.getPointer(), Builder);
       }
@@ -1842,8 +1851,8 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
 
   // Emit debug info for param declaration.
   if (CGDebugInfo *DI = getDebugInfo()) {
-    if (CGM.getCodeGenOpts().getDebugInfo()
-          >= CodeGenOptions::LimitedDebugInfo) {
+    if (CGM.getCodeGenOpts().getDebugInfo() >=
+        codegenoptions::LimitedDebugInfo) {
       DI->EmitDeclareOfArgVariable(&D, DeclPtr.getPointer(), ArgNo, Builder);
     }
   }

@@ -15,6 +15,7 @@
 #ifndef LLVM_CLANG_BASIC_MODULE_H
 #define LLVM_CLANG_BASIC_MODULE_H
 
+#include "clang/Basic/FileManager.h"
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
@@ -35,9 +36,6 @@ namespace llvm {
 
 namespace clang {
   
-class DirectoryEntry;
-class FileEntry;
-class FileManager;
 class LangOptions;
 class TargetInfo;
 class IdentifierInfo;
@@ -148,6 +146,9 @@ public:
   /// If any of these requirements are not available, the \c IsAvailable bit
   /// will be false to indicate that this (sub)module is not available.
   SmallVector<Requirement, 2> Requirements;
+
+  /// \brief A module with the same name that shadows this module.
+  Module *ShadowingModule = nullptr;
 
   /// \brief Whether this module is missing a feature from \c Requirements.
   unsigned IsMissingRequirement : 1;
@@ -323,13 +324,20 @@ public:
   ///
   /// \param Target The target options used for the current translation unit.
   ///
-  /// \param Req If this module is unavailable, this parameter
-  /// will be set to one of the requirements that is not met for use of
-  /// this module.
+  /// \param Req If this module is unavailable because of a missing requirement,
+  /// this parameter will be set to one of the requirements that is not met for
+  /// use of this module.
+  ///
+  /// \param MissingHeader If this module is unavailable because of a missing
+  /// header, this parameter will be set to one of the missing headers.
+  ///
+  /// \param ShadowingModule If this module is unavailable because it is
+  /// shadowed, this parameter will be set to the shadowing module.
   bool isAvailable(const LangOptions &LangOpts, 
                    const TargetInfo &Target,
                    Requirement &Req,
-                   UnresolvedHeaderDirective &MissingHeader) const;
+                   UnresolvedHeaderDirective &MissingHeader,
+                   Module *&ShadowingModule) const;
 
   /// \brief Determine whether this module is a submodule.
   bool isSubModule() const { return Parent != nullptr; }

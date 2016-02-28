@@ -972,6 +972,17 @@ bool X86FastISel::X86SelectStore(const Instruction *I) {
   if (S->isAtomic())
     return false;
 
+  const Value *PtrV = I->getOperand(1);
+  if (const Argument *Arg = dyn_cast<Argument>(PtrV)) {
+    if (Arg->hasSwiftErrorAttr() && TLI.supportSwiftError())
+      return false;
+  }
+
+  if (const AllocaInst *Alloca = dyn_cast<AllocaInst>(PtrV)) {
+    if (Alloca->isSwiftError() && TLI.supportSwiftError())
+      return false;
+  }
+
   const Value *Val = S->getValueOperand();
   const Value *Ptr = S->getPointerOperand();
 
@@ -1000,6 +1011,13 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
       FuncInfo.MF->getInfo<X86MachineFunctionInfo>();
 
   if (!FuncInfo.CanLowerReturn)
+    return false;
+
+  if (F.getAttributes().hasAttrSomewhere(Attribute::SwiftError) &&
+      TLI.supportSwiftError())
+    return false;
+
+  if (TLI.supportSplitCSR(FuncInfo.MF))
     return false;
 
   CallingConv::ID CC = F.getCallingConv();
@@ -1098,12 +1116,11 @@ bool X86FastISel::X86SelectRet(const Instruction *I) {
     RetRegs.push_back(VA.getLocReg());
   }
 
-  // The x86-64 ABI for returning structs by value requires that we copy
-  // the sret argument into %rax for the return. We saved the argument into
-  // a virtual register in the entry block, so now we copy the value out
-  // and into %rax. We also do the same with %eax for Win32.
-  if (F.hasStructRetAttr() &&
-      (Subtarget->is64Bit() || Subtarget->isTargetKnownWindowsMSVC())) {
+  // All x86 ABIs require that for returning structs by value we copy
+  // the sret argument into %rax/%eax (depending on ABI) for the return.
+  // We saved the argument into a virtual register in the entry block,
+  // so now we copy the value out and into %rax/%eax.
+  if (F.hasStructRetAttr()) {
     unsigned Reg = X86MFInfo->getSRetReturnReg();
     assert(Reg &&
            "SRetReturnReg should have been set in LowerFormalArguments()!");
@@ -1130,6 +1147,17 @@ bool X86FastISel::X86SelectLoad(const Instruction *I) {
   // Atomic loads need special handling.
   if (LI->isAtomic())
     return false;
+
+  const Value *SV = I->getOperand(0);
+  if (const Argument *Arg = dyn_cast<Argument>(SV)) {
+    if (Arg->hasSwiftErrorAttr() && TLI.supportSwiftError())
+      return false;
+  }
+
+  if (const AllocaInst *Alloca = dyn_cast<AllocaInst>(SV)) {
+    if (Alloca->isSwiftError() && TLI.supportSwiftError())
+      return false;
+  }
 
   MVT VT;
   if (!isTypeLegal(LI->getType(), VT, /*AllowI1=*/true))
@@ -2292,8 +2320,10 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
       // register class VR128 by method 'constrainOperandRegClass' which is
       // directly called by 'fastEmitInst_ri'.
       // Instruction VCVTPS2PHrr takes an extra immediate operand which is
-      // used to provide rounding control.
-      InputReg = fastEmitInst_ri(X86::VCVTPS2PHrr, RC, InputReg, false, 0);
+      // used to provide rounding control: use MXCSR.RC, encoded as 0b100.
+      // It's consistent with the other FP instructions, which are usually
+      // controlled by MXCSR.
+      InputReg = fastEmitInst_ri(X86::VCVTPS2PHrr, RC, InputReg, false, 4);
 
       // Move the lower 32-bits of ResultReg to another register of class GR32.
       ResultReg = createResultReg(&X86::GR32RegClass);
@@ -2740,6 +2770,8 @@ bool X86FastISel::fastLowerArguments() {
     if (F->getAttributes().hasAttribute(Idx, Attribute::ByVal) ||
         F->getAttributes().hasAttribute(Idx, Attribute::InReg) ||
         F->getAttributes().hasAttribute(Idx, Attribute::StructRet) ||
+        F->getAttributes().hasAttribute(Idx, Attribute::SwiftSelf) ||
+        F->getAttributes().hasAttribute(Idx, Attribute::SwiftError) ||
         F->getAttributes().hasAttribute(Idx, Attribute::Nest))
       return false;
 
@@ -2820,7 +2852,7 @@ static unsigned computeBytesPoppedByCallee(const X86Subtarget *Subtarget,
 
   if (CS)
     if (CS->arg_empty() || !CS->paramHasAttr(1, Attribute::StructRet) ||
-        CS->paramHasAttr(1, Attribute::InReg))
+        CS->paramHasAttr(1, Attribute::InReg) || Subtarget->isTargetMCU())
       return 0;
 
   return 4;
@@ -2847,6 +2879,7 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
   case CallingConv::C:
   case CallingConv::Fast:
   case CallingConv::WebKit_JS:
+  case CallingConv::Swift:
   case CallingConv::X86_FastCall:
   case CallingConv::X86_64_Win64:
   case CallingConv::X86_64_SysV:
@@ -2870,6 +2903,10 @@ bool X86FastISel::fastLowerCall(CallLoweringInfo &CLI) {
   // Don't know about inalloca yet.
   if (CLI.CS && CLI.CS->hasInAllocaArgument())
     return false;
+
+  for (auto Flag : CLI.OutFlags)
+    if (Flag.isSwiftError())
+      return false;
 
   // Fast-isel doesn't know about callee-pop yet.
   if (X86::isCalleePop(CC, Subtarget->is64Bit(), IsVarArg,

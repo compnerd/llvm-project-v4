@@ -155,7 +155,6 @@ static void SetUpDiagnosticLog(DiagnosticOptions *DiagOpts,
           << DiagOpts->DiagnosticLogFile << EC.message();
     } else {
       FileOS->SetUnbuffered();
-      FileOS->SetUseAtomicWrites(true);
       OS = FileOS.get();
       StreamOwner = std::move(FileOS);
     }
@@ -532,6 +531,13 @@ void CompilerInstance::createSema(TranslationUnitKind TUKind,
                                   CodeCompleteConsumer *CompletionConsumer) {
   TheSema.reset(new Sema(getPreprocessor(), getASTContext(), getASTConsumer(),
                          TUKind, CompletionConsumer));
+
+  // If we're building a module, notify the API notes manager.
+  if (!getLangOpts().CurrentModule.empty()) {
+    (void)TheSema->APINotes.loadCurrentModuleAPINotes(
+            getLangOpts().CurrentModule,
+            getAPINotesOpts().ModuleSearchPaths);
+  }
 }
 
 // Output Files
@@ -831,13 +837,13 @@ bool CompilerInstance::ExecuteAction(FrontendAction &Act) {
   if (getFrontendOpts().ShowStats)
     llvm::EnableStatistics();
 
-  for (unsigned i = 0, e = getFrontendOpts().Inputs.size(); i != e; ++i) {
+  for (const FrontendInputFile &FIF : getFrontendOpts().Inputs) {
     // Reset the ID tables if we are reusing the SourceManager and parsing
     // regular files.
     if (hasSourceManager() && !Act.isModelParsingAction())
       getSourceManager().clearIDTables();
 
-    if (Act.BeginSourceFile(*this, getFrontendOpts().Inputs[i])) {
+    if (Act.BeginSourceFile(*this, FIF)) {
       Act.Execute();
       Act.EndSourceFile();
     }
@@ -1605,8 +1611,13 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
     // Check whether this module is available.
     clang::Module::Requirement Requirement;
     clang::Module::UnresolvedHeaderDirective MissingHeader;
+    clang::Module *ShadowingModule = nullptr;
     if (!Module->isAvailable(getLangOpts(), getTarget(), Requirement,
-                             MissingHeader)) {
+                             MissingHeader, ShadowingModule)) {
+
+      assert(!ShadowingModule &&
+             "lookup of module by name should never find shadowed module");
+
       if (MissingHeader.FileNameLoc.isValid()) {
         getDiagnostics().Report(MissingHeader.FileNameLoc,
                                 diag::err_module_header_missing)

@@ -371,11 +371,14 @@ bool Decl::isReferenced() const {
 ///
 /// FIXME: Make these strings localizable, since they end up in
 /// diagnostics.
-static AvailabilityResult CheckAvailability(ASTContext &Context,
-                                            const AvailabilityAttr *A,
-                                            std::string *Message) {
-  VersionTuple TargetMinVersion =
-    Context.getTargetInfo().getPlatformMinVersion();
+static AvailabilityResult
+checkAvailability(ASTContext &Context, const AvailabilityAttr *A,
+                  Optional<VersionTuple> Version, std::string *Message) {
+  VersionTuple TargetMinVersion;
+  if (Version.hasValue())
+    TargetMinVersion = Version.getValue();
+  else
+    TargetMinVersion = Context.getTargetInfo().getPlatformMinVersion();
 
   if (TargetMinVersion.empty())
     return AR_Available;
@@ -466,7 +469,11 @@ static AvailabilityResult CheckAvailability(ASTContext &Context,
   return AR_Available;
 }
 
-AvailabilityResult Decl::getAvailability(std::string *Message) const {
+AvailabilityResult Decl::getAvailability(std::string *Message,
+                                         Optional<VersionTuple> Version) const {
+  if (auto *FTD = dyn_cast<FunctionTemplateDecl>(this))
+    return FTD->getTemplatedDecl()->getAvailability(Message, Version);
+
   AvailabilityResult Result = AR_Available;
   std::string ResultMessage;
 
@@ -489,8 +496,8 @@ AvailabilityResult Decl::getAvailability(std::string *Message) const {
     }
 
     if (const auto *Availability = dyn_cast<AvailabilityAttr>(A)) {
-      AvailabilityResult AR = CheckAvailability(getASTContext(), Availability,
-                                                Message);
+      AvailabilityResult AR = checkAvailability(getASTContext(), Availability,
+                                                Version, Message);
 
       if (AR == AR_Unavailable)
         return AR_Unavailable;
@@ -549,7 +556,7 @@ bool Decl::isWeakImported() const {
       return true;
 
     if (const auto *Availability = dyn_cast<AvailabilityAttr>(A)) {
-      if (CheckAvailability(getASTContext(), Availability,
+      if (checkAvailability(getASTContext(), Availability, None,
                             nullptr) == AR_NotYetIntroduced)
         return true;
     }
@@ -569,7 +576,6 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case Var:
     case ImplicitParam:
     case ParmVar:
-    case NonTypeTemplateParm:
     case ObjCMethod:
     case ObjCProperty:
     case MSProperty:
@@ -578,6 +584,12 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
       return IDNS_Label;
     case IndirectField:
       return IDNS_Ordinary | IDNS_Member;
+
+    case NonTypeTemplateParm:
+      // Non-type template parameters are not found by lookups that ignore
+      // non-types, but they are found by redeclaration lookups for tag types,
+      // so we include them in the tag namespace.
+      return IDNS_Ordinary | IDNS_Tag;
 
     case ObjCCompatibleAlias:
     case ObjCInterface:
@@ -1210,13 +1222,16 @@ void DeclContext::removeDecl(Decl *D) {
     // Remove only decls that have a name
     if (!ND->getDeclName()) return;
 
-    StoredDeclsMap *Map = getPrimaryContext()->LookupPtr;
-    if (!Map) return;
-
-    StoredDeclsMap::iterator Pos = Map->find(ND->getDeclName());
-    assert(Pos != Map->end() && "no lookup entry for decl");
-    if (Pos->second.getAsVector() || Pos->second.getAsDecl() == ND)
-      Pos->second.remove(ND);
+    auto *DC = this;
+    do {
+      StoredDeclsMap *Map = DC->getPrimaryContext()->LookupPtr;
+      if (Map) {
+        StoredDeclsMap::iterator Pos = Map->find(ND->getDeclName());
+        assert(Pos != Map->end() && "no lookup entry for decl");
+        if (Pos->second.getAsVector() || Pos->second.getAsDecl() == ND)
+          Pos->second.remove(ND);
+      }
+    } while (DC->isTransparentContext() && (DC = DC->getParent()));
   }
 }
 

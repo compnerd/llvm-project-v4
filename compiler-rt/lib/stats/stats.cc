@@ -62,7 +62,7 @@ void WriteModuleReport(StatModule **smodp) {
     return;
   if (!stats_fd)
     OpenStatsFile(path_env);
-  const LoadedModule *mod = Symbolizer::GetOrInit()->FindModuleForAddress(
+  LoadedModule *mod = Symbolizer::GetOrInit()->FindModuleForAddress(
       reinterpret_cast<uptr>(smodp));
   WriteToFile(stats_fd, mod->full_name(),
               internal_strlen(mod->full_name()) + 1);

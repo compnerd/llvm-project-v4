@@ -143,15 +143,6 @@ set(GENERIC_SOURCES
   umodsi3.c
   umodti3.c)
 
-set(MSVC_SOURCES
- divsc3.c
- divdc3.c
- divxc3.c
- mulsc3.c
- muldc3.c
- mulxc3.c)
-
-
 if(APPLE)
   set(GENERIC_SOURCES
     ${GENERIC_SOURCES}
@@ -225,15 +216,14 @@ if (NOT MSVC)
       ${i386_SOURCES})
 else () # MSVC
   # Use C versions of functions when building on MSVC
-  # MSVC's assembler takes Intel syntax, not AT&T syntax.
-  # Also use only MSVC compilable builtin implementations.
+  # MSVC's assembler takes Intel syntax, not AT&T syntax
   set(x86_64_SOURCES
       x86_64/floatdidf.c
       x86_64/floatdisf.c
       x86_64/floatdixf.c
-      ${MSVC_SOURCES})
+      ${GENERIC_SOURCES})
   set(x86_64h_SOURCES ${x86_64_SOURCES})
-  set(i386_SOURCES ${MSVC_SOURCES})
+  set(i386_SOURCES ${GENERIC_SOURCES})
   set(i686_SOURCES ${i386_SOURCES})
 endif () # if (NOT MSVC)
 
@@ -351,7 +341,6 @@ set(aarch64_SOURCES
 set(armhf_SOURCES ${arm_SOURCES})
 set(armv7_SOURCES ${arm_SOURCES})
 set(armv7s_SOURCES ${arm_SOURCES})
-set(armv7k_SOURCES ${arm_SOURCES})
 set(arm64_SOURCES ${aarch64_SOURCES})
 
 # macho_embedded archs
@@ -373,7 +362,7 @@ if (APPLE)
   add_subdirectory(Darwin-excludes)
   add_subdirectory(macho_embedded)
   darwin_add_builtin_libraries(${BUILTIN_SUPPORTED_OS})
-else ()
+elseif (NOT WIN32 OR MINGW)
   append_string_if(COMPILER_RT_HAS_STD_C99_FLAG -std=c99 maybe_stdc99)
 
   foreach (arch ${BUILTIN_SUPPORTED_ARCH})

@@ -72,12 +72,6 @@ extern "C" {
 #include <unistd.h>
 #include <util.h>
 
-// from <crt_externs.h>, but we don't have that file on iOS
-extern "C" {
-  extern char ***_NSGetArgv(void);
-  extern char ***_NSGetEnviron(void);
-}
-
 namespace __sanitizer {
 
 #include "sanitizer_syscall_generic.inc"
@@ -361,16 +355,13 @@ void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
 #endif
 }
 
-void ListOfModules::init() {
-  clear();
+uptr GetListOfModules(LoadedModule *modules, uptr max_modules,
+                      string_predicate_t filter) {
   MemoryMappingLayout memory_mapping(false);
-  memory_mapping.DumpListOfModules(&modules_);
+  return memory_mapping.DumpListOfModules(modules, max_modules, filter);
 }
 
-bool IsHandledDeadlySignal(int signum) {
-  if ((SANITIZER_WATCHOS || SANITIZER_TVOS) && !(SANITIZER_IOSSIM))
-    // Handling fatal signals on watchOS and tvOS devices is disallowed.
-    return false;
+bool IsDeadlySignal(int signum) {
   return (signum == SIGSEGV || signum == SIGBUS) && common_flags()->handle_segv;
 }
 
@@ -489,10 +480,6 @@ void LogFullErrorReport(const char *buffer) {
     WriteToSyslog(buffer);
 
   // The report is added to CrashLog as part of logging all of Printf output.
-}
-
-SignalContext::WriteFlag SignalContext::GetWriteFlag(void *context) {
-  return UNKNOWN;  // FIXME: implement this.
 }
 
 void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {

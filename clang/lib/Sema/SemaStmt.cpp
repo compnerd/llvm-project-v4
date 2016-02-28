@@ -1706,11 +1706,10 @@ Sema::CheckObjCForCollectionOperand(SourceLocation forLoc, Expr *collection) {
   // If we have a forward-declared type, we can't do this check.
   // Under ARC, it is an error not to have a forward-declared class.
   if (iface &&
-      RequireCompleteType(forLoc, QualType(objectType, 0),
-                          getLangOpts().ObjCAutoRefCount
-                            ? diag::err_arc_collection_forward
-                            : 0,
-                          collection)) {
+      (getLangOpts().ObjCAutoRefCount
+           ? RequireCompleteType(forLoc, QualType(objectType, 0),
+                                 diag::err_arc_collection_forward, collection)
+           : !isCompleteType(forLoc, QualType(objectType, 0)))) {
     // Otherwise, if we have any useful type information, check that
     // the type declares the appropriate method.
   } else if (iface || !objectType->qual_empty()) {
@@ -3067,22 +3066,28 @@ bool Sema::DeduceFunctionTypeFromReturnExpr(FunctionDecl *FD,
   //  has multiple return statements, the return type is deduced for each return
   //  statement. [...] if the type deduced is not the same in each deduction,
   //  the program is ill-formed.
-  if (AT->isDeduced() && !FD->isInvalidDecl()) {
+  QualType DeducedT = AT->getDeducedType();
+  if (!DeducedT.isNull() && !FD->isInvalidDecl()) {
     AutoType *NewAT = Deduced->getContainedAutoType();
+    // It is possible that NewAT->getDeducedType() is null. When that happens,
+    // we should not crash, instead we ignore this deduction.
+    if (NewAT->getDeducedType().isNull())
+      return false;
+
     CanQualType OldDeducedType = Context.getCanonicalFunctionResultType(
-                                   AT->getDeducedType());
+                                   DeducedT);
     CanQualType NewDeducedType = Context.getCanonicalFunctionResultType(
                                    NewAT->getDeducedType());
     if (!FD->isDependentContext() && OldDeducedType != NewDeducedType) {
       const LambdaScopeInfo *LambdaSI = getCurLambda();
       if (LambdaSI && LambdaSI->HasImplicitReturnType) {
         Diag(ReturnLoc, diag::err_typecheck_missing_return_type_incompatible)
-          << NewAT->getDeducedType() << AT->getDeducedType()
+          << NewAT->getDeducedType() << DeducedT
           << true /*IsLambda*/;
       } else {
         Diag(ReturnLoc, diag::err_auto_fn_different_deductions)
           << (AT->isDecltypeAuto() ? 1 : 0)
-          << NewAT->getDeducedType() << AT->getDeducedType();
+          << NewAT->getDeducedType() << DeducedT;
       }
       return true;
     }
@@ -3216,7 +3221,7 @@ StmtResult Sema::BuildReturnStmt(SourceLocation ReturnLoc, Expr *RetValExp) {
         }
         // return (some void expression); is legal in C++.
         else if (D != diag::ext_return_has_void_expr ||
-            !getLangOpts().CPlusPlus) {
+                 !getLangOpts().CPlusPlus) {
           NamedDecl *CurDecl = getCurFunctionOrMethodDecl();
 
           int FunctionKind = 0;
@@ -3803,11 +3808,10 @@ static void buildCapturedStmtCaptureList(
       continue;
     }
 
-    assert(Cap->isReferenceCapture() &&
-           "non-reference capture not yet implemented");
-
     Captures.push_back(CapturedStmt::Capture(Cap->getLocation(),
-                                             CapturedStmt::VCK_ByRef,
+                                             Cap->isReferenceCapture()
+                                                 ? CapturedStmt::VCK_ByRef
+                                                 : CapturedStmt::VCK_ByCopy,
                                              Cap->getVariable()));
     CaptureInits.push_back(Cap->getInitExpr());
   }

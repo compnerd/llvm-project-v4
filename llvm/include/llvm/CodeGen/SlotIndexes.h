@@ -213,6 +213,12 @@ namespace llvm {
       return A.listEntry()->getIndex() < B.listEntry()->getIndex();
     }
 
+    /// Return true if A refers to the same instruction as B or an earlier one.
+    /// This is equivalent to !isEarlierInstr(B, A).
+    static bool isEarlierEqualInstr(SlotIndex A, SlotIndex B) {
+      return !isEarlierInstr(B, A);
+    }
+
     /// Return the distance from this index to the given one.
     int distance(SlotIndex other) const {
       return other.getIndex() - getIndex();
@@ -272,7 +278,7 @@ namespace llvm {
     SlotIndex getNextSlot() const {
       Slot s = getSlot();
       if (s == Slot_Dead) {
-        return SlotIndex(listEntry()->getNextNode(), Slot_Block);
+        return SlotIndex(&*++listEntry()->getIterator(), Slot_Block);
       }
       return SlotIndex(listEntry(), s + 1);
     }
@@ -280,7 +286,7 @@ namespace llvm {
     /// Returns the next index. This is the index corresponding to the this
     /// index's slot, but for the next instruction.
     SlotIndex getNextIndex() const {
-      return SlotIndex(listEntry()->getNextNode(), getSlot());
+      return SlotIndex(&*++listEntry()->getIterator(), getSlot());
     }
 
     /// Returns the previous slot in the index list. This could be either the
@@ -292,7 +298,7 @@ namespace llvm {
     SlotIndex getPrevSlot() const {
       Slot s = getSlot();
       if (s == Slot_Block) {
-        return SlotIndex(listEntry()->getPrevNode(), Slot_Dead);
+        return SlotIndex(&*--listEntry()->getIterator(), Slot_Dead);
       }
       return SlotIndex(listEntry(), s - 1);
     }
@@ -300,7 +306,7 @@ namespace llvm {
     /// Returns the previous index. This is the index corresponding to this
     /// index's slot, but for the previous instruction.
     SlotIndex getPrevIndex() const {
-      return SlotIndex(listEntry()->getPrevNode(), getSlot());
+      return SlotIndex(&*--listEntry()->getIterator(), getSlot());
     }
 
   };
@@ -333,6 +339,8 @@ namespace llvm {
   /// This pass assigns indexes to each instruction.
   class SlotIndexes : public MachineFunctionPass {
   private:
+    // IndexListEntry allocator.
+    BumpPtrAllocator ileAllocator;
 
     typedef ilist<IndexListEntry> IndexList;
     IndexList indexList;
@@ -353,9 +361,6 @@ namespace llvm {
     /// and MBB id.
     SmallVector<IdxMBBPair, 8> idx2MBBMap;
 
-    // IndexListEntry allocator.
-    BumpPtrAllocator ileAllocator;
-
     IndexListEntry* createEntry(MachineInstr *mi, unsigned index) {
       IndexListEntry *entry =
         static_cast<IndexListEntry*>(
@@ -375,6 +380,11 @@ namespace llvm {
 
     SlotIndexes() : MachineFunctionPass(ID) {
       initializeSlotIndexesPass(*PassRegistry::getPassRegistry());
+    }
+
+    ~SlotIndexes() {
+      // The indexList's nodes are all allocated in the BumpPtrAllocator.
+      indexList.clearAndLeakNodesUnsafely();
     }
 
     void getAnalysisUsage(AnalysisUsage &au) const override;

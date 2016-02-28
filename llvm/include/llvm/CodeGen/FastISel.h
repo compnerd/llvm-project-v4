@@ -40,12 +40,15 @@ public:
     bool IsByVal : 1;
     bool IsInAlloca : 1;
     bool IsReturned : 1;
+    bool IsSwiftSelf : 1;
+    bool IsSwiftError : 1;
     uint16_t Alignment;
 
     ArgListEntry()
         : Val(nullptr), Ty(nullptr), IsSExt(false), IsZExt(false),
           IsInReg(false), IsSRet(false), IsNest(false), IsByVal(false),
-          IsInAlloca(false), IsReturned(false), Alignment(0) {}
+          IsInAlloca(false), IsReturned(false), IsSwiftSelf(false),
+          IsSwiftError(false), Alignment(0) {}
 
     /// \brief Set CallLoweringInfo attribute flags based on a call instruction
     /// and called function attributes.
@@ -558,6 +561,9 @@ private:
   /// to the beginning of the block. It helps to avoid spilling cached variables
   /// across heavy instructions like calls.
   void flushLocalValueMap();
+
+  /// \brief Removes dead local value instructions after SavedLastLocalvalue.
+  void removeDeadLocalValueCode(MachineInstr *SavedLastLocalValue);
 
   /// \brief Insertion point before trying to select the current instruction.
   MachineBasicBlock::iterator SavedInsertPt;

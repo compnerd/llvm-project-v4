@@ -1,6 +1,3 @@
-# Needed for lit support
-include(AddLLVM)
-
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.common.configured.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.common.configured)
@@ -23,7 +20,7 @@ if(NOT ANDROID)
     # Use LLVM utils and Clang from the same build tree.
     list(APPEND SANITIZER_COMMON_LIT_TEST_DEPS
       clang clang-headers FileCheck count not llvm-config llvm-nm llvm-objdump
-      llvm-symbolizer compiler-rt-headers sancov)
+      llvm-symbolizer compiler-rt-headers)
     if (COMPILER_RT_HAS_PROFILE)
       list(APPEND SANITIZER_COMMON_LIT_TEST_DEPS profile)
     endif()

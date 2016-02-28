@@ -113,7 +113,7 @@ class Symbolizer final {
   void AddHooks(StartSymbolizationHook start_hook,
                 EndSymbolizationHook end_hook);
 
-  const LoadedModule *FindModuleForAddress(uptr address);
+  LoadedModule *FindModuleForAddress(uptr address);
 
  private:
   // GetModuleNameAndOffsetForPC has to return a string to the caller.
@@ -141,7 +141,8 @@ class Symbolizer final {
 
   bool FindModuleNameAndOffsetForAddress(uptr address, const char **module_name,
                                          uptr *module_offset);
-  ListOfModules modules_;
+  LoadedModule modules_[kMaxNumberOfModules];
+  uptr n_modules_;
   // If stale, need to reload the modules before looking up addresses.
   bool modules_fresh_;
 

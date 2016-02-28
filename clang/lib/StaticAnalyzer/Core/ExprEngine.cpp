@@ -30,6 +30,7 @@
 #include "llvm/ADT/ImmutableList.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/SaveAndRestore.h"
 
 #ifndef NDEBUG
 #include "llvm/Support/GraphWriter.h"
@@ -476,8 +477,12 @@ void ExprEngine::ProcessInitializer(const CFGInitializer Init,
   if (BMI->isAnyMemberInitializer()) {
     // Constructors build the object directly in the field,
     // but non-objects must be copied in from the initializer.
-    const Expr *Init = BMI->getInit()->IgnoreImplicit();
-    if (!isa<CXXConstructExpr>(Init)) {
+    if (auto *CtorExpr = findDirectConstructorForCurrentCFGElement()) {
+      assert(BMI->getInit()->IgnoreImplicit() == CtorExpr);
+      (void)CtorExpr;
+      // The field was directly constructed, so there is no need to bind.
+    } else {
+      const Expr *Init = BMI->getInit()->IgnoreImplicit();
       const ValueDecl *Field;
       if (BMI->isIndirectMemberInitializer()) {
         Field = BMI->getIndirectMember();
@@ -755,6 +760,7 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::CXXUuidofExprClass:
     case Stmt::CXXFoldExprClass:
     case Stmt::MSPropertyRefExprClass:
+    case Stmt::MSPropertySubscriptExprClass:
     case Stmt::CXXUnresolvedConstructExprClass:
     case Stmt::DependentScopeDeclRefExprClass:
     case Stmt::ArrayTypeTraitExprClass:
@@ -828,6 +834,9 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
     case Stmt::OMPTeamsDirectiveClass:
     case Stmt::OMPCancellationPointDirectiveClass:
     case Stmt::OMPCancelDirectiveClass:
+    case Stmt::OMPTaskLoopDirectiveClass:
+    case Stmt::OMPTaskLoopSimdDirectiveClass:
+    case Stmt::OMPDistributeDirectiveClass:
       llvm_unreachable("Stmt should not be in analyzer evaluation loop");
 
     case Stmt::ObjCSubscriptRefExprClass:
@@ -1571,7 +1580,6 @@ void ExprEngine::processBranch(const Stmt *Condition, const Stmt *Term,
     return;
   }
 
-
   if (const Expr *Ex = dyn_cast<Expr>(Condition))
     Condition = Ex->IgnoreParens();
 
@@ -1738,6 +1746,14 @@ static bool stackFrameDoesNotContainInitializedTemporaries(ExplodedNode &Pred) {
 }
 #endif
 
+void ExprEngine::processBeginOfFunction(NodeBuilderContext &BC,
+                                        ExplodedNode *Pred,
+                                        ExplodedNodeSet &Dst,
+                                        const BlockEdge &L) {
+  SaveAndRestore<const NodeBuilderContext *> NodeContextRAII(currBldrCtx, &BC);
+  getCheckerManager().runCheckersForBeginFunction(Dst, L, Pred, *this);
+}
+
 /// ProcessEndPath - Called by CoreEngine.  Used to generate end-of-path
 ///  nodes when the control reaches the end of a function.
 void ExprEngine::processEndOfFunction(NodeBuilderContext& BC,
@@ -1867,7 +1883,7 @@ void ExprEngine::VisitCommonDeclRefExpr(const Expr *Ex, const NamedDecl *D,
     const auto *MD = D ? dyn_cast<CXXMethodDecl>(D) : nullptr;
     const auto *DeclRefEx = dyn_cast<DeclRefExpr>(Ex);
     SVal V;
-    bool CaptureByReference = false;
+    bool IsReference;
     if (AMgr.options.shouldInlineLambdas() && DeclRefEx &&
         DeclRefEx->refersToEnclosingVariableOrCapture() && MD &&
         MD->getParent()->isLambda()) {
@@ -1882,22 +1898,22 @@ void ExprEngine::VisitCommonDeclRefExpr(const Expr *Ex, const NamedDecl *D,
         // created in the lambda object.
         assert(VD->getType().isConstQualified());
         V = state->getLValue(VD, LocCtxt);
+        IsReference = false;
       } else {
         Loc CXXThis =
             svalBuilder.getCXXThis(MD, LocCtxt->getCurrentStackFrame());
         SVal CXXThisVal = state->getSVal(CXXThis);
         V = state->getLValue(FD, CXXThisVal);
-        if (FD->getType()->isReferenceType() &&
-            !VD->getType()->isReferenceType())
-          CaptureByReference = true;
+        IsReference = FD->getType()->isReferenceType();
       }
     } else {
       V = state->getLValue(VD, LocCtxt);
+      IsReference = VD->getType()->isReferenceType();
     }
 
     // For references, the 'lvalue' is the pointer address stored in the
     // reference region.
-    if (VD->getType()->isReferenceType() || CaptureByReference) {
+    if (IsReference) {
       if (const MemRegion *R = V.getAsRegion())
         V = state->getSVal(R);
       else
@@ -1942,7 +1958,6 @@ void ExprEngine::VisitLvalArraySubscriptExpr(const ArraySubscriptExpr *A,
 
   const Expr *Base = A->getBase()->IgnoreParens();
   const Expr *Idx  = A->getIdx()->IgnoreParens();
-
 
   ExplodedNodeSet checkerPreStmt;
   getCheckerManager().runCheckersForPreStmt(checkerPreStmt, Pred, A, *this);
@@ -2049,6 +2064,7 @@ void ExprEngine::VisitMemberExpr(const MemberExpr *M, ExplodedNode *Pred,
 namespace {
 class CollectReachableSymbolsCallback final : public SymbolVisitor {
   InvalidatedSymbols Symbols;
+
 public:
   CollectReachableSymbolsCallback(ProgramStateRef State) {}
   const InvalidatedSymbols &getSymbols() const { return Symbols; }
@@ -2171,7 +2187,6 @@ void ExprEngine::evalBind(ExplodedNodeSet &Dst, const Stmt *StoreE,
   getCheckerManager().runCheckersForBind(CheckedSet, Pred, location, Val,
                                          StoreE, *this, *PP);
 
-
   StmtNodeBuilder Bldr(CheckedSet, Dst, *currBldrCtx);
 
   // If the location is not a 'Loc', it will already be handled by
@@ -2184,7 +2199,6 @@ void ExprEngine::evalBind(ExplodedNodeSet &Dst, const Stmt *StoreE,
     Bldr.generateNode(L, state, Pred);
     return;
   }
-
 
   for (ExplodedNodeSet::iterator I = CheckedSet.begin(), E = CheckedSet.end();
        I!=E; ++I) {

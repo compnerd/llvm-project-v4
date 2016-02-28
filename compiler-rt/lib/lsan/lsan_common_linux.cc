@@ -26,8 +26,9 @@
 namespace __lsan {
 
 static const char kLinkerName[] = "ld";
-
-static char linker_placeholder[sizeof(LoadedModule)] ALIGNED(64);
+// We request 2 modules matching "ld", so we can print a warning if there's more
+// than one match. But only the first one is actually used.
+static char linker_placeholder[2 * sizeof(LoadedModule)] ALIGNED(64);
 static LoadedModule *linker = nullptr;
 
 static bool IsLinker(const char* full_name) {
@@ -35,24 +36,20 @@ static bool IsLinker(const char* full_name) {
 }
 
 void InitializePlatformSpecificModules() {
-  ListOfModules modules;
-  modules.init();
-  for (LoadedModule &module : modules) {
-    if (!IsLinker(module.full_name())) continue;
-    if (linker == nullptr) {
-      linker = reinterpret_cast<LoadedModule *>(linker_placeholder);
-      *linker = module;
-      module = LoadedModule();
-    } else {
-      VReport(1, "LeakSanitizer: Multiple modules match \"%s\". "
-              "TLS will not be handled correctly.\n", kLinkerName);
-      linker->clear();
-      linker = nullptr;
-      return;
-    }
+  internal_memset(linker_placeholder, 0, sizeof(linker_placeholder));
+  uptr num_matches = GetListOfModules(
+      reinterpret_cast<LoadedModule *>(linker_placeholder), 2, IsLinker);
+  if (num_matches == 1) {
+    linker = reinterpret_cast<LoadedModule *>(linker_placeholder);
+    return;
   }
-  VReport(1, "LeakSanitizer: Dynamic linker not found. "
-             "TLS will not be handled correctly.\n");
+  if (num_matches == 0)
+    VReport(1, "LeakSanitizer: Dynamic linker not found. "
+            "TLS will not be handled correctly.\n");
+  else if (num_matches > 1)
+    VReport(1, "LeakSanitizer: Multiple modules match \"%s\". "
+            "TLS will not be handled correctly.\n", kLinkerName);
+  linker = nullptr;
 }
 
 static int ProcessGlobalRegionsCallback(struct dl_phdr_info *info, size_t size,

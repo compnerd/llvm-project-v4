@@ -60,6 +60,7 @@ public:
 
   /// state management
   void reset() override {
+    CreatedADWARFSection = false;
     HasSectionLabel.clear();
     MCObjectStreamer::reset();
   }
@@ -345,6 +346,10 @@ bool MCMachOStreamer::EmitSymbolAttribute(MCSymbol *Sym,
     Symbol->setSymbolResolver();
     break;
 
+  case MCSA_AltEntry:
+    Symbol->setAltEntry();
+    break;
+
   case MCSA_PrivateExtern:
     Symbol->setExternal(true);
     Symbol->setPrivateExtern(true);
@@ -413,7 +418,7 @@ void MCMachOStreamer::EmitZerofill(MCSection *Section, MCSymbol *Symbol,
   if (ByteAlignment != 1)
     new MCAlignFragment(ByteAlignment, 0, 0, ByteAlignment, Section);
 
-  MCFragment *F = new MCFillFragment(0, 0, Size, Section);
+  MCFragment *F = new MCFillFragment(0, Size, Section);
   Symbol->setFragment(F);
 
   // Update the maximum alignment on the zero fill section if necessary.

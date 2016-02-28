@@ -75,9 +75,9 @@ public:
   ///
   int alignSPAdjust(int SPAdj) const {
     if (SPAdj < 0) {
-      SPAdj = -RoundUpToAlignment(-SPAdj, StackAlignment);
+      SPAdj = -alignTo(-SPAdj, StackAlignment);
     } else {
-      SPAdj = RoundUpToAlignment(SPAdj, StackAlignment);
+      SPAdj = alignTo(SPAdj, StackAlignment);
     }
     return SPAdj;
   }
@@ -120,7 +120,10 @@ public:
   virtual bool
   assignCalleeSavedSpillSlots(MachineFunction &MF,
                               const TargetRegisterInfo *TRI,
-                              std::vector<CalleeSavedInfo> &CSI) const {
+                              std::vector<CalleeSavedInfo> &CSI,
+                              unsigned &MinCSFrameIndex,
+                              unsigned &MaxCSFrameIndex) const {
+
     return false;
   }
 
@@ -157,6 +160,10 @@ public:
                             MachineBasicBlock &MBB) const = 0;
   virtual void emitEpilogue(MachineFunction &MF,
                             MachineBasicBlock &MBB) const = 0;
+
+  /// Replace a StackProbe stub (if any) with the actual probe code inline
+  virtual void inlineStackProbe(MachineFunction &MF,
+                                MachineBasicBlock &PrologueMBB) const {}
 
   /// Adjust the prologue to have the function use segmented stacks. This works
   /// by adding a check even before the "normal" function prologue.

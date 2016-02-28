@@ -52,6 +52,13 @@ void Preprocessor::appendMacroDirective(IdentifierInfo *II, MacroDirective *MD){
   StoredMD.setLatest(MD);
   StoredMD.overrideActiveModuleMacros(*this, II);
 
+  if (needModuleMacros()) {
+    // Track that we created a new macro directive, so we know we should
+    // consider building a ModuleMacro for it when we get to the end of
+    // the module.
+    PendingModuleMacroNames.push_back(II);
+  }
+
   // Set up the identifier as having associated macro history.
   II->setHasMacroDefinition(true);
   if (!MD->isDefined() && LeafModuleMacros.find(II) == LeafModuleMacros.end())
@@ -597,9 +604,7 @@ static bool CheckMatchedBrackets(const SmallVectorImpl<Token> &Tokens) {
       Brackets.pop_back();
     }
   }
-  if (!Brackets.empty())
-    return false;
-  return true;
+  return Brackets.empty();
 }
 
 /// GenerateNewArgTokens - Returns true if OldTokens can be converted to a new
@@ -1064,6 +1069,9 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
       .Case("attribute_availability_with_version_underscores", true)
       .Case("attribute_availability_tvos", true)
       .Case("attribute_availability_watchos", true)
+      .Case("attribute_availability_swift", true)
+      .Case("attribute_availability_with_strict", true)
+      .Case("attribute_availability_in_templates", true)
       .Case("attribute_cf_returns_not_retained", true)
       .Case("attribute_cf_returns_retained", true)
       .Case("attribute_cf_returns_on_parameters", true)
@@ -1084,6 +1092,7 @@ static bool HasFeature(const Preprocessor &PP, const IdentifierInfo *II) {
       .Case("cxx_exceptions", LangOpts.CXXExceptions)
       .Case("cxx_rtti", LangOpts.RTTI && LangOpts.RTTIData)
       .Case("enumerator_attributes", true)
+      .Case("generalized_swift_name", true)
       .Case("nullability", true)
       .Case("memory_sanitizer", LangOpts.Sanitize.has(SanitizerKind::Memory))
       .Case("thread_sanitizer", LangOpts.Sanitize.has(SanitizerKind::Thread))

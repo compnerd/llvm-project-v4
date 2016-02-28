@@ -155,28 +155,34 @@ bool MemoryMappingLayout::Next(uptr *start, uptr *end, uptr *offset,
   return false;
 }
 
-void MemoryMappingLayout::DumpListOfModules(
-    InternalMmapVector<LoadedModule> *modules) {
+uptr MemoryMappingLayout::DumpListOfModules(LoadedModule *modules,
+                                            uptr max_modules,
+                                            string_predicate_t filter) {
   Reset();
   uptr cur_beg, cur_end, prot;
   InternalScopedString module_name(kMaxPathLength);
-  for (uptr i = 0; Next(&cur_beg, &cur_end, 0, module_name.data(),
-                        module_name.size(), &prot);
+  uptr n_modules = 0;
+  for (uptr i = 0; n_modules < max_modules &&
+                       Next(&cur_beg, &cur_end, 0, module_name.data(),
+                            module_name.size(), &prot);
        i++) {
     const char *cur_name = module_name.data();
     if (cur_name[0] == '\0')
       continue;
+    if (filter && !filter(cur_name))
+      continue;
     LoadedModule *cur_module = nullptr;
-    if (!modules->empty() &&
-        0 == internal_strcmp(cur_name, modules->back().full_name())) {
-      cur_module = &modules->back();
+    if (n_modules > 0 &&
+        0 == internal_strcmp(cur_name, modules[n_modules - 1].full_name())) {
+      cur_module = &modules[n_modules - 1];
     } else {
-      modules->push_back(LoadedModule());
-      cur_module = &modules->back();
+      cur_module = &modules[n_modules];
       cur_module->set(cur_name, cur_beg);
+      n_modules++;
     }
     cur_module->addAddressRange(cur_beg, cur_end, prot & kProtectionExecute);
   }
+  return n_modules;
 }
 
 }  // namespace __sanitizer

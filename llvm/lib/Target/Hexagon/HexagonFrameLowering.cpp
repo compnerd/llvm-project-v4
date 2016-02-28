@@ -436,10 +436,10 @@ void HexagonFrameLowering::insertPrologueInBlock(MachineBasicBlock &MBB) const {
   // Get the number of bytes to allocate from the FrameInfo.
   unsigned FrameSize = MFI->getStackSize();
   // Round up the max call frame size to the max alignment on the stack.
-  unsigned MaxCFA = RoundUpToAlignment(MFI->getMaxCallFrameSize(), MaxAlign);
+  unsigned MaxCFA = alignTo(MFI->getMaxCallFrameSize(), MaxAlign);
   MFI->setMaxCallFrameSize(MaxCFA);
 
-  FrameSize = MaxCFA + RoundUpToAlignment(FrameSize, MaxAlign);
+  FrameSize = MaxCFA + alignTo(FrameSize, MaxAlign);
   MFI->setStackSize(FrameSize);
 
   bool AlignStack = (MaxAlign > getStackAlignment());
@@ -1193,7 +1193,8 @@ static void dump_registers(BitVector &Regs, const TargetRegisterInfo &TRI) {
 
 
 bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
-      const TargetRegisterInfo *TRI, std::vector<CalleeSavedInfo> &CSI) const {
+      const TargetRegisterInfo *TRI, std::vector<CalleeSavedInfo> &CSI,
+      unsigned &MinCSFrameIndex, unsigned &MaxCSFrameIndex) const {
   DEBUG(dbgs() << LLVM_FUNCTION_NAME << " on "
                << MF.getFunction()->getName() << '\n');
   MachineFrameInfo *MFI = MF.getFrameInfo();

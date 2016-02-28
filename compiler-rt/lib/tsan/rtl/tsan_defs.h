@@ -29,11 +29,7 @@
 #endif
 
 #ifndef TSAN_CONTAINS_UBSAN
-# if CAN_SANITIZE_UB && !defined(SANITIZER_GO)
-#  define TSAN_CONTAINS_UBSAN 1
-# else
-#  define TSAN_CONTAINS_UBSAN 0
-# endif
+# define TSAN_CONTAINS_UBSAN (CAN_SANITIZE_UB && !defined(SANITIZER_GO))
 #endif
 
 namespace __tsan {

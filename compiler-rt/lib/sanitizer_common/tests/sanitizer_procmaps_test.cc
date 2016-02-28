@@ -37,11 +37,11 @@ TEST(MemoryMappingLayout, DumpListOfModules) {
   const char *binary_name = last_slash ? last_slash + 1 : argv0;
   MemoryMappingLayout memory_mapping(false);
   const uptr kMaxModules = 100;
-  InternalMmapVector<LoadedModule> modules(kMaxModules);
-  memory_mapping.DumpListOfModules(&modules);
-  EXPECT_GT(modules.size(), 0U);
+  LoadedModule modules[kMaxModules];
+  uptr n_modules = memory_mapping.DumpListOfModules(modules, kMaxModules, 0);
+  EXPECT_GT(n_modules, 0U);
   bool found = false;
-  for (uptr i = 0; i < modules.size(); ++i) {
+  for (uptr i = 0; i < n_modules; ++i) {
     if (modules[i].containsAddress((uptr)&noop)) {
       // Verify that the module name is sane.
       if (strstr(modules[i].full_name(), binary_name) != 0)

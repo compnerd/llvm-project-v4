@@ -394,6 +394,13 @@ bool FrontendAction::BeginSourceFile(CompilerInstance &CI,
       CI.getDiagnostics().Report(diag::err_module_map_not_found) << Filename;
   }
 
+  // Add a module declaration scope so that modules from -fmodule-map-file
+  // arguments may shadow modules found implicitly in search paths.
+  CI.getPreprocessor()
+      .getHeaderSearchInfo()
+      .getModuleMap()
+      .finishModuleDeclarationScope();
+
   // If we were asked to load any module files, do so now.
   for (const auto &ModuleFile : CI.getFrontendOpts().ModuleFiles)
     if (!CI.loadModuleFile(ModuleFile))
@@ -559,7 +566,10 @@ bool WrapperFrontendAction::BeginSourceFileAction(CompilerInstance &CI,
                                                   StringRef Filename) {
   WrappedAction->setCurrentInput(getCurrentInput());
   WrappedAction->setCompilerInstance(&CI);
-  return WrappedAction->BeginSourceFileAction(CI, Filename);
+  auto Ret = WrappedAction->BeginSourceFileAction(CI, Filename);
+  // BeginSourceFileAction may change CurrentInput, e.g. during module builds.
+  setCurrentInput(WrappedAction->getCurrentInput());
+  return Ret;
 }
 void WrapperFrontendAction::ExecuteAction() {
   WrappedAction->ExecuteAction();
@@ -587,6 +597,7 @@ bool WrapperFrontendAction::hasCodeCompletionSupport() const {
   return WrappedAction->hasCodeCompletionSupport();
 }
 
-WrapperFrontendAction::WrapperFrontendAction(FrontendAction *WrappedAction)
-  : WrappedAction(WrappedAction) {}
+WrapperFrontendAction::WrapperFrontendAction(
+    std::unique_ptr<FrontendAction> WrappedAction)
+  : WrappedAction(std::move(WrappedAction)) {}
 

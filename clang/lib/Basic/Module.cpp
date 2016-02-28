@@ -79,11 +79,16 @@ static bool hasFeature(StringRef Feature, const LangOptions &LangOpts,
 
 bool Module::isAvailable(const LangOptions &LangOpts, const TargetInfo &Target,
                          Requirement &Req,
-                         UnresolvedHeaderDirective &MissingHeader) const {
+                         UnresolvedHeaderDirective &MissingHeader,
+                         Module *&ShadowingModule) const {
   if (IsAvailable)
     return true;
 
   for (const Module *Current = this; Current; Current = Current->Parent) {
+    if (Current->ShadowingModule) {
+      ShadowingModule = Current->ShadowingModule;
+      return false;
+    }
     for (unsigned I = 0, N = Current->Requirements.size(); I != N; ++I) {
       if (hasFeature(Current->Requirements[I].first, LangOpts, Target) !=
               Current->Requirements[I].second) {
@@ -486,12 +491,13 @@ void Module::print(raw_ostream &OS, unsigned Indent) const {
   OS << "}\n";
 }
 
-void Module::dump() const {
+LLVM_DUMP_METHOD void Module::dump() const {
   print(llvm::errs());
 }
 
 void VisibleModuleSet::setVisible(Module *M, SourceLocation Loc,
                                   VisibleCallback Vis, ConflictCallback Cb) {
+  assert(Loc.isValid() && "setVisible expects a valid import location");
   if (isVisible(M))
     return;
 

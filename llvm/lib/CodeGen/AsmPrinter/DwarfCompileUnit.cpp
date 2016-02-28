@@ -83,8 +83,8 @@ static const ConstantExpr *getMergedGlobalExpr(const Value *V) {
 
   // First operand points to a global struct.
   Value *Ptr = CE->getOperand(0);
-  if (!isa<GlobalValue>(Ptr) ||
-      !isa<StructType>(cast<PointerType>(Ptr->getType())->getElementType()))
+  GlobalValue *GV = dyn_cast<GlobalValue>(Ptr);
+  if (!GV || !isa<StructType>(GV->getValueType()))
     return nullptr;
 
   // Second operand is zero.
@@ -161,8 +161,9 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
         // Based on GCC's support for TLS:
         if (!DD->useSplitDwarf()) {
           // 1) Start with a constNu of the appropriate pointer size
-          addUInt(*Loc, dwarf::DW_FORM_data1,
-                  PointerSize == 4 ? dwarf::DW_OP_const4u : dwarf::DW_OP_const8u);
+          addUInt(*Loc, dwarf::DW_FORM_data1, PointerSize == 4
+                                                  ? dwarf::DW_OP_const4u
+                                                  : dwarf::DW_OP_const8u);
           // 2) containing the (relocated) offset of the TLS variable
           //    within the module's TLS block.
           addExpr(*Loc, dwarf::DW_FORM_udata,
@@ -439,6 +440,9 @@ DIE *DwarfCompileUnit::constructInlinedScopeDIE(LexicalScope *Scope) {
   addUInt(*ScopeDIE, dwarf::DW_AT_call_file, None,
           getOrCreateSourceID(IA->getFilename(), IA->getDirectory()));
   addUInt(*ScopeDIE, dwarf::DW_AT_call_line, None, IA->getLine());
+  if (IA->getDiscriminator())
+    addUInt(*ScopeDIE, dwarf::DW_AT_GNU_discriminator, None,
+            IA->getDiscriminator());
 
   // Add name to the name table, we do this here because we're guaranteed
   // to have concrete versions of our DW_TAG_inlined_subprogram nodes.
@@ -499,9 +503,20 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
         addVariableAddress(DV, *VariableDie, Location);
       } else if (RegOp.getReg())
         addVariableAddress(DV, *VariableDie, MachineLocation(RegOp.getReg()));
-    } else if (DVInsn->getOperand(0).isImm())
-      addConstantValue(*VariableDie, DVInsn->getOperand(0), DV.getType());
-    else if (DVInsn->getOperand(0).isFPImm())
+    } else if (DVInsn->getOperand(0).isImm()) {
+      // This variable is described by a single constant.
+      // Check whether it has a DIExpression.
+      auto *Expr = DV.getSingleExpression();
+      if (Expr && Expr->getNumElements()) {
+        DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+        DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+        // If there is an expression, emit raw unsigned bytes.
+        DwarfExpr.AddUnsignedConstant(DVInsn->getOperand(0).getImm());
+        DwarfExpr.AddExpression(Expr->expr_op_begin(), Expr->expr_op_end());
+        addBlock(*VariableDie, dwarf::DW_AT_location, Loc);
+      } else
+        addConstantValue(*VariableDie, DVInsn->getOperand(0), DV.getType());
+    } else if (DVInsn->getOperand(0).isFPImm())
       addConstantFPValue(*VariableDie, DVInsn->getOperand(0));
     else if (DVInsn->getOperand(0).isCImm())
       addConstantValue(*VariableDie, DVInsn->getOperand(0).getCImm(),
@@ -521,8 +536,7 @@ DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
     unsigned FrameReg = 0;
     const TargetFrameLowering *TFI = Asm->MF->getSubtarget().getFrameLowering();
     int Offset = TFI->getFrameIndexReference(*Asm->MF, FI, FrameReg);
-    assert(Expr != DV.getExpression().end() &&
-           "Wrong number of expressions");
+    assert(Expr != DV.getExpression().end() && "Wrong number of expressions");
     DwarfExpr.AddMachineRegIndirect(FrameReg, Offset);
     DwarfExpr.AddExpression((*Expr)->expr_op_begin(), (*Expr)->expr_op_end());
     ++Expr;
@@ -601,8 +615,8 @@ DIE *DwarfCompileUnit::createAndAddScopeChildren(LexicalScope *Scope,
   return ObjectPointer;
 }
 
-void
-DwarfCompileUnit::constructAbstractSubprogramScopeDIE(LexicalScope *Scope) {
+void DwarfCompileUnit::constructAbstractSubprogramScopeDIE(
+    LexicalScope *Scope) {
   DIE *&AbsDef = DU->getAbstractSPDies()[Scope->getScopeNode()];
   if (AbsDef)
     return;
@@ -767,8 +781,7 @@ void DwarfCompileUnit::addComplexAddress(const DbgVariable &DV, DIE &Die,
                                          const MachineLocation &Location) {
   DIELoc *Loc = new (DIEValueAllocator) DIELoc;
   DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-  assert(DV.getExpression().size() == 1);
-  const DIExpression *Expr = DV.getExpression().back();
+  const DIExpression *Expr = DV.getSingleExpression();
   bool ValidReg;
   if (Location.getOffset()) {
     ValidReg = DwarfExpr.AddMachineRegIndirect(Location.getReg(),

@@ -192,11 +192,7 @@ endif()
 add_dependencies(compiler-rt tsan)
 
 # Make sure that non-platform-specific files don't include any system headers.
-# FreeBSD does not install a number of Clang-provided headers for the compiler
-# in the base system due to incompatibilities between FreeBSD's and Clang's
-# versions. As a workaround do not use --sysroot=. on FreeBSD until this is
-# addressed.                                                        
-if(COMPILER_RT_HAS_SYSROOT_FLAG AND NOT CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+if(COMPILER_RT_HAS_SYSROOT_FLAG)
   file(GLOB _tsan_generic_sources rtl/tsan*)
   file(GLOB _tsan_platform_sources rtl/tsan*posix* rtl/tsan*mac*
                                    rtl/tsan*linux*)
@@ -208,17 +204,10 @@ endif()
 # Build libcxx instrumented with TSan.
 if(COMPILER_RT_HAS_LIBCXX_SOURCES AND
    COMPILER_RT_TEST_COMPILER_ID STREQUAL "Clang")
-  set(libcxx_tsan_deps)
-  foreach(arch ${TSAN_SUPPORTED_ARCH})
-    get_target_flags_for_arch(${arch} TARGET_CFLAGS)
-    set(LIBCXX_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/libcxx_tsan_${arch})
-    add_custom_libcxx(libcxx_tsan_${arch} ${LIBCXX_PREFIX}
-      DEPS ${TSAN_RUNTIME_LIBRARIES}
-      CFLAGS ${TARGET_CFLAGS} -fsanitize=thread)
-    list(APPEND libcxx_tsan_deps libcxx_tsan_${arch})
-  endforeach()
-
-  add_custom_target(libcxx_tsan DEPENDS ${libcxx_tsan_deps})
+  set(LIBCXX_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/libcxx_tsan)
+  add_custom_libcxx(libcxx_tsan ${LIBCXX_PREFIX}
+    DEPS ${TSAN_RUNTIME_LIBRARIES}
+    CFLAGS -fsanitize=thread)
 endif()
 
 if(COMPILER_RT_INCLUDE_TESTS)

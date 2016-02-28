@@ -386,9 +386,6 @@ ValueProfData *
 serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
                              ValueProfData *Dst);
 uint32_t getNumValueKindsRT(const void *R);
-ValueProfRecord *getFirstValueProfRecord(ValueProfData *VPD);
-ValueProfRecord *getValueProfRecordNext(ValueProfRecord *VPR);
-InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *VPR);
 
 #undef INSTR_PROF_VALUE_PROF_DATA
 #endif  /* INSTR_PROF_VALUE_PROF_DATA */
@@ -398,10 +395,8 @@ InstrProfValueData *getValueProfRecordValueData(ValueProfRecord *VPR);
 #define INSTR_PROF_DATA_DEFINED
 #ifdef __cplusplus
 #define INSTR_PROF_INLINE inline
-#define INSTR_PROF_NULLPTR nullptr
 #else
 #define INSTR_PROF_INLINE
-#define INSTR_PROF_NULLPTR NULL
 #endif
 
 #ifndef offsetof
@@ -561,19 +556,18 @@ int initializeValueProfRuntimeRecord(ValueProfRuntimeRecord *RuntimeRecord,
   for (I = 0; I <= IPVK_Last; I++) {
     uint16_t N = NumValueSites[I];
     if (!N) {
-      RuntimeRecord->SiteCountArray[I] = INSTR_PROF_NULLPTR;
+      RuntimeRecord->SiteCountArray[I] = 0;
       continue;
     }
     NumValueKinds++;
     RuntimeRecord->SiteCountArray[I] = (uint8_t *)calloc(N, 1);
     if (!RuntimeRecord->SiteCountArray[I])
       return 1;
-    RuntimeRecord->NodesKind[I] = Nodes ? &Nodes[S] : INSTR_PROF_NULLPTR;
+    RuntimeRecord->NodesKind[I] = Nodes ? &Nodes[S] : NULL;
     for (J = 0; J < N; J++) {
       /* Compute value count for each site. */
       uint32_t C = 0;
-      ValueProfNode *Site =
-          Nodes ? RuntimeRecord->NodesKind[I][J] : INSTR_PROF_NULLPTR;
+      ValueProfNode *Site = Nodes ? RuntimeRecord->NodesKind[I][J] : NULL;
       while (Site) {
         C++;
         Site = Site->Next;
@@ -614,7 +608,7 @@ uint32_t getNumValueDataForSiteRT(const void *R, uint32_t VK, uint32_t S) {
 uint32_t getNumValueDataRT(const void *R, uint32_t VK) {
   unsigned I, S = 0;
   const ValueProfRuntimeRecord *Record = (const ValueProfRuntimeRecord *)R;
-  if (Record->SiteCountArray[VK] == INSTR_PROF_NULLPTR)
+  if (Record->SiteCountArray[VK] == 0)
     return 0;
   for (I = 0; I < Record->NumValueSites[VK]; I++)
     S += Record->SiteCountArray[VK][I];
@@ -639,10 +633,14 @@ ValueProfData *allocValueProfDataRT(size_t TotalSizeInBytes) {
   return (ValueProfData *)calloc(TotalSizeInBytes, 1);
 }
 
-static ValueProfRecordClosure RTRecordClosure = {
-    INSTR_PROF_NULLPTR, getNumValueKindsRT,       getNumValueSitesRT,
-    getNumValueDataRT,  getNumValueDataForSiteRT, INSTR_PROF_NULLPTR,
-    getValueForSiteRT,  allocValueProfDataRT};
+static ValueProfRecordClosure RTRecordClosure = {0,
+                                                 getNumValueKindsRT,
+                                                 getNumValueSitesRT,
+                                                 getNumValueDataRT,
+                                                 getNumValueDataForSiteRT,
+                                                 0,
+                                                 getValueForSiteRT,
+                                                 allocValueProfDataRT};
 
 /*
  * Return the size of ValueProfData structure to store data
@@ -667,15 +665,17 @@ serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
   return serializeValueProfDataFrom(&RTRecordClosure, DstData);
 }
 
+
 #undef INSTR_PROF_COMMON_API_IMPL
 #endif /* INSTR_PROF_COMMON_API_IMPL */
 
 /*============================================================================*/
 
+
 #ifndef INSTR_PROF_DATA_DEFINED
 
-#ifndef INSTR_PROF_DATA_INC
-#define INSTR_PROF_DATA_INC
+#ifndef INSTR_PROF_DATA_INC_
+#define INSTR_PROF_DATA_INC_
 
 /* Helper macros.  */
 #define INSTR_PROF_SIMPLE_QUOTE(x) #x
@@ -708,11 +708,9 @@ serializeValueProfDataFromRT(const ValueProfRuntimeRecord *Record,
  * version for other variants of profile. We set the lowest bit of the upper 8
  * bits (i.e. bit 56) to 1 to indicate if this is an IR-level instrumentaiton
  * generated profile, and 0 if this is a Clang FE generated profile.
- */
+*/
 #define VARIANT_MASKS_ALL 0xff00000000000000ULL
 #define GET_VERSION(V) ((V) & ~VARIANT_MASKS_ALL)
-#define VARIANT_MASK_IR_PROF (0x1ULL << 56)
-#define IR_LEVEL_PROF_VERSION_VAR __llvm_profile_raw_version
 
 /* Runtime section names and name strings.  */
 #define INSTR_PROF_DATA_SECT_NAME __llvm_prf_data
@@ -766,7 +764,7 @@ typedef struct ValueProfNode {
   struct ValueProfNode *Next;
 } ValueProfNode;
 
-#endif /* INSTR_PROF_DATA_INC */
+#endif /* INSTR_PROF_DATA_INC_ */
 
 #else
 #undef INSTR_PROF_DATA_DEFINED

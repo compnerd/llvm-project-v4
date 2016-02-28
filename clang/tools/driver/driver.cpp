@@ -200,6 +200,8 @@ extern int cc1_main(ArrayRef<const char *> Argv, const char *Argv0,
                     void *MainAddr);
 extern int cc1as_main(ArrayRef<const char *> Argv, const char *Argv0,
                       void *MainAddr);
+extern int cc1apinotes_main(ArrayRef<const char *> Argv, const char *Argv0,
+                            void *MainAddr);
 
 static void insertTargetAndModeArgs(StringRef Target, StringRef Mode,
                                     SmallVectorImpl<const char *> &ArgVector,
@@ -290,9 +292,9 @@ static void SetInstallDir(SmallVectorImpl<const char *> &argv,
   if (CanonicalPrefixes)
     llvm::sys::fs::make_absolute(InstalledPath);
 
-  InstalledPath = llvm::sys::path::parent_path(InstalledPath);
-  if (llvm::sys::fs::exists(InstalledPath.c_str()))
-    TheDriver.setInstalledDir(InstalledPath);
+  StringRef InstalledPathParent(llvm::sys::path::parent_path(InstalledPath));
+  if (llvm::sys::fs::exists(InstalledPathParent))
+    TheDriver.setInstalledDir(InstalledPathParent);
 }
 
 static int ExecuteCC1Tool(ArrayRef<const char *> argv, StringRef Tool) {
@@ -301,6 +303,8 @@ static int ExecuteCC1Tool(ArrayRef<const char *> argv, StringRef Tool) {
     return cc1_main(argv.slice(2), argv[0], GetExecutablePathVP);
   if (Tool == "as")
     return cc1as_main(argv.slice(2), argv[0], GetExecutablePathVP);
+  if (Tool == "apinotes")
+    return cc1apinotes_main(argv.slice(2), argv[0], GetExecutablePathVP);
 
   // Reject unknown tools.
   llvm::errs() << "error: unknown integrated tool '" << Tool << "'\n";

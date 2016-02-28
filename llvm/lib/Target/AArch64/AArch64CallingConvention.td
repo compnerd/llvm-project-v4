@@ -86,6 +86,8 @@ def RetCC_AArch64_AAPCS : CallingConv<[
   CCIfType<[v2f32], CCBitConvertToType<v2i32>>,
   CCIfType<[v2f64, v4f32], CCBitConvertToType<v2i64>>,
 
+  CCIfSwiftError<CCIfType<[i64], CCAssignToRegWithShadow<[X19], [W19]>>>,
+
   // Big endian vectors must be passed as if they were 1-element vectors so that
   // their lanes are in a consistent order.
   CCIfBigEndian<CCIfType<[v2i32, v2f32, v4i16, v4f16, v8i8],
@@ -125,6 +127,12 @@ def CC_AArch64_DarwinPCS : CallingConv<[
   // Put ByVal arguments directly on the stack. Minimum size and alignment of a
   // slot is 64-bit.
   CCIfByVal<CCPassByVal<8, 8>>,
+
+  // An SwiftSelf is passed in X9.
+  CCIfSwiftSelf<CCIfType<[i64], CCAssignToRegWithShadow<[X9], [W9]>>>,
+
+  // A SwiftError is passed in X19.
+  CCIfSwiftError<CCIfType<[i64], CCAssignToRegWithShadow<[X19], [W19]>>>,
 
   CCIfConsecutiveRegs<CCCustom<"CC_AArch64_Custom_Block">>,
 
@@ -270,6 +278,11 @@ def CSR_AArch64_AAPCS : CalleeSavedRegs<(add LR, FP, X19, X20, X21, X22,
 // case)
 def CSR_AArch64_AAPCS_ThisReturn : CalleeSavedRegs<(add CSR_AArch64_AAPCS, X0)>;
 
+def CSR_AArch64_AAPCS_SwiftError : CalleeSavedRegs<(add LR, FP, X20, X21, X22,
+                                           X23, X24, X25, X26, X27, X28,
+                                           D8,  D9,  D10, D11,
+                                           D12, D13, D14, D15)>;
+
 // The function used by Darwin to obtain the address of a thread-local variable
 // guarantees more than a normal AAPCS function. x16 and x17 are used on the
 // fast path for calculation, but other registers except X0 (argument/return)
@@ -278,6 +291,23 @@ def CSR_AArch64_TLS_Darwin
     : CalleeSavedRegs<(add (sub (sequence "X%u", 1, 28), X16, X17),
                            FP,
                            (sequence "Q%u", 0, 31))>;
+
+// We can only handle a register pair with adjacent registers, the register pair
+// should belong to the same class as well. Since the access function on the
+// fast path calls a function that follows CSR_AArch64_TLS_Darwin,
+// CSR_AArch64_CXX_TLS_Darwin should be a subset of CSR_AArch64_TLS_Darwin.
+def CSR_AArch64_CXX_TLS_Darwin
+    : CalleeSavedRegs<(add CSR_AArch64_AAPCS,
+                           (sub (sequence "X%u", 1, 28), X15, X16, X17, X18),
+                           (sequence "D%u", 0, 31))>;
+
+// CSRs that are handled by prologue, epilogue.
+def CSR_AArch64_CXX_TLS_Darwin_PE
+    : CalleeSavedRegs<(add LR, FP)>;
+
+// CSRs that are handled explicitly via copies.
+def CSR_AArch64_CXX_TLS_Darwin_ViaCopy
+    : CalleeSavedRegs<(sub CSR_AArch64_CXX_TLS_Darwin, LR, FP)>;
 
 // The ELF stub used for TLS-descriptor access saves every feasible
 // register. Only X0 and LR are clobbered.

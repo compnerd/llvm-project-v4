@@ -85,6 +85,9 @@ def NormalVar : SubsetSubject<Var,
 def NonBitField : SubsetSubject<Field,
                                 [{!S->isBitField()}]>;
 
+def ObjCClassMethod : SubsetSubject<ObjCMethod,
+                                    [{!S->isInstanceMethod()}]>;
+
 def ObjCInstanceMethod : SubsetSubject<ObjCMethod,
                                        [{S->isInstanceMethod()}]>;
 
@@ -252,6 +255,7 @@ def TargetARM : TargetArch<["arm", "thumb"]>;
 def TargetMips : TargetArch<["mips", "mipsel"]>;
 def TargetMSP430 : TargetArch<["msp430"]>;
 def TargetX86 : TargetArch<["x86"]>;
+def TargetAnyX86 : TargetArch<["x86", "x86_64"]>;
 def TargetWindows : TargetArch<["x86", "x86_64", "arm", "thumb"]> {
   let OSes = ["Win32"];
 }
@@ -426,8 +430,8 @@ def Annotate : InheritableParamAttr {
 }
 
 def ARMInterrupt : InheritableAttr, TargetSpecificAttr<TargetARM> {
-  // NOTE: If you add any additional spellings, MSP430Interrupt's spellings
-  // must match.
+  // NOTE: If you add any additional spellings, MSP430Interrupt's,
+  // MipsInterrupt's and AnyX86Interrupt's spellings must match.
   let Spellings = [GNU<"interrupt">];
   let Args = [EnumArgument<"Interrupt", "InterruptType",
                            ["IRQ", "FIQ", "SWI", "ABORT", "UNDEF", ""],
@@ -449,7 +453,8 @@ def Availability : InheritableAttr {
   let Spellings = [GNU<"availability">];
   let Args = [IdentifierArgument<"platform">, VersionArgument<"introduced">,
               VersionArgument<"deprecated">, VersionArgument<"obsoleted">,
-              BoolArgument<"unavailable">, StringArgument<"message">];
+              BoolArgument<"unavailable">, StringArgument<"message">,
+              BoolArgument<"strict">];
   let AdditionalMembers =
 [{static llvm::StringRef getPrettyPlatformName(llvm::StringRef Platform) {
     return llvm::StringSwitch<llvm::StringRef>(Platform)
@@ -462,6 +467,7 @@ def Availability : InheritableAttr {
              .Case("macosx_app_extension", "OS X (App Extension)")
              .Case("tvos_app_extension", "tvOS (App Extension)")
              .Case("watchos_app_extension", "watchOS (App Extension)")
+             .Case("swift", "Swift")
              .Default(llvm::StringRef());
 } }];
   let HasCustomParsing = 1;
@@ -845,8 +851,8 @@ def MSABI : InheritableAttr {
 }
 
 def MSP430Interrupt : InheritableAttr, TargetSpecificAttr<TargetMSP430> {
-  // NOTE: If you add any additional spellings, ARMInterrupt's spellings must
-  // match.
+  // NOTE: If you add any additional spellings, ARMInterrupt's, MipsInterrupt's
+  // and AnyX86Interrupt's spellings must match.
   let Spellings = [GNU<"interrupt">];
   let Args = [UnsignedArgument<"Number">];
   let ParseKind = "Interrupt";
@@ -860,8 +866,26 @@ def Mips16 : InheritableAttr, TargetSpecificAttr<TargetMips> {
   let Documentation = [Undocumented];
 }
 
+def MipsInterrupt : InheritableAttr, TargetSpecificAttr<TargetMips> {
+  // NOTE: If you add any additional spellings, ARMInterrupt's,
+  // MSP430Interrupt's and AnyX86Interrupt's spellings must match.
+  let Spellings = [GNU<"interrupt">];
+  let Subjects = SubjectList<[Function]>;
+  let Args = [EnumArgument<"Interrupt", "InterruptType",
+                           ["vector=sw0", "vector=sw1", "vector=hw0",
+                            "vector=hw1", "vector=hw2", "vector=hw3",
+                            "vector=hw4", "vector=hw5", "eic", ""],
+                           ["sw0", "sw1", "hw0", "hw1", "hw2", "hw3",
+                            "hw4", "hw5", "eic", "eic"]
+                           >];
+  let ParseKind = "Interrupt";
+  let Documentation = [MipsInterruptDocs];
+}
+
 def Mode : Attr {
   let Spellings = [GCC<"mode">];
+  let Subjects = SubjectList<[Var, TypedefName, Field], ErrorDiag,
+                             "ExpectedVariableFieldOrTypedef">;
   let Args = [IdentifierArgument<"Mode">];
   let Documentation = [Undocumented];
 }
@@ -888,6 +912,13 @@ def ReturnsTwice : InheritableAttr {
   let Spellings = [GCC<"returns_twice">];
   let Subjects = SubjectList<[Function]>;
   let Documentation = [Undocumented];
+}
+
+def DisableTailCalls : InheritableAttr {
+  let Spellings = [GNU<"disable_tail_calls">,
+                   CXX11<"clang", "disable_tail_calls">];
+  let Subjects = SubjectList<[Function, ObjCMethod]>;
+  let Documentation = [DisableTailCallsDocs];
 }
 
 def NoAlias : InheritableAttr {
@@ -989,6 +1020,15 @@ def ReturnsNonNull : InheritableAttr {
   let Documentation = [ReturnsNonNullDocs];
 }
 
+// pass_object_size(N) indicates that the parameter should have
+// __builtin_object_size with Type=N evaluated on the parameter at the callsite.
+def PassObjectSize : InheritableParamAttr {
+  let Spellings = [GNU<"pass_object_size">];
+  let Args = [IntArgument<"Type">];
+  let Subjects = SubjectList<[ParmVar]>;
+  let Documentation = [PassObjectSizeDocs];
+}
+
 // Nullability type attributes.
 def TypeNonNull : TypeAttr {
   let Spellings = [Keyword<"_Nonnull">];
@@ -1010,6 +1050,12 @@ def ObjCKindOf : TypeAttr {
   let Documentation = [Undocumented];
 }
 
+def NoEscape : InheritableAttr {
+  let Spellings = [GCC<"noescape">];
+  let Subjects = SubjectList<[ParmVar], WarnDiag, "ExpectedParameter">;
+  let Documentation = [Undocumented];
+}
+
 def AssumeAligned : InheritableAttr {
   let Spellings = [GCC<"assume_aligned">];
   let Subjects = SubjectList<[ObjCMethod, Function]>;
@@ -1027,6 +1073,12 @@ def NoInstrumentFunction : InheritableAttr {
   let Spellings = [GCC<"no_instrument_function">];
   let Subjects = SubjectList<[Function]>;
   let Documentation = [Undocumented];
+}
+
+def NotTailCalled : InheritableAttr {
+  let Spellings = [GNU<"not_tail_called">, CXX11<"clang", "not_tail_called">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [NotTailCalledDocs];
 }
 
 def NoThrow : InheritableAttr {
@@ -1058,10 +1110,16 @@ def ObjCBridgeRelated : InheritableAttr {
   let Spellings = [GNU<"objc_bridge_related">];
   let Subjects = SubjectList<[Record], ErrorDiag>;
   let Args = [IdentifierArgument<"RelatedClass">,
-          IdentifierArgument<"ClassMethod">,
-          IdentifierArgument<"InstanceMethod">];
+          IdentifierArgument<"ClassMethod", 1>,
+          IdentifierArgument<"InstanceMethod", 1>];
   let HasCustomParsing = 1;
   let Documentation = [Undocumented];
+}
+
+def NSErrorDomain : Attr {
+  let Spellings = [GNU<"ns_error_domain">];
+  let Args = [IdentifierArgument<"ErrorDomain">];
+  let Documentation = [NSErrorDomainDocs];
 }
 
 def NSReturnsRetained : InheritableAttr {
@@ -1140,6 +1198,18 @@ def ObjCRequiresSuper : InheritableAttr {
 
 def ObjCRootClass : InheritableAttr {
   let Spellings = [GNU<"objc_root_class">];
+  let Subjects = SubjectList<[ObjCInterface], ErrorDiag>;
+  let Documentation = [Undocumented];
+}
+
+def ObjCSubclassingRestricted : InheritableAttr {
+  let Spellings = [GNU<"objc_subclassing_restricted">];
+  let Subjects = SubjectList<[ObjCInterface], ErrorDiag>;
+  let Documentation = [Undocumented];
+}
+
+def ObjCCompleteDefinition : InheritableAttr {
+  let Spellings = [GNU<"objc_complete_definition">];
   let Subjects = SubjectList<[ObjCInterface], ErrorDiag>;
   let Documentation = [Undocumented];
 }
@@ -1238,6 +1308,38 @@ def Regparm : TypeAttr {
   let Spellings = [GCC<"regparm">];
   let Args = [UnsignedArgument<"NumParams">];
   let Documentation = [RegparmDocs];
+}
+
+def SwiftError : InheritableAttr {
+  let Spellings = [GCC<"swift_error">];
+  let Args = [EnumArgument<"Convention", "ConventionKind",
+               ["none", "nonnull_error", "null_result", "zero_result", "nonzero_result"],
+               ["None", "NonNullError", "NullResult", "ZeroResult", "NonZeroResult"]>];
+  let Subjects = SubjectList<[ObjCMethod, Function], ErrorDiag>;
+  let Documentation = [SwiftErrorDocs];
+}
+
+def SwiftName : InheritableAttr {
+  let Spellings = [GCC<"swift_name">];
+  let Args = [StringArgument<"Name">];
+  // Proper subject list disabled because of the custom error needed.
+  // Let's avoid merge conflicts for now.
+//  let Subjects = SubjectList<[EnumConstant, ObjCProtocol, ObjCClassMethod],
+//                             ErrorDiag, "ExpectedSwiftNameSubjects">;
+  let Documentation = [Undocumented];
+}
+
+def SwiftPrivate : InheritableAttr {
+  let Spellings = [GCC<"swift_private">];
+  let Documentation = [Undocumented];
+}
+
+def SwiftSuppressFactoryAsInit : InheritableAttr { 
+  // This attribute has no spellings as it is only ever created implicitly
+  // from API notes.
+  let Spellings = [];
+  let SemaHandler = 0; 
+  let Documentation = [Undocumented];
 }
 
 def ReqdWorkGroupSize : InheritableAttr {
@@ -1487,6 +1589,16 @@ def WeakRef : InheritableAttr {
   let Args = [StringArgument<"Aliasee", 1>];
   let Subjects = SubjectList<[Var, Function], ErrorDiag>;
   let Documentation = [Undocumented];
+}
+
+def AnyX86Interrupt : InheritableAttr, TargetSpecificAttr<TargetAnyX86> {
+  // NOTE: If you add any additional spellings, ARMInterrupt's,
+  // MSP430Interrupt's and MipsInterrupt's spellings must match.
+  let Spellings = [GNU<"interrupt">];
+  let Subjects = SubjectList<[HasFunctionProto]>;
+  let ParseKind = "Interrupt";
+  let HasCustomParsing = 1;
+  let Documentation = [AnyX86InterruptDocs];
 }
 
 def X86ForceAlignArgPointer : InheritableAttr, TargetSpecificAttr<TargetX86> {
@@ -2125,4 +2237,10 @@ def OMPThreadPrivateDecl : InheritableAttr {
   let Spellings = [];
   let SemaHandler = 0;
   let Documentation = [Undocumented];
+}
+
+def InternalLinkage : InheritableAttr {
+  let Spellings = [GNU<"internal_linkage">, CXX11<"clang", "internal_linkage">];
+  let Subjects = SubjectList<[Var, Function, CXXRecord]>;
+  let Documentation = [InternalLinkageDocs];
 }

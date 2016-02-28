@@ -35,15 +35,13 @@ namespace __sanitizer {
 
 // --------------------- sanitizer_common.h
 uptr GetPageSize() {
-  SYSTEM_INFO si;
-  GetSystemInfo(&si);
-  return si.dwPageSize;
+  // FIXME: there is an API for getting the system page size (GetSystemInfo or
+  // GetNativeSystemInfo), but if we use it here we get test failures elsewhere.
+  return 1U << 14;
 }
 
 uptr GetMmapGranularity() {
-  SYSTEM_INFO si;
-  GetSystemInfo(&si);
-  return si.dwAllocationGranularity;
+  return 1U << 16;  // FIXME: is this configurable?
 }
 
 uptr GetMaxVirtualAddress() {
@@ -236,9 +234,9 @@ int CompareModulesBase(const void *pl, const void *pr) {
 #ifndef SANITIZER_GO
 void DumpProcessMap() {
   Report("Dumping process modules:\n");
-  ListOfModules modules;
-  modules.init();
-  uptr num_modules = modules.size();
+  InternalScopedBuffer<LoadedModule> modules(kMaxNumberOfModules);
+  uptr num_modules =
+      GetListOfModules(modules.data(), kMaxNumberOfModules, nullptr);
 
   InternalScopedBuffer<ModuleInfo> module_infos(num_modules);
   for (size_t i = 0; i < num_modules; ++i) {
@@ -372,8 +370,8 @@ static uptr GetPreferredBase(const char *modname) {
 }
 
 #ifndef SANITIZER_GO
-void ListOfModules::init() {
-  clear();
+uptr GetListOfModules(LoadedModule *modules, uptr max_modules,
+                      string_predicate_t filter) {
   HANDLE cur_process = GetCurrentProcess();
 
   // Query the list of modules.  Start by assuming there are no more than 256
@@ -395,8 +393,10 @@ void ListOfModules::init() {
   }
 
   // |num_modules| is the number of modules actually present,
-  size_t num_modules = bytes_required / sizeof(HMODULE);
-  for (size_t i = 0; i < num_modules; ++i) {
+  // |count| is the number of modules we return.
+  size_t nun_modules = bytes_required / sizeof(HMODULE),
+         count = 0;
+  for (size_t i = 0; i < nun_modules && count < max_modules; ++i) {
     HMODULE handle = hmodules[i];
     MODULEINFO mi;
     if (!GetModuleInformation(cur_process, handle, &mi, sizeof(mi)))
@@ -414,6 +414,9 @@ void ListOfModules::init() {
                               &module_name[0], kMaxPathLength, NULL, NULL);
     module_name[module_name_len] = '\0';
 
+    if (filter && !filter(module_name))
+      continue;
+
     uptr base_address = (uptr)mi.lpBaseOfDll;
     uptr end_address = (uptr)mi.lpBaseOfDll + mi.SizeOfImage;
 
@@ -424,13 +427,15 @@ void ListOfModules::init() {
     uptr preferred_base = GetPreferredBase(&module_name[0]);
     uptr adjusted_base = base_address - preferred_base;
 
-    LoadedModule cur_module;
-    cur_module.set(module_name, adjusted_base);
+    LoadedModule *cur_module = &modules[count];
+    cur_module->set(module_name, adjusted_base);
     // We add the whole module as one single address range.
-    cur_module.addAddressRange(base_address, end_address, /*executable*/ true);
-    modules_.push_back(cur_module);
+    cur_module->addAddressRange(base_address, end_address, /*executable*/ true);
+    count++;
   }
   UnmapOrDie(hmodules, modules_buffer_size);
+
+  return count;
 };
 
 // We can't use atexit() directly at __asan_init time as the CRT is not fully
@@ -695,7 +700,7 @@ void InstallDeadlySignalHandlers(SignalHandlerType handler) {
   // FIXME: Decide what to do on Windows.
 }
 
-bool IsHandledDeadlySignal(int signum) {
+bool IsDeadlySignal(int signum) {
   // FIXME: Decide what to do on Windows.
   return false;
 }
@@ -726,8 +731,8 @@ bool IsAccessibleMemoryRange(uptr beg, uptr size) {
 }
 
 SignalContext SignalContext::Create(void *siginfo, void *context) {
-  EXCEPTION_RECORD *exception_record = (EXCEPTION_RECORD *)siginfo;
-  CONTEXT *context_record = (CONTEXT *)context;
+  EXCEPTION_RECORD *exception_record = (EXCEPTION_RECORD*)siginfo;
+  CONTEXT *context_record = (CONTEXT*)context;
 
   uptr pc = (uptr)exception_record->ExceptionAddress;
 #ifdef _WIN64
@@ -739,19 +744,7 @@ SignalContext SignalContext::Create(void *siginfo, void *context) {
 #endif
   uptr access_addr = exception_record->ExceptionInformation[1];
 
-  // The contents of this array are documented at
-  // https://msdn.microsoft.com/en-us/library/windows/desktop/aa363082(v=vs.85).aspx
-  // The first element indicates read as 0, write as 1, or execute as 8.  The
-  // second element is the faulting address.
-  WriteFlag write_flag = SignalContext::UNKNOWN;
-  switch (exception_record->ExceptionInformation[0]) {
-  case 0: write_flag = SignalContext::READ; break;
-  case 1: write_flag = SignalContext::WRITE; break;
-  case 8: write_flag = SignalContext::UNKNOWN; break;
-  }
-  bool is_memory_access = write_flag != SignalContext::UNKNOWN;
-  return SignalContext(context, access_addr, pc, sp, bp, is_memory_access,
-                       write_flag);
+  return SignalContext(context, access_addr, pc, sp, bp);
 }
 
 uptr ReadBinaryName(/*out*/char *buf, uptr buf_len) {
@@ -781,22 +774,6 @@ char **GetArgv() {
   // FIXME: Actually implement this function.
   return 0;
 }
-
-pid_t StartSubprocess(const char *program, const char *const argv[],
-                      fd_t stdin_fd, fd_t stdout_fd, fd_t stderr_fd) {
-  // FIXME: implement on this platform
-  // Should be implemented based on
-  // SymbolizerProcess::StarAtSymbolizerSubprocess
-  // from lib/sanitizer_common/sanitizer_symbolizer_win.cc.
-  return -1;
-}
-
-bool IsProcessRunning(pid_t pid) {
-  // FIXME: implement on this platform.
-  return false;
-}
-
-int WaitForProcess(pid_t pid) { return -1; }
 
 }  // namespace __sanitizer
 

@@ -20,41 +20,10 @@
 static char global_string[] = "global";
 static size_t global_string_length = 6;
 
-const char kStackReadUnderflow[] =
-#if !GTEST_USES_SIMPLE_RE
-    ASAN_PCRE_DOTALL
-    "READ.*"
-#endif
-    "underflows this variable";
-const char kStackReadOverflow[] =
-#if !GTEST_USES_SIMPLE_RE
-    ASAN_PCRE_DOTALL
-    "READ.*"
-#endif
-    "overflows this variable";
-
-namespace {
-enum class OOBKind {
-  Heap,
-  Stack,
-  Global,
-};
-
-string LeftOOBReadMessage(OOBKind oob_kind, int oob_distance) {
-  return oob_kind == OOBKind::Stack ? kStackReadUnderflow
-                                    : ::LeftOOBReadMessage(oob_distance);
-}
-
-string RightOOBReadMessage(OOBKind oob_kind, int oob_distance) {
-  return oob_kind == OOBKind::Stack ? kStackReadOverflow
-                                    : ::RightOOBReadMessage(oob_distance);
-}
-}  // namespace
-
 // Input to a test is a zero-terminated string str with given length
 // Accesses to the bytes to the left and to the right of str
 // are presumed to produce OOB errors
-void StrLenOOBTestTemplate(char *str, size_t length, OOBKind oob_kind) {
+void StrLenOOBTestTemplate(char *str, size_t length, bool is_global) {
   // Normal strlen calls
   EXPECT_EQ(strlen(str), length);
   if (length > 0) {
@@ -62,18 +31,17 @@ void StrLenOOBTestTemplate(char *str, size_t length, OOBKind oob_kind) {
     EXPECT_EQ(0U, strlen(str + length));
   }
   // Arg of strlen is not malloced, OOB access
-  if (oob_kind != OOBKind::Global) {
+  if (!is_global) {
     // We don't insert RedZones to the left of global variables
-    EXPECT_DEATH(Ident(strlen(str - 1)), LeftOOBReadMessage(oob_kind, 1));
-    EXPECT_DEATH(Ident(strlen(str - 5)), LeftOOBReadMessage(oob_kind, 5));
+    EXPECT_DEATH(Ident(strlen(str - 1)), LeftOOBReadMessage(1));
+    EXPECT_DEATH(Ident(strlen(str - 5)), LeftOOBReadMessage(5));
   }
-  EXPECT_DEATH(Ident(strlen(str + length + 1)),
-               RightOOBReadMessage(oob_kind, 0));
+  EXPECT_DEATH(Ident(strlen(str + length + 1)), RightOOBReadMessage(0));
   // Overwrite terminator
   str[length] = 'a';
   // String is not zero-terminated, strlen will lead to OOB access
-  EXPECT_DEATH(Ident(strlen(str)), RightOOBReadMessage(oob_kind, 0));
-  EXPECT_DEATH(Ident(strlen(str + length)), RightOOBReadMessage(oob_kind, 0));
+  EXPECT_DEATH(Ident(strlen(str)), RightOOBReadMessage(0));
+  EXPECT_DEATH(Ident(strlen(str + length)), RightOOBReadMessage(0));
   // Restore terminator
   str[length] = 0;
 }
@@ -89,9 +57,11 @@ TEST(AddressSanitizer, StrLenOOBTest) {
   }
   heap_string[length] = 0;
   stack_string[length] = 0;
-  StrLenOOBTestTemplate(heap_string, length, OOBKind::Heap);
-  StrLenOOBTestTemplate(stack_string, length, OOBKind::Stack);
-  StrLenOOBTestTemplate(global_string, global_string_length, OOBKind::Global);
+  StrLenOOBTestTemplate(heap_string, length, false);
+  // TODO(samsonov): Fix expected messages in StrLenOOBTestTemplate to
+  //      make test for stack_string work. Or move it to output tests.
+  // StrLenOOBTestTemplate(stack_string, length, false);
+  StrLenOOBTestTemplate(global_string, global_string_length, true);
   free(heap_string);
 }
 
@@ -216,8 +186,23 @@ TEST(AddressSanitizer, StrNCpyOOBTest) {
 typedef char*(*PointerToStrChr1)(const char*, int);
 typedef char*(*PointerToStrChr2)(char*, int);
 
-template<typename StrChrFn>
-static void RunStrChrTestImpl(StrChrFn *StrChr) {
+UNUSED static void RunStrChrTest(PointerToStrChr1 StrChr) {
+  size_t size = Ident(100);
+  char *str = MallocAndMemsetString(size);
+  str[10] = 'q';
+  str[11] = '\0';
+  EXPECT_EQ(str, StrChr(str, 'z'));
+  EXPECT_EQ(str + 10, StrChr(str, 'q'));
+  EXPECT_EQ(NULL, StrChr(str, 'a'));
+  // StrChr argument points to not allocated memory.
+  EXPECT_DEATH(Ident(StrChr(str - 1, 'z')), LeftOOBReadMessage(1));
+  EXPECT_DEATH(Ident(StrChr(str + size, 'z')), RightOOBReadMessage(0));
+  // Overwrite the terminator and hit not allocated memory.
+  str[11] = 'z';
+  EXPECT_DEATH(Ident(StrChr(str, 'a')), RightOOBReadMessage(0));
+  free(str);
+}
+UNUSED static void RunStrChrTest(PointerToStrChr2 StrChr) {
   size_t size = Ident(100);
   char *str = MallocAndMemsetString(size);
   str[10] = 'q';
@@ -234,19 +219,11 @@ static void RunStrChrTestImpl(StrChrFn *StrChr) {
   free(str);
 }
 
-// Prefer to use the standard signature if both are available.
-UNUSED static void RunStrChrTest(PointerToStrChr1 StrChr, ...) {
-  RunStrChrTestImpl(StrChr);
-}
-UNUSED static void RunStrChrTest(PointerToStrChr2 StrChr, int) {
-  RunStrChrTestImpl(StrChr);
-}
-
 TEST(AddressSanitizer, StrChrAndIndexOOBTest) {
-  RunStrChrTest(&strchr, 0);
+  RunStrChrTest(&strchr);
 // No index() on Windows and on Android L.
 #if !defined(_WIN32) && !defined(__ANDROID__)
-  RunStrChrTest(&index, 0);
+  RunStrChrTest(&index);
 #endif
 }
 

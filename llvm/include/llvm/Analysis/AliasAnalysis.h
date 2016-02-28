@@ -421,6 +421,26 @@ public:
     return getModRefInfo(I, MemoryLocation(P, Size));
   }
 
+  /// getModRefInfo (for catchpads) - Return information about whether
+  /// a particular catchpad modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const CatchPadInst *I, const MemoryLocation &Loc);
+
+  /// getModRefInfo (for catchpads) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const CatchPadInst *I, const Value *P,
+                           uint64_t Size) {
+    return getModRefInfo(I, MemoryLocation(P, Size));
+  }
+
+  /// getModRefInfo (for catchrets) - Return information about whether
+  /// a particular catchret modifies or reads the specified memory location.
+  ModRefInfo getModRefInfo(const CatchReturnInst *I, const MemoryLocation &Loc);
+
+  /// getModRefInfo (for catchrets) - A convenience wrapper.
+  ModRefInfo getModRefInfo(const CatchReturnInst *I, const Value *P,
+                           uint64_t Size) {
+    return getModRefInfo(I, MemoryLocation(P, Size));
+  }
+
   /// Check whether or not an instruction may read or write memory (without
   /// regard to a specific location).
   ///
@@ -430,11 +450,11 @@ public:
   ModRefInfo getModRefInfo(const Instruction *I) {
     if (auto CS = ImmutableCallSite(I)) {
       auto MRB = getModRefBehavior(CS);
-      if (MRB & MRI_ModRef)
+      if ((MRB & MRI_ModRef) == MRI_ModRef)
         return MRI_ModRef;
-      else if (MRB & MRI_Ref)
+      if (MRB & MRI_Ref)
         return MRI_Ref;
-      else if (MRB & MRI_Mod)
+      if (MRB & MRI_Mod)
         return MRI_Mod;
       return MRI_NoModRef;
     }
@@ -461,6 +481,10 @@ public:
       return getModRefInfo((const AtomicRMWInst*)I, Loc);
     case Instruction::Call:   return getModRefInfo((const CallInst*)I,  Loc);
     case Instruction::Invoke: return getModRefInfo((const InvokeInst*)I,Loc);
+    case Instruction::CatchPad:
+      return getModRefInfo((const CatchPadInst *)I, Loc);
+    case Instruction::CatchRet:
+      return getModRefInfo((const CatchReturnInst *)I, Loc);
     default:
       return MRI_NoModRef;
     }
@@ -799,9 +823,7 @@ ModRefInfo AAResultBase<DerivedT>::getModRefInfo(ImmutableCallSite CS,
     bool DoesAlias = false;
     ModRefInfo AllArgsMask = MRI_NoModRef;
     if (AAResults::doesAccessArgPointees(MRB)) {
-      for (ImmutableCallSite::arg_iterator AI = CS.arg_begin(),
-                                           AE = CS.arg_end();
-           AI != AE; ++AI) {
+      for (auto AI = CS.arg_begin(), AE = CS.arg_end(); AI != AE; ++AI) {
         const Value *Arg = *AI;
         if (!Arg->getType()->isPointerTy())
           continue;
@@ -863,9 +885,7 @@ ModRefInfo AAResultBase<DerivedT>::getModRefInfo(ImmutableCallSite CS1,
   if (AAResults::onlyAccessesArgPointees(CS2B)) {
     ModRefInfo R = MRI_NoModRef;
     if (AAResults::doesAccessArgPointees(CS2B)) {
-      for (ImmutableCallSite::arg_iterator I = CS2.arg_begin(),
-                                           E = CS2.arg_end();
-           I != E; ++I) {
+      for (auto I = CS2.arg_begin(), E = CS2.arg_end(); I != E; ++I) {
         const Value *Arg = *I;
         if (!Arg->getType()->isPointerTy())
           continue;
@@ -897,9 +917,7 @@ ModRefInfo AAResultBase<DerivedT>::getModRefInfo(ImmutableCallSite CS1,
   if (AAResults::onlyAccessesArgPointees(CS1B)) {
     ModRefInfo R = MRI_NoModRef;
     if (AAResults::doesAccessArgPointees(CS1B)) {
-      for (ImmutableCallSite::arg_iterator I = CS1.arg_begin(),
-                                           E = CS1.arg_end();
-           I != E; ++I) {
+      for (auto I = CS1.arg_begin(), E = CS1.arg_end(); I != E; ++I) {
         const Value *Arg = *I;
         if (!Arg->getType()->isPointerTy())
           continue;
@@ -927,16 +945,14 @@ ModRefInfo AAResultBase<DerivedT>::getModRefInfo(ImmutableCallSite CS1,
   return Mask;
 }
 
-/// isNoAliasCall - Return true if this pointer is returned by a noalias
-/// function.
+/// Return true if this pointer is returned by a noalias function.
 bool isNoAliasCall(const Value *V);
 
-/// isNoAliasArgument - Return true if this is an argument with the noalias
-/// attribute.
+/// Return true if this is an argument with the noalias attribute.
 bool isNoAliasArgument(const Value *V);
 
-/// isIdentifiedObject - Return true if this pointer refers to a distinct and
-/// identifiable object.  This returns true for:
+/// Return true if this pointer refers to a distinct and identifiable object.
+/// This returns true for:
 ///    Global Variables and Functions (but not Global Aliases)
 ///    Allocas
 ///    ByVal and NoAlias Arguments
@@ -944,8 +960,8 @@ bool isNoAliasArgument(const Value *V);
 ///
 bool isIdentifiedObject(const Value *V);
 
-/// isIdentifiedFunctionLocal - Return true if V is umabigously identified
-/// at the function-level. Different IdentifiedFunctionLocals can't alias.
+/// Return true if V is umabigously identified at the function-level.
+/// Different IdentifiedFunctionLocals can't alias.
 /// Further, an IdentifiedFunctionLocal can not alias with any function
 /// arguments other than itself, which is not necessarily true for
 /// IdentifiedObjects.

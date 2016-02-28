@@ -1904,6 +1904,17 @@ bool AArch64FastISel::selectLoad(const Instruction *I) {
       cast<LoadInst>(I)->isAtomic())
     return false;
 
+  const Value *SV = I->getOperand(0);
+  if (const Argument *Arg = dyn_cast<Argument>(SV)) {
+    if (Arg->hasSwiftErrorAttr() && TLI.supportSwiftError())
+      return false;
+  }
+
+  if (const AllocaInst *Alloca = dyn_cast<AllocaInst>(SV)) {
+    if (Alloca->isSwiftError() && TLI.supportSwiftError())
+      return false;
+  }
+
   // See if we can handle this address.
   Address Addr;
   if (!computeAddress(I->getOperand(0), Addr, I->getType()))
@@ -2067,6 +2078,17 @@ bool AArch64FastISel::selectStore(const Instruction *I) {
   if (!isTypeSupported(Op0->getType(), VT, /*IsVectorAllowed=*/true) ||
       cast<StoreInst>(I)->isAtomic())
     return false;
+
+  const Value *PtrV = I->getOperand(1);
+  if (const Argument *Arg = dyn_cast<Argument>(PtrV)) {
+    if (Arg->hasSwiftErrorAttr() && TLI.supportSwiftError())
+      return false;
+  }
+
+  if (const AllocaInst *Alloca = dyn_cast<AllocaInst>(PtrV)) {
+    if (Alloca->isSwiftError() && TLI.supportSwiftError())
+      return false;
+  }
 
   // Get the value to be stored into a register. Use the zero register directly
   // when possible to avoid an unnecessary copy and a wasted register.
@@ -2275,7 +2297,6 @@ bool AArch64FastISel::selectBranch(const Instruction *I) {
   MachineBasicBlock *TBB = FuncInfo.MBBMap[BI->getSuccessor(0)];
   MachineBasicBlock *FBB = FuncInfo.MBBMap[BI->getSuccessor(1)];
 
-  AArch64CC::CondCode CC = AArch64CC::NE;
   if (const CmpInst *CI = dyn_cast<CmpInst>(BI->getCondition())) {
     if (CI->hasOneUse() && isValueAvailable(CI)) {
       // Try to optimize or fold the cmp.
@@ -2307,7 +2328,7 @@ bool AArch64FastISel::selectBranch(const Instruction *I) {
 
       // FCMP_UEQ and FCMP_ONE cannot be checked with a single branch
       // instruction.
-      CC = getCompareCC(Predicate);
+      AArch64CC::CondCode CC = getCompareCC(Predicate);
       AArch64CC::CondCode ExtraCC = AArch64CC::AL;
       switch (Predicate) {
       default:
@@ -2338,65 +2359,37 @@ bool AArch64FastISel::selectBranch(const Instruction *I) {
       finishCondBranch(BI->getParent(), TBB, FBB);
       return true;
     }
-  } else if (TruncInst *TI = dyn_cast<TruncInst>(BI->getCondition())) {
-    MVT SrcVT;
-    if (TI->hasOneUse() && isValueAvailable(TI) &&
-        isTypeSupported(TI->getOperand(0)->getType(), SrcVT)) {
-      unsigned CondReg = getRegForValue(TI->getOperand(0));
-      if (!CondReg)
-        return false;
-      bool CondIsKill = hasTrivialKill(TI->getOperand(0));
-
-      // Issue an extract_subreg to get the lower 32-bits.
-      if (SrcVT == MVT::i64) {
-        CondReg = fastEmitInst_extractsubreg(MVT::i32, CondReg, CondIsKill,
-                                             AArch64::sub_32);
-        CondIsKill = true;
-      }
-
-      unsigned ANDReg = emitAnd_ri(MVT::i32, CondReg, CondIsKill, 1);
-      assert(ANDReg && "Unexpected AND instruction emission failure.");
-      emitICmp_ri(MVT::i32, ANDReg, /*IsKill=*/true, 0);
-
-      if (FuncInfo.MBB->isLayoutSuccessor(TBB)) {
-        std::swap(TBB, FBB);
-        CC = AArch64CC::EQ;
-      }
-      BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::Bcc))
-          .addImm(CC)
-          .addMBB(TBB);
-
-      finishCondBranch(BI->getParent(), TBB, FBB);
-      return true;
-    }
   } else if (const auto *CI = dyn_cast<ConstantInt>(BI->getCondition())) {
     uint64_t Imm = CI->getZExtValue();
     MachineBasicBlock *Target = (Imm == 0) ? FBB : TBB;
     BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::B))
         .addMBB(Target);
 
-    // Obtain the branch weight and add the target to the successor list.
+    // Obtain the branch probability and add the target to the successor list.
     if (FuncInfo.BPI) {
-      uint32_t BranchWeight =
-          FuncInfo.BPI->getEdgeWeight(BI->getParent(), Target->getBasicBlock());
-      FuncInfo.MBB->addSuccessor(Target, BranchWeight);
+      auto BranchProbability = FuncInfo.BPI->getEdgeProbability(
+          BI->getParent(), Target->getBasicBlock());
+      FuncInfo.MBB->addSuccessor(Target, BranchProbability);
     } else
-      FuncInfo.MBB->addSuccessorWithoutWeight(Target);
+      FuncInfo.MBB->addSuccessorWithoutProb(Target);
     return true;
-  } else if (foldXALUIntrinsic(CC, I, BI->getCondition())) {
-    // Fake request the condition, otherwise the intrinsic might be completely
-    // optimized away.
-    unsigned CondReg = getRegForValue(BI->getCondition());
-    if (!CondReg)
-      return false;
+  } else {
+    AArch64CC::CondCode CC = AArch64CC::NE;
+    if (foldXALUIntrinsic(CC, I, BI->getCondition())) {
+      // Fake request the condition, otherwise the intrinsic might be completely
+      // optimized away.
+      unsigned CondReg = getRegForValue(BI->getCondition());
+      if (!CondReg)
+        return false;
 
-    // Emit the branch.
-    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::Bcc))
-      .addImm(CC)
-      .addMBB(TBB);
+      // Emit the branch.
+      BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::Bcc))
+        .addImm(CC)
+        .addMBB(TBB);
 
-    finishCondBranch(BI->getParent(), TBB, FBB);
-    return true;
+      finishCondBranch(BI->getParent(), TBB, FBB);
+      return true;
+    }
   }
 
   unsigned CondReg = getRegForValue(BI->getCondition());
@@ -2404,26 +2397,19 @@ bool AArch64FastISel::selectBranch(const Instruction *I) {
     return false;
   bool CondRegIsKill = hasTrivialKill(BI->getCondition());
 
-  // We've been divorced from our compare!  Our block was split, and
-  // now our compare lives in a predecessor block.  We musn't
-  // re-compare here, as the children of the compare aren't guaranteed
-  // live across the block boundary (we *could* check for this).
-  // Regardless, the compare has been done in the predecessor block,
-  // and it left a value for us in a virtual register.  Ergo, we test
-  // the one-bit value left in the virtual register.
-  //
-  // FIXME: Optimize this with TBZW/TBZNW.
-  unsigned ANDReg = emitAnd_ri(MVT::i32, CondReg, CondRegIsKill, 1);
-  assert(ANDReg && "Unexpected AND instruction emission failure.");
-  emitICmp_ri(MVT::i32, ANDReg, /*IsKill=*/true, 0);
-
+  // i1 conditions come as i32 values, test the lowest bit with tb(n)z.
+  unsigned Opcode = AArch64::TBNZW;
   if (FuncInfo.MBB->isLayoutSuccessor(TBB)) {
     std::swap(TBB, FBB);
-    CC = AArch64CC::EQ;
+    Opcode = AArch64::TBZW;
   }
 
-  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, TII.get(AArch64::Bcc))
-      .addImm(CC)
+  const MCInstrDesc &II = TII.get(Opcode);
+  unsigned ConstrainedCondReg
+    = constrainOperandRegClass(II, CondReg, II.getNumDefs());
+  BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc, II)
+      .addReg(ConstrainedCondReg, getKillRegState(CondRegIsKill))
+      .addImm(0)
       .addMBB(TBB);
 
   finishCondBranch(BI->getParent(), TBB, FBB);
@@ -2450,6 +2436,10 @@ bool AArch64FastISel::selectIndirectBr(const Instruction *I) {
 
 bool AArch64FastISel::selectCmp(const Instruction *I) {
   const CmpInst *CI = cast<CmpInst>(I);
+
+  // Vectors of i1 are weird: bail out.
+  if (CI->getType()->isVectorTy())
+    return false;
 
   // Try to optimize or fold the cmp.
   CmpInst::Predicate Predicate = optimizeCmpPredicate(CI);
@@ -2845,6 +2835,8 @@ bool AArch64FastISel::fastLowerArguments() {
     if (F->getAttributes().hasAttribute(Idx, Attribute::ByVal) ||
         F->getAttributes().hasAttribute(Idx, Attribute::InReg) ||
         F->getAttributes().hasAttribute(Idx, Attribute::StructRet) ||
+        F->getAttributes().hasAttribute(Idx, Attribute::SwiftSelf) ||
+        F->getAttributes().hasAttribute(Idx, Attribute::SwiftError) ||
         F->getAttributes().hasAttribute(Idx, Attribute::Nest))
       return false;
 
@@ -3096,7 +3088,8 @@ bool AArch64FastISel::fastLowerCall(CallLoweringInfo &CLI) {
     return false;
 
   for (auto Flag : CLI.OutFlags)
-    if (Flag.isInReg() || Flag.isSRet() || Flag.isNest() || Flag.isByVal())
+    if (Flag.isInReg() || Flag.isSRet() || Flag.isNest() || Flag.isByVal() ||
+        Flag.isSwiftSelf() || Flag.isSwiftError())
       return false;
 
   // Set up the argument vectors.
@@ -3676,6 +3669,13 @@ bool AArch64FastISel::selectRet(const Instruction *I) {
     return false;
 
   if (F.isVarArg())
+    return false;
+
+  if (F.getAttributes().hasAttrSomewhere(Attribute::SwiftError) &&
+      TLI.supportSwiftError())
+    return false;
+
+  if (TLI.supportSplitCSR(FuncInfo.MF))
     return false;
 
   // Build a list of return value registers.
