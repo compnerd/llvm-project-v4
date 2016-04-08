@@ -71,16 +71,7 @@ static cl::opt<bool> DetectParallel("polly-ast-detect-parallel",
                                     cl::init(false), cl::ZeroOrMore,
                                     cl::cat(PollyCategory));
 
-/// @brief Free an IslAstUserPayload object pointed to by @p Ptr
-static void freeIslAstUserPayload(void *Ptr) {
-  delete ((IslAstInfo::IslAstUserPayload *)Ptr);
-}
-
-IslAstInfo::IslAstUserPayload::~IslAstUserPayload() {
-  isl_ast_build_free(Build);
-  isl_pw_aff_free(MinimalDependenceDistance);
-}
-
+namespace polly {
 /// @brief Temporary information used when building the ast.
 struct AstBuildUserInfo {
   /// @brief Construct and initialize the helper struct for AST creation.
@@ -96,6 +87,17 @@ struct AstBuildUserInfo {
   /// @brief The last iterator id created for the current SCoP.
   isl_id *LastForNodeId;
 };
+}
+
+/// @brief Free an IslAstUserPayload object pointed to by @p Ptr
+static void freeIslAstUserPayload(void *Ptr) {
+  delete ((IslAstInfo::IslAstUserPayload *)Ptr);
+}
+
+IslAstInfo::IslAstUserPayload::~IslAstUserPayload() {
+  isl_ast_build_free(Build);
+  isl_pw_aff_free(MinimalDependenceDistance);
+}
 
 /// @brief Print a string @p str in a single line using @p Printer.
 static isl_printer *printLine(__isl_take isl_printer *Printer,
@@ -336,8 +338,15 @@ IslAst::buildRunCondition(Scop *S, __isl_keep isl_ast_build *Build) {
   // The conditions that need to be checked at run-time for this scop are
   // available as an isl_set in the runtime check context from which we can
   // directly derive a run-time condition.
-  RunCondition =
-      isl_ast_build_expr_from_set(Build, S->getRuntimeCheckContext());
+  auto *PosCond = isl_ast_build_expr_from_set(Build, S->getAssumedContext());
+  if (S->hasTrivialInvalidContext()) {
+    RunCondition = PosCond;
+  } else {
+    auto *ZeroV = isl_val_zero(isl_ast_build_get_ctx(Build));
+    auto *NegCond = isl_ast_build_expr_from_set(Build, S->getInvalidContext());
+    auto *NotNegCond = isl_ast_expr_eq(isl_ast_expr_from_val(ZeroV), NegCond);
+    RunCondition = isl_ast_expr_and(PosCond, NotNegCond);
+  }
 
   // Create the alias checks from the minimal/maximal accesses in each alias
   // group which consists of read only and non read only (read write) accesses.
@@ -459,7 +468,8 @@ bool IslAstInfo::runOnScop(Scop &Scop) {
 
   S = &Scop;
 
-  const Dependences &D = getAnalysis<DependenceInfo>().getDependences();
+  const Dependences &D =
+      getAnalysis<DependenceInfo>().getDependences(Dependences::AL_Statement);
 
   Ast = IslAst::create(&Scop, D);
 
