@@ -238,7 +238,7 @@ void BlockGenerator::generateScalarStore(ScopStmt &Stmt, StoreInst *Store,
 bool BlockGenerator::canSyntheziseInStmt(ScopStmt &Stmt, Instruction *Inst) {
   Loop *L = getLoopForStmt(Stmt);
   return (Stmt.isBlockStmt() || !Stmt.getRegion()->contains(L)) &&
-         canSynthesize(Inst, &LI, &SE, &Stmt.getParent()->getRegion());
+         canSynthesize(Inst, &LI, &SE, &Stmt.getParent()->getRegion(), L);
 }
 
 void BlockGenerator::copyInstruction(ScopStmt &Stmt, Instruction *Inst,
@@ -601,6 +601,13 @@ void BlockGenerator::createExitPHINodeMerges(Scop &S) {
     auto &SAI = Pair.second;
     auto *Val = SAI->getBasePtr();
 
+    // Only Value-like scalars need a merge PHI. Exit block PHIs receive either
+    // the original PHI's value or the reloaded incoming values from the
+    // generated code. An llvm::Value is merged between the original code's
+    // value or the generated one.
+    if (!SAI->isValueKind() && !SAI->isExitPHIKind())
+      continue;
+
     PHINode *PHI = dyn_cast<PHINode>(Val);
     if (!PHI)
       continue;
@@ -613,6 +620,9 @@ void BlockGenerator::createExitPHINodeMerges(Scop &S) {
     Value *Reload = Builder.CreateLoad(ScalarAddr, Name + ".ph.final_reload");
     Reload = Builder.CreateBitOrPointerCast(Reload, PHI->getType());
     Value *OriginalValue = PHI->getIncomingValueForBlock(MergeBB);
+    assert((!isa<Instruction>(OriginalValue) ||
+            cast<Instruction>(OriginalValue)->getParent() != MergeBB) &&
+           "Original value must no be one we just generated.");
     auto *MergePHI = PHINode::Create(PHI->getType(), 2, Name + ".ph.merge");
     MergePHI->insertBefore(&*MergeBB->getFirstInsertionPt());
     MergePHI->addIncoming(Reload, OptExitBB);
@@ -1355,11 +1365,14 @@ void RegionGenerator::addOperandToPHI(ScopStmt &Stmt, const PHINode *PHI,
 
     Value *Op = PHI->getIncomingValueForBlock(IncomingBB);
 
-    BasicBlock *OldBlock = Builder.GetInsertBlock();
-    auto OldIP = Builder.GetInsertPoint();
-    Builder.SetInsertPoint(BBCopy->getTerminator());
+    // If the current insert block is different from the PHIs incoming block
+    // change it, otherwise do not.
+    auto IP = Builder.GetInsertPoint();
+    if (IP->getParent() != BBCopy)
+      Builder.SetInsertPoint(BBCopy->getTerminator());
     OpCopy = getNewValue(Stmt, Op, BBCopyMap, LTS, getLoopForStmt(Stmt));
-    Builder.SetInsertPoint(OldBlock, OldIP);
+    if (IP->getParent() != BBCopy)
+      Builder.SetInsertPoint(&*IP);
   } else {
 
     if (PHICopy->getBasicBlockIndex(BBCopy) >= 0)

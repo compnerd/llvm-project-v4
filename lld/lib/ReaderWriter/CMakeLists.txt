@@ -6,9 +6,7 @@ if (MSVC)
 endif()
 
 add_lld_library(lldReaderWriter
-  CoreLinkingContext.cpp
   FileArchive.cpp
-  LinkerScript.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${LLD_INCLUDE_DIR}/lld/ReaderWriter

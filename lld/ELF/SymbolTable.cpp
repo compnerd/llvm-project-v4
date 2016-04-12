@@ -19,11 +19,7 @@
 #include "Error.h"
 #include "Symbols.h"
 #include "llvm/Bitcode/ReaderWriter.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/Linker/Linker.h"
 #include "llvm/Support/StringSaver.h"
-#include "llvm/Support/TargetRegistry.h"
-#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -82,9 +78,10 @@ void SymbolTable<ELFT>::addFile(std::unique_ptr<InputFile> File) {
   // LLVM bitcode file.
   if (auto *F = dyn_cast<BitcodeFile>(FileP)) {
     BitcodeFiles.emplace_back(cast<BitcodeFile>(File.release()));
-    F->parse();
+    F->parse(ComdatGroups);
     for (SymbolBody *B : F->getSymbols())
-      resolve(B);
+      if (B)
+        resolve(B);
     return;
   }
 
@@ -92,72 +89,34 @@ void SymbolTable<ELFT>::addFile(std::unique_ptr<InputFile> File) {
   auto *F = cast<ObjectFile<ELFT>>(FileP);
   ObjectFiles.emplace_back(cast<ObjectFile<ELFT>>(File.release()));
   F->parse(ComdatGroups);
-  for (SymbolBody *B : F->getSymbols())
+  for (SymbolBody *B : F->getNonLocalSymbols())
     resolve(B);
-}
-
-// Codegen the module M and returns the resulting InputFile.
-template <class ELFT>
-std::unique_ptr<InputFile> SymbolTable<ELFT>::codegen(Module &M) {
-  StringRef TripleStr = M.getTargetTriple();
-  Triple TheTriple(TripleStr);
-
-  // FIXME: Should we have a default triple? The gold plugin uses
-  // sys::getDefaultTargetTriple(), but that is probably wrong given that this
-  // might be a cross linker.
-
-  std::string ErrMsg;
-  const Target *TheTarget = TargetRegistry::lookupTarget(TripleStr, ErrMsg);
-  if (!TheTarget)
-    fatal("Target not found: " + ErrMsg);
-
-  TargetOptions Options;
-  std::unique_ptr<TargetMachine> TM(
-      TheTarget->createTargetMachine(TripleStr, "", "", Options));
-
-  raw_svector_ostream OS(OwningLTOData);
-  legacy::PassManager CodeGenPasses;
-  if (TM->addPassesToEmitFile(CodeGenPasses, OS,
-                              TargetMachine::CGFT_ObjectFile))
-    fatal("Failed to setup codegen");
-  CodeGenPasses.run(M);
-  LtoBuffer = MemoryBuffer::getMemBuffer(OwningLTOData, "", false);
-  return createObjectFile(*LtoBuffer);
-}
-
-// Merge all the bitcode files we have seen, codegen the result and return
-// the resulting ObjectFile.
-template <class ELFT>
-ObjectFile<ELFT> *SymbolTable<ELFT>::createCombinedLtoObject() {
-  LLVMContext Context;
-  Module Combined("ld-temp.o", Context);
-  Linker L(Combined);
-  for (const std::unique_ptr<BitcodeFile> &F : BitcodeFiles) {
-    std::unique_ptr<MemoryBuffer> Buffer =
-        MemoryBuffer::getMemBuffer(F->MB, false);
-    ErrorOr<std::unique_ptr<Module>> MOrErr =
-        getLazyBitcodeModule(std::move(Buffer), Context,
-                             /*ShouldLazyLoadMetadata*/ true);
-    fatal(MOrErr);
-    std::unique_ptr<Module> &M = *MOrErr;
-    L.linkInModule(std::move(M));
-  }
-  std::unique_ptr<InputFile> F = codegen(Combined);
-  ObjectFiles.emplace_back(cast<ObjectFile<ELFT>>(F.release()));
-  return &*ObjectFiles.back();
 }
 
 template <class ELFT> void SymbolTable<ELFT>::addCombinedLtoObject() {
   if (BitcodeFiles.empty())
     return;
-  ObjectFile<ELFT> *Obj = createCombinedLtoObject();
-  // FIXME: We probably have to ignore comdats here.
-  Obj->parse(ComdatGroups);
-  for (SymbolBody *Body : Obj->getSymbols()) {
+
+  // Compile bitcode files.
+  Lto.reset(new BitcodeCompiler);
+  for (const std::unique_ptr<BitcodeFile> &F : BitcodeFiles)
+    Lto->add(*F);
+  std::unique_ptr<InputFile> IF = Lto->compile();
+  ObjectFile<ELFT> *Obj = cast<ObjectFile<ELFT>>(IF.release());
+
+  // Replace bitcode symbols.
+  llvm::DenseSet<StringRef> DummyGroups;
+  Obj->parse(DummyGroups);
+  for (SymbolBody *Body : Obj->getNonLocalSymbols()) {
     Symbol *Sym = insert(Body);
-    assert(isa<DefinedBitcode>(Sym->Body));
+    Sym->Body->setUsedInRegularObj();
+    if (!Sym->Body->isUndefined() && Body->isUndefined())
+      continue;
+    if (Sym->Body->MustBeInDynSym)
+      Body->MustBeInDynSym = true;
     Sym->Body = Body;
   }
+  ObjectFiles.emplace_back(Obj);
 }
 
 // Add an undefined symbol.
@@ -178,28 +137,31 @@ SymbolBody *SymbolTable<ELFT>::addUndefinedOpt(StringRef Name) {
 }
 
 template <class ELFT>
-SymbolBody *SymbolTable<ELFT>::addAbsolute(StringRef Name, Elf_Sym &ESym) {
+DefinedRegular<ELFT> *SymbolTable<ELFT>::addAbsolute(StringRef Name,
+                                                     uint8_t Visibility) {
   // Pass nullptr because absolute symbols have no corresponding input sections.
-  auto *Sym = new (Alloc) DefinedRegular<ELFT>(Name, ESym, nullptr);
+  auto *Sym = new (Alloc) DefinedRegular<ELFT>(Name, STB_GLOBAL, Visibility);
   resolve(Sym);
   return Sym;
 }
 
 template <class ELFT>
 SymbolBody *SymbolTable<ELFT>::addSynthetic(StringRef Name,
-                                            OutputSectionBase<ELFT> &Section,
-                                            uintX_t Value) {
-  auto *Sym = new (Alloc) DefinedSynthetic<ELFT>(Name, Value, Section);
+                                            OutputSectionBase<ELFT> &Sec,
+                                            uintX_t Val, uint8_t Visibility) {
+  auto *Sym = new (Alloc) DefinedSynthetic<ELFT>(Name, Val, Sec, Visibility);
   resolve(Sym);
   return Sym;
 }
 
 // Add Name as an "ignored" symbol. An ignored symbol is a regular
-// linker-synthesized defined symbol, but it is not recorded to the output
-// file's symbol table. Such symbols are useful for some linker-defined symbols.
+// linker-synthesized defined symbol, but is only defined if needed.
 template <class ELFT>
-SymbolBody *SymbolTable<ELFT>::addIgnored(StringRef Name) {
-  return addAbsolute(Name, ElfSym<ELFT>::Ignored);
+DefinedRegular<ELFT> *SymbolTable<ELFT>::addIgnored(StringRef Name,
+                                                    uint8_t Visibility) {
+  if (!find(Name))
+    return nullptr;
+  return addAbsolute(Name, Visibility);
 }
 
 // Rename SYM as __wrap_SYM. The original symbol is preserved as __real_SYM.
@@ -259,25 +221,27 @@ template <class ELFT> void SymbolTable<ELFT>::resolve(SymbolBody *New) {
 
   SymbolBody *Existing = Sym->Body;
 
-  if (Lazy *L = dyn_cast<Lazy>(Existing)) {
+  if (auto *L = dyn_cast<Lazy>(Existing)) {
     if (auto *Undef = dyn_cast<Undefined>(New)) {
       addMemberFile(Undef, L);
       return;
     }
     // Found a definition for something also in an archive.
     // Ignore the archive definition.
+    if (L->isUsedInRegularObj())
+      New->setUsedInRegularObj();
     Sym->Body = New;
     return;
   }
 
-  if (New->IsTls != Existing->IsTls) {
+  if (New->isTls() != Existing->isTls()) {
     error("TLS attribute mismatch for symbol: " + conflictMsg(Existing, New));
     return;
   }
 
   // compare() returns -1, 0, or 1 if the lhs symbol is less preferable,
   // equivalent (conflicting), or more preferable, respectively.
-  int Comp = Existing->compare<ELFT>(New);
+  int Comp = Existing->compare(New);
   if (Comp == 0) {
     std::string S = "duplicate symbol: " + conflictMsg(Existing, New);
     if (Config->AllowMultipleDefinition)
@@ -319,6 +283,8 @@ template <class ELFT> void SymbolTable<ELFT>::addLazy(Lazy *L) {
 
 template <class ELFT>
 void SymbolTable<ELFT>::addMemberFile(Undefined *Undef, Lazy *L) {
+  if (Undef->isUsedInRegularObj())
+    L->setUsedInRegularObj();
   // Weak undefined symbols should not fetch members from archives.
   // If we were to keep old symbol we would not know that an archive member was
   // available if a strong undefined symbol shows up afterwards in the link.
@@ -328,10 +294,10 @@ void SymbolTable<ELFT>::addMemberFile(Undefined *Undef, Lazy *L) {
   // symbols and copy information to reduce how many special cases are needed.
   if (Undef->isWeak()) {
     L->setUsedInRegularObj();
-    L->setWeak();
+    L->Binding = Undef->Binding;
+    L->Type = Undef->Type;
 
     // FIXME: Do we need to copy more?
-    L->IsTls = Undef->IsTls;
     return;
   }
 
