@@ -244,9 +244,12 @@ ProcessLaunchInfo::Clear ()
 }
 
 void
-ProcessLaunchInfo::SetMonitorProcessCallback(const Host::MonitorChildProcessCallback &callback, bool monitor_signals)
+ProcessLaunchInfo::SetMonitorProcessCallback (Host::MonitorChildProcessCallback callback,
+                           void *baton,
+                           bool monitor_signals)
 {
     m_monitor_callback = callback;
+    m_monitor_callback_baton = baton;
     m_monitor_signals = monitor_signals;
 }
 
@@ -256,6 +259,7 @@ ProcessLaunchInfo::MonitorProcess () const
     if (m_monitor_callback && ProcessIDIsValid())
     {
         Host::StartMonitoringChildProcess (m_monitor_callback,
+                                           m_monitor_callback_baton,
                                            GetProcessID(),
                                            m_monitor_signals);
         return true;

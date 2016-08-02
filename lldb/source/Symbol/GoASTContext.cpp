@@ -322,7 +322,7 @@ GoASTContext::GetPluginVersion()
 }
 
 lldb::TypeSystemSP
-GoASTContext::CreateInstance (lldb::LanguageType language, Module *module, Target *target)
+GoASTContext::CreateInstance (lldb::LanguageType language, Module *module, Target *target, const char *compiler_options)
 {
     if (language == eLanguageTypeGo)
     {
@@ -569,7 +569,9 @@ GoASTContext::IsPolymorphicClass(lldb::opaque_compiler_type_t type)
 bool
 GoASTContext::IsPossibleDynamicType(lldb::opaque_compiler_type_t type,
                                     CompilerType *target_type, // Can pass NULL
-                                    bool check_cplusplus, bool check_objc)
+                                    bool check_cplusplus,
+                                    bool check_objc,
+                                    bool check_swift)
 {
     if (target_type)
         target_type->Clear();
@@ -1387,9 +1389,16 @@ GoASTContext::DumpValue(lldb::opaque_compiler_type_t type, ExecutionContext *exe
 }
 
 bool
-GoASTContext::DumpTypeValue(lldb::opaque_compiler_type_t type, Stream *s, lldb::Format format, const DataExtractor &data,
-                            lldb::offset_t byte_offset, size_t byte_size, uint32_t bitfield_bit_size,
-                            uint32_t bitfield_bit_offset, ExecutionContextScope *exe_scope)
+GoASTContext::DumpTypeValue(lldb::opaque_compiler_type_t type,
+                            Stream *s,
+                            lldb::Format format,
+                            const DataExtractor &data,
+                            lldb::offset_t byte_offset,
+                            size_t byte_size,
+                            uint32_t bitfield_bit_size,
+                            uint32_t bitfield_bit_offset,
+                            ExecutionContextScope *exe_scope,
+                            bool is_base_class)
 {
     if (!type)
         return false;
@@ -1415,7 +1424,8 @@ GoASTContext::DumpTypeValue(lldb::opaque_compiler_type_t type, Stream *s, lldb::
                 typedef_byte_size,   // Size of this type in bytes
                 bitfield_bit_size,   // Size in bits of a bitfield value, if zero don't treat as a bitfield
                 bitfield_bit_offset, // Offset in bits of a bitfield value if bitfield_bit_size != 0
-                exe_scope);
+                exe_scope,
+                is_base_class);
         }
 
         uint32_t item_count = 1;

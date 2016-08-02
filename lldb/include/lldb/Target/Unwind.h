@@ -12,11 +12,10 @@
 
 // C Includes
 // C++ Includes
-#include <mutex>
-
 // Other libraries and framework includes
 // Project includes
 #include "lldb/lldb-private.h"
+#include "lldb/Host/Mutex.h"
 
 namespace lldb_private {
 
@@ -26,7 +25,11 @@ protected:
     //------------------------------------------------------------------
     // Classes that inherit from Unwind can see and modify these
     //------------------------------------------------------------------
-    Unwind(Thread &thread) : m_thread(thread), m_unwind_mutex() {}
+    Unwind(Thread &thread) :
+        m_thread (thread),
+        m_unwind_mutex(Mutex::eMutexTypeRecursive)
+    {
+    }
 
 public:
     virtual
@@ -37,17 +40,18 @@ public:
     void
     Clear()
     {
-        std::lock_guard<std::recursive_mutex> guard(m_unwind_mutex);
+        Mutex::Locker locker(m_unwind_mutex);
         DoClear();
+    
     }
 
     uint32_t
     GetFrameCount()
     {
-        std::lock_guard<std::recursive_mutex> guard(m_unwind_mutex);
+        Mutex::Locker locker(m_unwind_mutex);
         return DoGetFrameCount();
     }
-
+    
     uint32_t
     GetFramesUpTo (uint32_t end_idx)
     {
@@ -66,19 +70,21 @@ public:
     }
 
     bool
-    GetFrameInfoAtIndex(uint32_t frame_idx, lldb::addr_t &cfa, lldb::addr_t &pc)
+    GetFrameInfoAtIndex (uint32_t frame_idx,
+                         lldb::addr_t& cfa, 
+                         lldb::addr_t& pc)
     {
-        std::lock_guard<std::recursive_mutex> guard(m_unwind_mutex);
-        return DoGetFrameInfoAtIndex(frame_idx, cfa, pc);
+        Mutex::Locker locker(m_unwind_mutex);
+        return DoGetFrameInfoAtIndex (frame_idx, cfa, pc);
     }
-
+    
     lldb::RegisterContextSP
-    CreateRegisterContextForFrame(StackFrame *frame)
+    CreateRegisterContextForFrame (StackFrame *frame)
     {
-        std::lock_guard<std::recursive_mutex> guard(m_unwind_mutex);
-        return DoCreateRegisterContextForFrame(frame);
+        Mutex::Locker locker(m_unwind_mutex);
+        return DoCreateRegisterContextForFrame (frame);
     }
-
+    
     Thread &
     GetThread()
     {
@@ -104,8 +110,7 @@ protected:
     DoCreateRegisterContextForFrame (StackFrame *frame) = 0;
 
     Thread &m_thread;
-    std::recursive_mutex m_unwind_mutex;
-
+    Mutex  m_unwind_mutex;
 private:
     DISALLOW_COPY_AND_ASSIGN (Unwind);
 };

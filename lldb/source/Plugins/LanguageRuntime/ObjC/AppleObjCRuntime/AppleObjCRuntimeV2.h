@@ -14,7 +14,6 @@
 // C++ Includes
 #include <map>
 #include <memory>
-#include <mutex>
 
 // Other libraries and framework includes
 // Project includes
@@ -65,7 +64,15 @@ public:
                              TypeAndOrName &class_type_or_name,
                              Address &address,
                              Value::ValueType &value_type) override;
-    
+
+    bool
+    GetDynamicTypeAndAddress(ValueObject &in_value,
+                             lldb::DynamicValueType use_dynamic,
+                             TypeAndOrName &class_type_or_name,
+                             Address &address,
+                             Value::ValueType &value_type,
+                             bool allow_swift) override;
+
     UtilityFunction *
     CreateObjectChecker(const char *) override;
 
@@ -107,7 +114,10 @@ public:
     
     EncodingToTypeSP
     GetEncodingToType() override;
-    
+
+    bool
+    IsTaggedPointer(lldb::addr_t ptr);
+
     TaggedPointerVendor*
     GetTaggedPointerVendor() override
     {
@@ -318,22 +328,20 @@ private:
             return {true, found};
         }
     };
-    
+
     AppleObjCRuntimeV2 (Process *process,
                         const lldb::ModuleSP &objc_module_sp);
-    
+
     ObjCISA
     GetPointerISA (ObjCISA isa);
-    
-    bool
-    IsTaggedPointer(lldb::addr_t ptr);
-    
+
     lldb::addr_t
     GetISAHashTablePointer ();
 
     bool
-    UpdateISAToDescriptorMapFromMemory (RemoteNXMapTable &hash_table);
+    UpdateISAToDescriptorMapFromMemory (RemoteNXMapTable &hash_table, uint32_t &discovered_classes_count);
     
+
     DescriptorMapUpdateResult
     UpdateISAToDescriptorMapDynamic(RemoteNXMapTable &hash_table);
     
@@ -345,20 +353,21 @@ private:
     UpdateISAToDescriptorMapSharedCache ();
     
     void
-    WarnIfNoClassesCached ();
+    WarnIfNoClassesFound (bool globally);
 
     lldb::addr_t
     GetSharedCacheReadOnlyAddress();
     
     friend class ClassDescriptorV2;
+    friend class SwiftLanguageRuntime;
 
     std::unique_ptr<UtilityFunction>        m_get_class_info_code;
     lldb::addr_t                            m_get_class_info_args;
-    std::mutex m_get_class_info_args_mutex;
+    Mutex                                   m_get_class_info_args_mutex;
 
     std::unique_ptr<UtilityFunction>        m_get_shared_cache_class_info_code;
     lldb::addr_t                            m_get_shared_cache_class_info_args;
-    std::mutex m_get_shared_cache_class_info_args_mutex;
+    Mutex                                   m_get_shared_cache_class_info_args_mutex;
 
     std::unique_ptr<DeclVendor>             m_decl_vendor_ap;
     lldb::addr_t                            m_isa_hash_table_ptr;
@@ -368,6 +377,10 @@ private:
     std::unique_ptr<NonPointerISACache>     m_non_pointer_isa_cache_ap;
     std::unique_ptr<TaggedPointerVendor>    m_tagged_pointer_vendor_ap;
     EncodingToTypeSP                        m_encoding_to_type_sp;
+    struct {
+        bool in_shared_cache : 1;
+        bool globally : 1;
+    }                                       m_warn_if_no_classes_cached;
     bool                                    m_noclasses_warning_emitted;
 };
     

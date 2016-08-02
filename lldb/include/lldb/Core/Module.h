@@ -13,7 +13,6 @@
 // C Includes
 // C++ Includes
 #include <atomic>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,7 +22,10 @@
 #include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/UUID.h"
 #include "lldb/Host/FileSpec.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Host/TimeValue.h"
+#include "lldb/Symbol/ClangASTContext.h"
+#include "lldb/Symbol/SwiftASTContext.h"
 #include "lldb/Symbol/SymbolContextScope.h"
 #include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Target/PathMappingList.h"
@@ -68,7 +70,7 @@ public:
     static Module *
     GetAllocatedModuleAtIndex (size_t idx);
 
-    static std::recursive_mutex &
+    static Mutex *
     GetAllocationModuleCollectionMutex();
 
     //------------------------------------------------------------------
@@ -250,7 +252,7 @@ public:
                                      SymbolContextList &sc_list);
 
     //------------------------------------------------------------------
-    /// Find a function symbols in the object file's symbol table.
+    /// Find a funciton symbols in the object file's symbol table.
     ///
     /// @param[in] name
     ///     The name of the symbol that we are looking for.
@@ -950,9 +952,27 @@ public:
     bool
     GetIsDynamicLinkEditor ();
 
+    // This function must be called immediately after construction of the Module
+    // in the cases where the AST is to be shared.
+    void
+    SetTypeSystemForLanguage (lldb::LanguageType language, const lldb::TypeSystemSP &type_system_sp);
+
+#ifdef __clang_analyzer__
+    // See GetScratchTypeSystemForLanguage() in Target.h for what this block does
+    TypeSystem *
+    GetTypeSystemForLanguage (lldb::LanguageType language) __attribute__ ((always_inline))
+    {
+        TypeSystem *ret = GetTypeSystemForLanguageImpl(language);
+        return ret ? ret : nullptr;
+    }
+    
+    TypeSystem *
+    GetTypeSystemForLanguageImpl (lldb::LanguageType language);
+#else
     TypeSystem *
     GetTypeSystemForLanguage (lldb::LanguageType language);
-
+#endif
+    
     // Special error functions that can do printf style formatting that will prepend the message with
     // something appropriate for this module (like the architecture, path and object name (if any)). 
     // This centralizes code so that everyone doesn't need to format their error and log messages on
@@ -986,8 +1006,8 @@ public:
     // SymbolVendor, SymbolFile and ObjectFile member objects should
     // lock the module mutex to avoid deadlocks.
     //------------------------------------------------------------------
-    std::recursive_mutex &
-    GetMutex() const
+    Mutex &
+    GetMutex () const
     {
         return m_mutex;
     }
@@ -1048,6 +1068,15 @@ public:
     bool
     RemapSourceFile (const char *path, std::string &new_path) const;
     
+    void
+    ClearModuleDependentCaches ();
+
+    void
+    SetTypeSystemMap (const TypeSystemMap &type_system_map)
+    {
+        m_type_system_map = type_system_map;
+    }
+
     //----------------------------------------------------------------------
     /// @class LookupInfo Module.h "lldb/Core/Module.h"
     /// @brief A class that encapsulates name lookup information.
@@ -1134,10 +1163,13 @@ public:
     };
 
 protected:
+    SwiftASTContext *
+    GetSwiftASTContextNoCreate ();
+
     //------------------------------------------------------------------
     // Member Variables
     //------------------------------------------------------------------
-    mutable std::recursive_mutex m_mutex;       ///< A mutex to keep this object happy in multi-threaded environments.
+    mutable Mutex               m_mutex;        ///< A mutex to keep this object happy in multi-threaded environments.
     TimeValue                   m_mod_time;     ///< The modification time for this module when it was created.
     ArchSpec                    m_arch;         ///< The architecture for this module.
     UUID                        m_uuid;         ///< Each module is assumed to have a unique identifier to help match it up to debug symbols.

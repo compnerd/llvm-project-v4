@@ -11,8 +11,6 @@
 #include "lldb/Core/Error.h"
 #include "lldb/Core/Log.h"
 #include "lldb/Host/common/TCPSocket.h"
-#include "lldb/Host/ConnectionFileDescriptor.h"
-
 #include "PlatformAndroidRemoteGDBServer.h"
 #include "Utility/UriParser.h"
 

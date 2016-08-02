@@ -19,6 +19,7 @@
 #include "lldb/Core/Log.h"
 #include "lldb/Core/StreamString.h"
 #include "lldb/Core/Event.h"
+#include "lldb/Host/TimeValue.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -39,8 +40,12 @@ namespace
     };
 } // anonymous namespace
 
-Listener::Listener(const char *name)
-    : m_name(name), m_broadcasters(), m_broadcasters_mutex(), m_events(), m_events_mutex()
+Listener::Listener(const char *name) :
+    m_name (name),
+    m_broadcasters(),
+    m_broadcasters_mutex (Mutex::eMutexTypeRecursive),
+    m_events (),
+    m_events_mutex (Mutex::eMutexTypeNormal)
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_OBJECT));
     if (log != nullptr)
@@ -50,19 +55,16 @@ Listener::Listener(const char *name)
 
 Listener::~Listener()
 {
-    Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+    Mutex::Locker locker (m_broadcasters_mutex);
 
     Clear();
-
-    if (log)
-        log->Printf("%p Listener::%s('%s')", static_cast<void *>(this), __FUNCTION__, m_name.c_str());
 }
 
 void
 Listener::Clear()
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_OBJECT));
-    std::lock_guard<std::recursive_mutex> broadcasters_guard(m_broadcasters_mutex);
+    Mutex::Locker locker(m_broadcasters_mutex);
     broadcaster_collection::iterator pos, end = m_broadcasters.end();
     for (pos = m_broadcasters.begin(); pos != end; ++pos)
     {
@@ -72,7 +74,7 @@ Listener::Clear()
     }
     m_broadcasters.clear();
 
-    std::lock_guard<std::mutex> events_guard(m_events_mutex);
+    Mutex::Locker event_locker(m_events_mutex);
     m_events.clear();
     size_t num_managers = m_broadcaster_managers.size();
 
@@ -83,8 +85,9 @@ Listener::Clear()
             manager_sp->RemoveListener(this);
     }
 
-    if (log)
-        log->Printf("%p Listener::%s('%s')", static_cast<void *>(this), __FUNCTION__, m_name.c_str());
+    if (log != nullptr)
+        log->Printf ("%p Listener::~Listener('%s')",
+                     static_cast<void*>(this), m_name.c_str());
 }
 
 uint32_t
@@ -95,7 +98,7 @@ Listener::StartListeningForEvents (Broadcaster* broadcaster, uint32_t event_mask
         // Scope for "locker"
         // Tell the broadcaster to add this object as a listener
         {
-            std::lock_guard<std::recursive_mutex> broadcasters_guard(m_broadcasters_mutex);
+            Mutex::Locker locker(m_broadcasters_mutex);
             Broadcaster::BroadcasterImplWP impl_wp(broadcaster->GetBroadcasterImpl());
             m_broadcasters.insert(std::make_pair(impl_wp, BroadcasterInfo(event_mask)));
         }
@@ -122,7 +125,7 @@ Listener::StartListeningForEvents (Broadcaster* broadcaster, uint32_t event_mask
         // Scope for "locker"
         // Tell the broadcaster to add this object as a listener
         {
-            std::lock_guard<std::recursive_mutex> broadcasters_guard(m_broadcasters_mutex);
+            Mutex::Locker locker(m_broadcasters_mutex);
             Broadcaster::BroadcasterImplWP impl_wp(broadcaster->GetBroadcasterImpl());
             m_broadcasters.insert(std::make_pair(impl_wp,
                                                  BroadcasterInfo(event_mask, callback, callback_user_data)));
@@ -153,7 +156,7 @@ Listener::StopListeningForEvents (Broadcaster* broadcaster, uint32_t event_mask)
     {
         // Scope for "locker"
         {
-            std::lock_guard<std::recursive_mutex> broadcasters_guard(m_broadcasters_mutex);
+            Mutex::Locker locker(m_broadcasters_mutex);
             m_broadcasters.erase (broadcaster->GetBroadcasterImpl());
         }
         // Remove the broadcaster from our set of broadcasters
@@ -170,13 +173,13 @@ Listener::BroadcasterWillDestruct (Broadcaster *broadcaster)
 {
     // Scope for "broadcasters_locker"
     {
-        std::lock_guard<std::recursive_mutex> broadcasters_guard(m_broadcasters_mutex);
+        Mutex::Locker broadcasters_locker(m_broadcasters_mutex);
         m_broadcasters.erase (broadcaster->GetBroadcasterImpl());
     }
 
     // Scope for "event_locker"
     {
-        std::lock_guard<std::mutex> events_guard(m_events_mutex);
+        Mutex::Locker event_locker(m_events_mutex);
         // Remove all events for this broadcaster object.
         event_collection::iterator pos = m_events.begin();
         while (pos != m_events.end())
@@ -211,9 +214,9 @@ Listener::AddEvent (EventSP &event_sp)
                      static_cast<void*>(this), m_name.c_str(),
                      static_cast<void*>(event_sp.get()));
 
-    std::lock_guard<std::mutex> guard(m_events_mutex);
+    Mutex::Locker locker(m_events_mutex);
     m_events.push_back (event_sp);
-    m_events_condition.notify_all();
+    m_events_condition.Broadcast();
 }
 
 class EventBroadcasterMatches
@@ -278,11 +281,15 @@ private:
 };
 
 bool
-Listener::FindNextEventInternal(std::unique_lock<std::mutex> &lock,
-                                Broadcaster *broadcaster,             // nullptr for any broadcaster
-                                const ConstString *broadcaster_names, // nullptr for any event
-                                uint32_t num_broadcaster_names, uint32_t event_type_mask, EventSP &event_sp,
-                                bool remove)
+Listener::FindNextEventInternal
+(
+    Mutex::Locker& lock,
+    Broadcaster *broadcaster,   // nullptr for any broadcaster
+    const ConstString *broadcaster_names, // nullptr for any event
+    uint32_t num_broadcaster_names,
+    uint32_t event_type_mask,
+    EventSP &event_sp,
+    bool remove)
 {
     // NOTE: callers of this function must lock m_events_mutex using a Mutex::Locker
     // and pass the locker as the first argument. m_events_mutex is no longer recursive.
@@ -320,7 +327,7 @@ Listener::FindNextEventInternal(std::unique_lock<std::mutex> &lock,
             // Unlock the event queue here.  We've removed this event and are about to return
             // it so it should be okay to get the next event off the queue here - and it might
             // be useful to do that in the "DoOnRemoval".
-            lock.unlock();
+            lock.Unlock();
             event_sp->DoOnRemoval();
         }
         return true;
@@ -333,9 +340,9 @@ Listener::FindNextEventInternal(std::unique_lock<std::mutex> &lock,
 Event *
 Listener::PeekAtNextEvent ()
 {
-    std::unique_lock<std::mutex> guard(m_events_mutex);
+    Mutex::Locker lock(m_events_mutex);
     EventSP event_sp;
-    if (FindNextEventInternal(guard, nullptr, nullptr, 0, 0, event_sp, false))
+    if (FindNextEventInternal(lock, nullptr, nullptr, 0, 0, event_sp, false))
         return event_sp.get();
     return nullptr;
 }
@@ -343,9 +350,9 @@ Listener::PeekAtNextEvent ()
 Event *
 Listener::PeekAtNextEventForBroadcaster (Broadcaster *broadcaster)
 {
-    std::unique_lock<std::mutex> guard(m_events_mutex);
+    Mutex::Locker lock(m_events_mutex);
     EventSP event_sp;
-    if (FindNextEventInternal(guard, broadcaster, nullptr, 0, 0, event_sp, false))
+    if (FindNextEventInternal(lock, broadcaster, nullptr, 0, 0, event_sp, false))
         return event_sp.get();
     return nullptr;
 }
@@ -353,9 +360,9 @@ Listener::PeekAtNextEventForBroadcaster (Broadcaster *broadcaster)
 Event *
 Listener::PeekAtNextEventForBroadcasterWithType (Broadcaster *broadcaster, uint32_t event_type_mask)
 {
-    std::unique_lock<std::mutex> guard(m_events_mutex);
+    Mutex::Locker lock(m_events_mutex);
     EventSP event_sp;
-    if (FindNextEventInternal(guard, broadcaster, nullptr, 0, event_type_mask, event_sp, false))
+    if (FindNextEventInternal(lock, broadcaster, nullptr, 0, event_type_mask, event_sp, false))
         return event_sp.get();
     return nullptr;
 }
@@ -367,9 +374,8 @@ Listener::GetNextEventInternal(Broadcaster *broadcaster,             // nullptr 
                                uint32_t event_type_mask,
                                EventSP &event_sp)
 {
-    std::unique_lock<std::mutex> guard(m_events_mutex);
-    return FindNextEventInternal(guard, broadcaster, broadcaster_names, num_broadcaster_names, event_type_mask,
-                                 event_sp, true);
+    Mutex::Locker lock(m_events_mutex);
+    return FindNextEventInternal (lock, broadcaster, broadcaster_names, num_broadcaster_names, event_type_mask, event_sp, true);
 }
 
 bool
@@ -391,17 +397,20 @@ Listener::GetNextEventForBroadcasterWithType (Broadcaster *broadcaster, uint32_t
 }
 
 bool
-Listener::WaitForEventsInternal(const std::chrono::microseconds &timeout,
+Listener::WaitForEventsInternal(const TimeValue *timeout,
                                 Broadcaster *broadcaster,             // nullptr for any broadcaster
                                 const ConstString *broadcaster_names, // nullptr for any event
-                                uint32_t num_broadcaster_names, uint32_t event_type_mask, EventSP &event_sp)
+                                uint32_t num_broadcaster_names,
+                                uint32_t event_type_mask,
+                                EventSP &event_sp)
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_EVENTS));
     if (log != nullptr)
-        log->Printf("%p Listener::WaitForEventsInternal (timeout = %llu us) for %s", static_cast<void *>(this),
-                    static_cast<unsigned long long>(timeout.count()), m_name.c_str());
+        log->Printf ("%p Listener::WaitForEventsInternal (timeout = { %p }) for %s",
+                     static_cast<void*>(this), static_cast<const void*>(timeout),
+                     m_name.c_str());
 
-    std::unique_lock<std::mutex> lock(m_events_mutex);
+    Mutex::Locker lock(m_events_mutex);
 
     while (true)
     {
@@ -411,26 +420,23 @@ Listener::WaitForEventsInternal(const std::chrono::microseconds &timeout,
         }
         else
         {
-            std::cv_status result = std::cv_status::no_timeout;
-            if (timeout == std::chrono::microseconds(0))
-                m_events_condition.wait(lock);
-            else
-                result = m_events_condition.wait_for(lock, timeout);
-
-            if (result == std::cv_status::timeout)
+            bool timed_out = false;
+            if (m_events_condition.Wait(m_events_mutex, timeout, &timed_out) != 0)
             {
-              log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EVENTS);
-              if (log)
-                  log->Printf("%p Listener::WaitForEventsInternal() timed out for %s", static_cast<void *>(this),
-                              m_name.c_str());
-              return false;
-            }
-            else if (result != std::cv_status::no_timeout)
-            {
-                log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EVENTS);
-                if (log)
-                    log->Printf("%p Listener::WaitForEventsInternal() unknown error for %s", static_cast<void *>(this),
-                                m_name.c_str());
+                if (timed_out)
+                {
+                    log = lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_EVENTS);
+                    if (log != nullptr)
+                        log->Printf ("%p Listener::WaitForEventsInternal() timed out for %s",
+                                     static_cast<void*>(this), m_name.c_str());
+                }
+                else
+                {
+                    log = lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_EVENTS);
+                    if (log != nullptr)
+                        log->Printf ("%p Listener::WaitForEventsInternal() unknown error for %s",
+                                     static_cast<void*>(this), m_name.c_str());
+                }
                 return false;
             }
         }
@@ -440,21 +446,24 @@ Listener::WaitForEventsInternal(const std::chrono::microseconds &timeout,
 }
 
 bool
-Listener::WaitForEventForBroadcasterWithType(const std::chrono::microseconds &timeout, Broadcaster *broadcaster,
-                                             uint32_t event_type_mask, EventSP &event_sp)
+Listener::WaitForEventForBroadcasterWithType(const TimeValue *timeout,
+                                             Broadcaster *broadcaster,
+                                             uint32_t event_type_mask,
+                                             EventSP &event_sp)
 {
     return WaitForEventsInternal(timeout, broadcaster, nullptr, 0, event_type_mask, event_sp);
 }
 
 bool
-Listener::WaitForEventForBroadcaster(const std::chrono::microseconds &timeout, Broadcaster *broadcaster,
+Listener::WaitForEventForBroadcaster(const TimeValue *timeout,
+                                     Broadcaster *broadcaster,
                                      EventSP &event_sp)
 {
     return WaitForEventsInternal(timeout, broadcaster, nullptr, 0, 0, event_sp);
 }
 
 bool
-Listener::WaitForEvent(const std::chrono::microseconds &timeout, EventSP &event_sp)
+Listener::WaitForEvent (const TimeValue *timeout, EventSP &event_sp)
 {
     return WaitForEventsInternal(timeout, nullptr, nullptr, 0, 0, event_sp);
 }
@@ -463,7 +472,7 @@ size_t
 Listener::HandleBroadcastEvent (EventSP &event_sp)
 {
     size_t num_handled = 0;
-    std::lock_guard<std::recursive_mutex> guard(m_broadcasters_mutex);
+    Mutex::Locker locker(m_broadcasters_mutex);
     Broadcaster *broadcaster = event_sp->GetBroadcaster();
     if (!broadcaster)
         return 0;
@@ -496,8 +505,8 @@ Listener::StartListeningForEventSpec (BroadcasterManagerSP manager_sp,
     
     // The BroadcasterManager mutex must be locked before m_broadcasters_mutex 
     // to avoid violating the lock hierarchy (manager before broadcasters).
-    std::lock_guard<std::recursive_mutex> manager_guard(manager_sp->m_manager_mutex);
-    std::lock_guard<std::recursive_mutex> guard(m_broadcasters_mutex);
+    Mutex::Locker manager_locker(manager_sp->m_manager_mutex);
+    Mutex::Locker locker(m_broadcasters_mutex);
 
     uint32_t bits_acquired = manager_sp->RegisterListenerForEvents(this->shared_from_this(), event_spec);
     if (bits_acquired)
@@ -519,8 +528,8 @@ Listener::StopListeningForEventSpec (BroadcasterManagerSP manager_sp,
 {
     if (!manager_sp)
         return false;
-
-    std::lock_guard<std::recursive_mutex> guard(m_broadcasters_mutex);
+    
+    Mutex::Locker locker(m_broadcasters_mutex);
     return manager_sp->UnregisterListenerForEvents (this->shared_from_this(), event_spec);
 }
     

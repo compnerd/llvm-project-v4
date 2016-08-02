@@ -494,13 +494,9 @@ EmulateInstructionMIPS::GetOpcodeForInstruction (const char *op_name)
         //----------------------------------------------------------------------
         // Prologue/Epilogue instructions
         //----------------------------------------------------------------------
-        { "ADDiu",      &EmulateInstructionMIPS::Emulate_ADDiu,       "ADDIU rt, rs, immediate"    },
-        { "SW",         &EmulateInstructionMIPS::Emulate_SW,          "SW rt, offset(rs)"          },
-        { "LW",         &EmulateInstructionMIPS::Emulate_LW,          "LW rt, offset(base)"        },
-        { "SUBU",       &EmulateInstructionMIPS::Emulate_SUBU_ADDU,   "SUBU rd, rs, rt"            },
-        { "ADDU",       &EmulateInstructionMIPS::Emulate_SUBU_ADDU,   "ADDU rd, rs, rt"            },
-        { "LUI",        &EmulateInstructionMIPS::Emulate_LUI,          "LUI rt, immediate"          },
-
+        { "ADDiu",      &EmulateInstructionMIPS::Emulate_ADDiu,       "ADDIU rt,rs,immediate"    },
+        { "SW",         &EmulateInstructionMIPS::Emulate_SW,          "SW rt,offset(rs)"         },
+        { "LW",         &EmulateInstructionMIPS::Emulate_LW,          "LW rt,offset(base)"       },
         //----------------------------------------------------------------------
         // MicroMIPS Prologue/Epilogue instructions
         //----------------------------------------------------------------------
@@ -908,57 +904,36 @@ EmulateInstructionMIPS::nonvolatile_reg_p (uint32_t regnum)
 bool
 EmulateInstructionMIPS::Emulate_ADDiu (llvm::MCInst& insn)
 {
-    // ADDIU rt, rs, immediate
-    // GPR[rt] <- GPR[rs] + sign_extend(immediate)
-
-    uint8_t dst, src;
     bool success = false;
     const uint32_t imm16 = insn.getOperand(2).getImm();
-    int64_t imm = SignedBits(imm16, 15, 0);
+    uint32_t imm = SignedBits(imm16, 15, 0);
+    uint64_t result;
+    uint32_t src, dst;
 
     dst = m_reg_info->getEncodingValue (insn.getOperand(0).getReg());
     src = m_reg_info->getEncodingValue (insn.getOperand(1).getReg());
 
-    // If immediate value is greater then 2^16 - 1 then clang generate
-    // LUI, ADDIU, SUBU instructions in prolog.
-    // Example
-    // lui    $1, 0x2
-    // addiu $1, $1, -0x5920
-    // subu  $sp, $sp, $1
-    // In this case, ADDIU dst and src will be same and not equal to sp
-    if (dst == src)
+    /* Check if this is addiu sp,<src>,imm16 */
+    if (dst == dwarf_sp_mips)
     {
-        Context context;
-
         /* read <src> register */
-        const int64_t src_opd_val = ReadRegisterUnsigned (eRegisterKindDWARF, dwarf_zero_mips + src, 0, &success);
+        uint64_t src_opd_val = ReadRegisterUnsigned (eRegisterKindDWARF, dwarf_zero_mips + src, 0, &success);
         if (!success)
             return false;
 
-        /* Check if this is daddiu sp, sp, imm16 */
-        if (dst == dwarf_sp_mips)
-        {
-            uint64_t result = src_opd_val + imm;
-            RegisterInfo reg_info_sp;
+        result = src_opd_val + imm;
 
-            if (GetRegisterInfo (eRegisterKindDWARF, dwarf_sp_mips, reg_info_sp))
-                context.SetRegisterPlusOffset (reg_info_sp, imm);
+        Context context;
+        RegisterInfo reg_info_sp;
+        if (GetRegisterInfo (eRegisterKindDWARF, dwarf_sp_mips, reg_info_sp))
+            context.SetRegisterPlusOffset (reg_info_sp, imm);
 
-            /* We are allocating bytes on stack */
-            context.type = eContextAdjustStackPointer;
+        /* We are allocating bytes on stack */
+        context.type = eContextAdjustStackPointer;
 
-            WriteRegisterUnsigned (context, eRegisterKindDWARF, dwarf_sp_mips, result);
-            return true;
-        }
-
-        imm += src_opd_val;
-        context.SetImmediateSigned (imm);
-        context.type = eContextImmediate;
-
-        if (!WriteRegisterUnsigned (context, eRegisterKindDWARF, dwarf_zero_mips + dst, imm))
-            return false;
+        WriteRegisterUnsigned (context, eRegisterKindDWARF, dwarf_sp_mips, result);
     }
-
+    
     return true;
 }
 
@@ -993,7 +968,7 @@ EmulateInstructionMIPS::Emulate_SW (llvm::MCInst& insn)
     WriteRegisterUnsigned (bad_vaddr_context, eRegisterKindDWARF, dwarf_bad_mips, address);
 
     /* We look for sp based non-volatile register stores */
-    if (nonvolatile_reg_p (src))
+    if (base == dwarf_sp_mips && nonvolatile_reg_p (src))
     {
 
         RegisterInfo reg_info_src;
@@ -1052,7 +1027,7 @@ EmulateInstructionMIPS::Emulate_LW (llvm::MCInst& insn)
     bad_vaddr_context.type = eContextInvalid;
     WriteRegisterUnsigned (bad_vaddr_context, eRegisterKindDWARF, dwarf_bad_mips, address);
 
-    if (nonvolatile_reg_p (src))
+    if (base == dwarf_sp_mips && nonvolatile_reg_p (src))
     {
         RegisterValue data_src;
         RegisterInfo reg_info_src;
@@ -1069,105 +1044,6 @@ EmulateInstructionMIPS::Emulate_LW (llvm::MCInst& insn)
 
         return true;
     }
-
-    return false;
-}
-
-bool
-EmulateInstructionMIPS::Emulate_SUBU_ADDU (llvm::MCInst& insn)
-{
-     // SUBU sp, <src>, <rt>
-     // ADDU sp, <src>, <rt>
-     // ADDU dst, sp, <rt>
-
-    bool success = false;
-    uint64_t result;
-    uint8_t src, dst, rt;
-    const char *op_name = m_insn_info->getName (insn.getOpcode ());
-    
-    dst = m_reg_info->getEncodingValue (insn.getOperand(0).getReg());
-    src = m_reg_info->getEncodingValue (insn.getOperand(1).getReg());
-
-    /* Check if sp is destination register */
-    if (dst == dwarf_sp_mips)
-    {
-        rt = m_reg_info->getEncodingValue (insn.getOperand(2).getReg());
-
-        /* read <src> register */
-        uint64_t src_opd_val = ReadRegisterUnsigned (eRegisterKindDWARF, dwarf_zero_mips + src, 0, &success);
-       if (!success)
-           return false;
-
-        /* read <rt > register */
-        uint64_t rt_opd_val = ReadRegisterUnsigned (eRegisterKindDWARF, dwarf_zero_mips + rt, 0, &success);
-        if (!success)
-            return false;
-
-        if (!strcasecmp (op_name, "SUBU"))
-            result = src_opd_val - rt_opd_val;
-        else
-            result = src_opd_val + rt_opd_val;
-
-        Context context;
-        RegisterInfo reg_info_sp;
-        if (GetRegisterInfo (eRegisterKindDWARF, dwarf_sp_mips, reg_info_sp))
-            context.SetRegisterPlusOffset (reg_info_sp, rt_opd_val);
-
-        /* We are allocating bytes on stack */
-        context.type = eContextAdjustStackPointer;
-
-        WriteRegisterUnsigned (context, eRegisterKindDWARF, dwarf_sp_mips, result);
-
-        return true;
-    }
-    else if (src == dwarf_sp_mips)
-    {
-        rt = m_reg_info->getEncodingValue (insn.getOperand(2).getReg());
-
-        /* read <src> register */
-        uint64_t src_opd_val = ReadRegisterUnsigned (eRegisterKindDWARF, dwarf_zero_mips + src, 0, &success);
-        if (!success)
-            return false;
-
-       /* read <rt> register */
-       uint64_t rt_opd_val = ReadRegisterUnsigned (eRegisterKindDWARF, dwarf_zero_mips + rt, 0, &success);
-       if (!success)
-           return false;
-
-       Context context;
-
-       if (!strcasecmp (op_name, "SUBU"))
-           result = src_opd_val - rt_opd_val;
-       else
-           result = src_opd_val + rt_opd_val; 
-
-       context.SetImmediateSigned (result);
-       context.type = eContextImmediate;
-
-       if (!WriteRegisterUnsigned (context, eRegisterKindDWARF, dwarf_zero_mips + dst, result))
-           return false;
-    }
-
-    return true;
-}
-
-bool
-EmulateInstructionMIPS::Emulate_LUI (llvm::MCInst& insn)
-{
-    // LUI rt, immediate
-    // GPR[rt] <- sign_extend(immediate << 16)
-
-    const uint32_t imm32 = insn.getOperand(1).getImm() << 16;
-    int64_t imm = SignedBits(imm32, 31, 0);
-    uint8_t rt;
-    Context context;
-    
-    rt = m_reg_info->getEncodingValue (insn.getOperand(0).getReg());
-    context.SetImmediateSigned (imm);
-    context.type = eContextImmediate;
-
-    if (WriteRegisterUnsigned (context, eRegisterKindDWARF, dwarf_zero_mips + rt, imm))
-        return true;
 
     return false;
 }
@@ -1606,56 +1482,56 @@ EmulateInstructionMIPS::Emulate_BXX_3ops_C (llvm::MCInst& insn)
     if (!strcasecmp (op_name, "BEQC"))
     {
         if (rs_val == rt_val)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BNEC"))
     {
         if (rs_val != rt_val)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BLTC"))
     {
         if (rs_val < rt_val)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BGEC"))
     {
         if (rs_val >= rt_val)
-            target = pc  + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BLTUC"))
     {
         if (rs_val < rt_val)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BGEUC"))
     {
         if ((uint32_t)rs_val >= (uint32_t)rt_val)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BOVC"))
     {
         if (IsAdd64bitOverflow (rs_val, rt_val))
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BNVC"))
     {
         if (!IsAdd64bitOverflow (rs_val, rt_val))
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
@@ -1897,42 +1773,42 @@ EmulateInstructionMIPS::Emulate_BXX_2ops_C (llvm::MCInst& insn)
     if (!strcasecmp (op_name, "BLTZC"))
     {
         if (rs_val < 0)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BLEZC"))
     {
         if (rs_val <= 0)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BGEZC"))
     {
         if (rs_val >= 0)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BGTZC"))
     {
         if (rs_val > 0)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BEQZC"))
     {
         if (rs_val == 0)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
     else if (!strcasecmp (op_name, "BNEZC"))
     {
         if (rs_val != 0)
-            target = pc + offset;
+            target = pc + 4 + offset;
         else
             target = pc + 4;
     }
@@ -2253,7 +2129,7 @@ EmulateInstructionMIPS::Emulate_BALC (llvm::MCInst& insn)
     if (!success)
         return false;
 
-    target = pc + offset;
+    target = pc + 4 + offset;
 
     Context context;
 
@@ -2283,7 +2159,7 @@ EmulateInstructionMIPS::Emulate_BC (llvm::MCInst& insn)
     if (!success)
         return false;
 
-    target = pc + offset;
+    target = pc + 4 + offset;
 
     Context context;
 

@@ -15,7 +15,10 @@
 using namespace lldb;
 using namespace lldb_private;
 
-CommandHistory::CommandHistory() : m_mutex(), m_history()
+
+CommandHistory::CommandHistory () :
+    m_mutex(Mutex::eMutexTypeRecursive),
+    m_history()
 {}
 
 CommandHistory::~CommandHistory ()
@@ -24,21 +27,21 @@ CommandHistory::~CommandHistory ()
 size_t
 CommandHistory::GetSize () const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     return m_history.size();
 }
 
 bool
 CommandHistory::IsEmpty () const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     return m_history.empty();
 }
 
 const char*
 CommandHistory::FindString (const char* input_str) const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     if (!input_str)
         return nullptr;
     if (input_str[0] != g_repeat_char)
@@ -77,7 +80,7 @@ CommandHistory::FindString (const char* input_str) const
 const char*
 CommandHistory::GetStringAtIndex (size_t idx) const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     if (idx < m_history.size())
         return m_history[idx].c_str();
     return nullptr;
@@ -92,7 +95,7 @@ CommandHistory::operator [] (size_t idx) const
 const char*
 CommandHistory::GetRecentmostString () const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     if (m_history.empty())
         return nullptr;
     return m_history.back().c_str();
@@ -102,7 +105,7 @@ void
 CommandHistory::AppendString (const std::string& str,
                               bool reject_if_dupe)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     if (reject_if_dupe)
     {
         if (!m_history.empty())
@@ -117,7 +120,7 @@ CommandHistory::AppendString (const std::string& str,
 void
 CommandHistory::Clear ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     m_history.clear();
 }
 
@@ -126,7 +129,7 @@ CommandHistory::Dump (Stream& stream,
                       size_t start_idx,
                       size_t stop_idx) const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     stop_idx = std::min(stop_idx + 1, m_history.size());
     for (size_t counter = start_idx;
          counter < stop_idx;

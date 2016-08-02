@@ -52,8 +52,7 @@ class TopLevelExpressionsTestCase(TestBase):
     @add_test_categories(['pyapi'])
     @expectedFailureAndroid(api_levels=[21, 22], bugnumber="llvm.org/pr27787")
     @expectedFailureAll(oslist=["linux"], archs=["arm", "aarch64"], bugnumber="llvm.org/pr27787")
-    @expectedFailureAll(bugnumber="llvm.org/pr28353", oslist=["linux"], archs=["i386", "x86_64"], compiler="gcc", compiler_version=["<", "4.9"])
-    @skipIf(debug_info="gmodules") # not relevant
+    @expectedFailureAll(oslist=["macosx"], debug_info="gmodules", bugnumber="llvm.org/pr27864")
     @skipIf(oslist=["windows"]) # Error in record layout on Windows
     def test_top_level_expressions(self):
         self.build_and_run()
@@ -83,7 +82,6 @@ class TopLevelExpressionsTestCase(TestBase):
         for expression in expressions:
             self.frame().EvaluateExpression(expression, options)
 
-        resultFromTopLevel = self.frame().EvaluateExpression("doTest()")
+        resultFromTopLevel = self.frame().EvaluateExpression("doTest()").GetValueAsUnsigned()
 
-        self.assertTrue(resultFromTopLevel.IsValid())
-        self.assertEqual(resultFromCode, resultFromTopLevel.GetValueAsUnsigned())
+        self.assertEqual(resultFromCode, resultFromTopLevel)

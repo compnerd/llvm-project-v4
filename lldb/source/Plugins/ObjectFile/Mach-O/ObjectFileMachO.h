@@ -19,6 +19,7 @@
 #include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/RangeMap.h"
 #include "lldb/Host/FileSpec.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Symbol/ObjectFile.h"
 
 //----------------------------------------------------------------------

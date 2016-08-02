@@ -38,8 +38,6 @@ class IRInterpreterTestCase(TestBase):
         self.runCmd("run", RUN_SUCCEEDED)
 
     @add_test_categories(['pyapi'])
-    @expectedFailureAll(oslist=['windows'], bugnumber="http://llvm.org/pr21765")  # getpid() is POSIX, among other problems, see bug
-    @expectedFailureAll(oslist=['linux'], archs=['arm'], bugnumber="llvm.org/pr27868")
     def test_ir_interpreter(self):
         self.build_and_run()
 

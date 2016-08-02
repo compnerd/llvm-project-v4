@@ -378,7 +378,7 @@ namespace lldb {
     ///
     /// These enumerations use the same language enumerations as the DWARF
     /// specification for ease of use and consistency.
-    /// The enum -> string code is in Language.cpp, don't change this
+    /// The enum -> string code is in LanguageRuntime.cpp, don't change this
     /// table without updating that code as well.
     //----------------------------------------------------------------------
     enum LanguageType
@@ -577,7 +577,10 @@ namespace lldb {
         eSymbolTypeObjCClass,
         eSymbolTypeObjCMetaClass,
         eSymbolTypeObjCIVar,
-        eSymbolTypeReExported
+        eSymbolTypeIVarOffset,  // A symbol that contains an offset for an instance variable
+        eSymbolTypeReExported,
+        eSymbolTypeMetadata,    // A symbol that contains the location of a direct metadata for a type
+        eSymbolTypeASTFile      // A symbol whose name is the path to a compiler AST file
     };
     
     enum SectionType
@@ -613,6 +616,7 @@ namespace lldb {
         eSectionTypeDWARFDebugStrOffsets,
         eSectionTypeDWARFAppleNames,
         eSectionTypeDWARFAppleTypes,
+        eSectionTypeDWARFAppleExternalTypes,
         eSectionTypeDWARFAppleNamespaces,
         eSectionTypeDWARFAppleObjC,
         eSectionTypeELFSymbolTable,       // Elf SHT_SYMTAB section
@@ -620,6 +624,7 @@ namespace lldb {
         eSectionTypeELFRelocationEntries, // Elf SHT_REL or SHT_REL section
         eSectionTypeELFDynamicLinkInfo,   // Elf SHT_DYNAMIC section
         eSectionTypeEHFrame,
+        eSectionTypeSwiftModules,
         eSectionTypeARMexidx,
         eSectionTypeARMextab,
         eSectionTypeCompactUnwind,        // compact unwind section in Mach-O, __TEXT,__unwind_info
@@ -757,9 +762,9 @@ namespace lldb {
    // 1) When frame A pushes frame B (or a frame that ends up pushing B) A is Older than B.
    // 2) When frame A pushed frame B (or if frame A is on the stack but B is not) A is Younger than B
    // 3) When frame A and frame B have the same StackID, they are Equal.
-   // 4) When frame A and frame B have the same immediate parent frame, but are not equal, the comparison yields
+   // 4) When frame A and frame B have the same immediate parent frame, but are not equal, the comparision yields
    //    SameParent.
-   // 5) If the two frames are on different threads or processes the comparison is Invalid
+   // 5) If the two frames are on different threads or processes the comparision is Invalid
    // 6) If for some reason we can't figure out what went on, we return Unknown.
    //----------------------------------------------------------------------
    enum FrameComparison
@@ -905,13 +910,15 @@ namespace lldb {
     {
         ePathTypeLLDBShlibDir,            // The directory where the lldb.so (unix) or LLDB mach-o file in LLDB.framework (MacOSX) exists
         ePathTypeSupportExecutableDir,    // Find LLDB support executable directory (debugserver, etc)
+        ePathTypeSupportFileDir,          // Find LLDB support file directory (non-executable files)
         ePathTypeHeaderDir,               // Find LLDB header file directory
         ePathTypePythonDir,               // Find Python modules (PYTHONPATH) directory
         ePathTypeLLDBSystemPlugins,       // System plug-ins directory
         ePathTypeLLDBUserPlugins,         // User plug-ins directory
         ePathTypeLLDBTempSystemDir,       // The LLDB temp directory for this system that will be cleaned up on exit
         ePathTypeGlobalLLDBTempSystemDir, // The LLDB temp directory for this system, NOT cleaned up on a process exit.
-        ePathTypeClangDir                 // Find path to Clang builtin headers
+        ePathTypeClangDir,                // Find path to Clang builtin headers
+        ePathTypeSwiftDir                 // Find path to Swift libraries
     };
     
     //----------------------------------------------------------------------
@@ -965,7 +972,14 @@ namespace lldb {
         eTypeIsFloat            = (1u << 19),
         eTypeIsComplex          = (1u << 20),
         eTypeIsSigned           = (1u << 21),
-        eTypeInstanceIsPointer  = (1u << 22)
+        eTypeInstanceIsPointer  = (1u << 22),
+        eTypeIsSwift            = (1u << 23),
+        eTypeIsArchetype        = (1u << 24),
+        eTypeIsProtocol         = (1u << 25),
+        eTypeIsTuple            = (1u << 26),
+        eTypeIsMetatype         = (1u << 27),
+        eTypeIsGeneric          = (1u << 28),
+        eTypeIsBound            = (1u << 29)
     };
     
     FLAGS_ENUM(CommandFlags)

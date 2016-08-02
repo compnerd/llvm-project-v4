@@ -176,17 +176,19 @@ namespace lldb_private {
 // constructor
 //----------------------
 
-CompactUnwindInfo::CompactUnwindInfo(ObjectFile &objfile, SectionSP &section_sp)
-    : m_objfile(objfile),
-      m_section_sp(section_sp),
-      m_section_contents_if_encrypted(),
-      m_mutex(),
-      m_indexes(),
-      m_indexes_computed(eLazyBoolCalculate),
-      m_unwindinfo_data(),
-      m_unwindinfo_data_computed(false),
-      m_unwind_header()
+
+CompactUnwindInfo::CompactUnwindInfo(ObjectFile& objfile, SectionSP& section_sp) :
+    m_objfile (objfile),
+    m_section_sp (section_sp),
+    m_section_contents_if_encrypted (),
+    m_mutex (),
+    m_indexes (),
+    m_indexes_computed (eLazyBoolCalculate),
+    m_unwindinfo_data (),
+    m_unwindinfo_data_computed (false),
+    m_unwind_header ()
 {
+
 }
 
 //----------------------
@@ -275,7 +277,7 @@ CompactUnwindInfo::IsValid (const ProcessSP &process_sp)
 void
 CompactUnwindInfo::ScanIndex (const ProcessSP &process_sp)
 {
-    std::lock_guard<std::mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     if (m_indexes_computed == eLazyBoolYes && m_unwindinfo_data_computed)
         return;
 

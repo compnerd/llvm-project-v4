@@ -20,19 +20,22 @@
 using namespace lldb;
 using namespace lldb_private;
 
-TypeCategoryMap::TypeCategoryMap(IFormatChangeListener *lst)
-    : m_map_mutex(), listener(lst), m_map(), m_active_categories()
+TypeCategoryMap::TypeCategoryMap (IFormatChangeListener* lst) :
+m_map_mutex(Mutex::eMutexTypeRecursive),
+listener(lst),
+m_map(),
+m_active_categories()
 {
     ConstString default_cs("default");
     lldb::TypeCategoryImplSP default_sp = lldb::TypeCategoryImplSP(new TypeCategoryImpl(listener, default_cs));
-    Add(default_cs, default_sp);
-    Enable(default_cs, First);
+    Add(default_cs,default_sp);
+    Enable(default_cs,First);
 }
 
 void
 TypeCategoryMap::Add (KeyType name, const ValueSP& entry)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     m_map[name] = entry;
     if (listener)
         listener->Changed();
@@ -41,7 +44,7 @@ TypeCategoryMap::Add (KeyType name, const ValueSP& entry)
 bool
 TypeCategoryMap::Delete (KeyType name)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     MapIterator iter = m_map.find(name);
     if (iter == m_map.end())
         return false;
@@ -55,7 +58,7 @@ TypeCategoryMap::Delete (KeyType name)
 bool
 TypeCategoryMap::Enable (KeyType category_name, Position pos)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     ValueSP category;
     if (!Get(category_name,category))
         return false;
@@ -65,7 +68,7 @@ TypeCategoryMap::Enable (KeyType category_name, Position pos)
 bool
 TypeCategoryMap::Disable (KeyType category_name)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     ValueSP category;
     if (!Get(category_name,category))
         return false;
@@ -75,7 +78,7 @@ TypeCategoryMap::Disable (KeyType category_name)
 bool
 TypeCategoryMap::Enable (ValueSP category, Position pos)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     if (category.get())
     {
         Position pos_w = pos;
@@ -104,7 +107,7 @@ TypeCategoryMap::Enable (ValueSP category, Position pos)
 bool
 TypeCategoryMap::Disable (ValueSP category)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     if (category.get())
     {
         m_active_categories.remove_if(delete_matching_categories(category));
@@ -117,7 +120,7 @@ TypeCategoryMap::Disable (ValueSP category)
 void
 TypeCategoryMap::EnableAllCategories ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     std::vector<ValueSP> sorted_categories(m_map.size(), ValueSP());
     MapType::iterator iter = m_map.begin(), end = m_map.end();
     for (; iter != end; ++iter)
@@ -145,7 +148,7 @@ TypeCategoryMap::EnableAllCategories ()
 void
 TypeCategoryMap::DisableAllCategories ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     Position p = First;
     for (; false == m_active_categories.empty(); p++)
     {
@@ -157,7 +160,7 @@ TypeCategoryMap::DisableAllCategories ()
 void
 TypeCategoryMap::Clear ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     m_map.clear();
     m_active_categories.clear();
     if (listener)
@@ -167,7 +170,7 @@ TypeCategoryMap::Clear ()
 bool
 TypeCategoryMap::Get (KeyType name, ValueSP& entry)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     MapIterator iter = m_map.find(name);
     if (iter == m_map.end())
         return false;
@@ -178,7 +181,7 @@ TypeCategoryMap::Get (KeyType name, ValueSP& entry)
 bool
 TypeCategoryMap::Get (uint32_t pos, ValueSP& entry)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
+    Mutex::Locker locker(m_map_mutex);
     MapIterator iter = m_map.begin();
     MapIterator end = m_map.end();
     while (pos > 0)
@@ -199,8 +202,8 @@ TypeCategoryMap::AnyMatches (ConstString type_name,
                              const char** matching_category,
                              TypeCategoryImpl::FormatCategoryItems* matching_type)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-
+    Mutex::Locker locker(m_map_mutex);
+    
     MapIterator pos, end = m_map.end();
     for (pos = m_map.begin(); pos != end; pos++)
     {
@@ -217,8 +220,8 @@ TypeCategoryMap::AnyMatches (ConstString type_name,
 lldb::TypeFormatImplSP
 TypeCategoryMap::GetFormat (FormattersMatchData& match_data)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-
+    Mutex::Locker locker(m_map_mutex);
+    
     uint32_t reason_why;
     ActiveCategoriesIterator begin, end = m_active_categories.end();
     
@@ -255,8 +258,8 @@ TypeCategoryMap::GetFormat (FormattersMatchData& match_data)
 lldb::TypeSummaryImplSP
 TypeCategoryMap::GetSummaryFormat (FormattersMatchData& match_data)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-
+    Mutex::Locker locker(m_map_mutex);
+    
     uint32_t reason_why;
     ActiveCategoriesIterator begin, end = m_active_categories.end();
     
@@ -294,8 +297,8 @@ TypeCategoryMap::GetSummaryFormat (FormattersMatchData& match_data)
 lldb::SyntheticChildrenSP
 TypeCategoryMap::GetSyntheticChildren (FormattersMatchData& match_data)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-
+    Mutex::Locker locker(m_map_mutex);
+    
     uint32_t reason_why;
     
     ActiveCategoriesIterator begin, end = m_active_categories.end();
@@ -334,8 +337,8 @@ TypeCategoryMap::GetSyntheticChildren (FormattersMatchData& match_data)
 lldb::TypeValidatorImplSP
 TypeCategoryMap::GetValidator (FormattersMatchData& match_data)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-
+    Mutex::Locker locker(m_map_mutex);
+    
     uint32_t reason_why;
     ActiveCategoriesIterator begin, end = m_active_categories.end();
     
@@ -374,8 +377,8 @@ TypeCategoryMap::ForEach(ForEachCallback callback)
 {
     if (callback)
     {
-        std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-
+        Mutex::Locker locker(m_map_mutex);
+        
         // loop through enabled categories in respective order
         {
             ActiveCategoriesIterator begin, end = m_active_categories.end();
@@ -405,8 +408,8 @@ TypeCategoryMap::ForEach(ForEachCallback callback)
 TypeCategoryImplSP
 TypeCategoryMap::GetAtIndex (uint32_t index)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-
+    Mutex::Locker locker(m_map_mutex);
+    
     if (index < m_map.size())
     {
         MapIterator pos, end = m_map.end();

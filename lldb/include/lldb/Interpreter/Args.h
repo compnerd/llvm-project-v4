@@ -91,20 +91,14 @@ public:
     ~Args();
 
     //------------------------------------------------------------------
-    /// Dump all entries to the stream \a s using label \a label_name.
-    ///
-    /// If label_name is nullptr, the dump operation is skipped.
+    /// Dump all arguments to the stream \a s.
     ///
     /// @param[in] s
     ///     The stream to which to dump all arguments in the argument
     ///     vector.
-    /// @param[in] label_name
-    ///     The label_name to use as the label printed for each
-    ///     entry of the args like so:
-    ///       {label_name}[{index}]={value}
     //------------------------------------------------------------------
     void
-    Dump (Stream &s, const char *label_name = "argv") const;
+    Dump (Stream *s);
 
     //------------------------------------------------------------------
     /// Sets the command string contained by this object.
@@ -335,6 +329,12 @@ public:
     void
     ParseArgsForCompletion (Options &options, OptionElementVector &option_element_vector, uint32_t cursor_index);
 
+    bool
+    GetOptionValueAsString(const char *option, std::string &value);
+    
+    int
+    GetOptionValuesAsStrings(const char *option, std::vector<std::string> &values);
+    
     //------------------------------------------------------------------
     // Clear the arguments.
     //

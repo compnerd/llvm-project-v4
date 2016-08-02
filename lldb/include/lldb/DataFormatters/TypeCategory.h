@@ -14,7 +14,6 @@
 // C++ Includes
 #include <initializer_list>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -520,9 +519,9 @@ namespace lldb_private {
         bool m_enabled;
         
         IFormatChangeListener* m_change_listener;
-
-        std::recursive_mutex m_mutex;
-
+        
+        Mutex m_mutex;
+        
         ConstString m_name;
         
         std::vector<lldb::LanguageType> m_languages;

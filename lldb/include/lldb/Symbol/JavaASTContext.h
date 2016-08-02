@@ -46,7 +46,7 @@ public:
     GetPluginNameStatic();
 
     static lldb::TypeSystemSP
-    CreateInstance(lldb::LanguageType language, Module *module, Target *target);
+    CreateInstance(lldb::LanguageType language, Module *module, Target *target, const char *extra_options);
 
     static void
     EnumerateSupportedLanguages(std::set<lldb::LanguageType> &languages_for_types,
@@ -123,8 +123,11 @@ public:
     IsIntegerType(lldb::opaque_compiler_type_t type, bool &is_signed) override;
 
     bool
-    IsPossibleDynamicType(lldb::opaque_compiler_type_t type, CompilerType *target_type, bool check_cplusplus,
-                          bool check_objc) override;
+    IsPossibleDynamicType(lldb::opaque_compiler_type_t type,
+                          CompilerType *target_type,
+                          bool check_cplusplus,
+                          bool check_objc,
+                          bool check_swift) override;
 
     bool
     IsPointerType(lldb::opaque_compiler_type_t type, CompilerType *pointee_type = nullptr) override;
@@ -203,6 +206,9 @@ public:
     GetCanonicalType(lldb::opaque_compiler_type_t type) override;
 
     CompilerType
+    GetInstanceType (lldb::opaque_compiler_type_t type) override;
+
+    CompilerType
     GetFullyUnqualifiedType(lldb::opaque_compiler_type_t type) override;
 
     CompilerType
@@ -210,6 +216,9 @@ public:
 
     CompilerType
     GetTypedefedType(lldb::opaque_compiler_type_t type) override;
+
+    CompilerType
+    GetUnboundType (lldb::opaque_compiler_type_t type) override;
 
     CompilerType
     GetBasicTypeFromAST(lldb::BasicType basic_type) override;
@@ -225,6 +234,9 @@ public:
 
     uint64_t
     GetBitSize(lldb::opaque_compiler_type_t type, ExecutionContextScope *exe_scope) override;
+
+    uint64_t
+    GetByteStride (lldb::opaque_compiler_type_t type) override;
 
     lldb::Encoding
     GetEncoding(lldb::opaque_compiler_type_t type, uint64_t &count) override;
@@ -287,10 +299,16 @@ public:
               uint32_t bitfield_bit_offset, bool show_types, bool show_summary, bool verbose, uint32_t depth) override;
 
     bool
-    DumpTypeValue(lldb::opaque_compiler_type_t type, Stream *s, lldb::Format format, const DataExtractor &data,
-                  lldb::offset_t data_offset, size_t data_byte_size, uint32_t bitfield_bit_size,
-                  uint32_t bitfield_bit_offset, ExecutionContextScope *exe_scope) override;
-
+    DumpTypeValue (lldb::opaque_compiler_type_t type,
+                   Stream *s,
+                   lldb::Format format,
+                   const DataExtractor &data,
+                   lldb::offset_t data_offset,
+                   size_t data_byte_size,
+                   uint32_t bitfield_bit_size,
+                   uint32_t bitfield_bit_offset,
+                   ExecutionContextScope *exe_scope,
+                   bool is_base_class) override;
     void
     DumpTypeDescription(lldb::opaque_compiler_type_t type) override;
 
@@ -329,8 +347,8 @@ public:
     CreateObjectType(const ConstString &name, const ConstString &linkage_name, uint32_t byte_size);
 
     CompilerType
-    CreateArrayType(const ConstString &linkage_name, const CompilerType &element_type,
-                    const DWARFExpression &length_expression, const lldb::addr_t data_offset);
+    CreateArrayType(const CompilerType &element_type, const DWARFExpression &length_expression,
+                    const lldb::addr_t data_offset);
 
     CompilerType
     CreateReferenceType(const CompilerType &pointee_type);
@@ -353,12 +371,6 @@ public:
 
     static ConstString
     GetLinkageName(const CompilerType &type);
-
-    static uint32_t
-    CalculateArraySize(const CompilerType &type, ValueObject &in_value);
-
-    static uint64_t
-    CalculateArrayElementOffset(const CompilerType &type, size_t index);
 
     //------------------------------------------------------------------
     // llvm casting support

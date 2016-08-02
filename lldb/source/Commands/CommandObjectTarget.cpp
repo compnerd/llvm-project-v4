@@ -1551,7 +1551,7 @@ static size_t
 DumpModuleObjfileHeaders(Stream &strm, ModuleList &module_list)
 {
     size_t num_dumped = 0;
-    std::lock_guard<std::recursive_mutex> guard(module_list.GetMutex());
+    Mutex::Locker modules_locker(module_list.GetMutex());
     const size_t num_modules = module_list.GetSize();
     if (num_modules > 0)
     {
@@ -1577,7 +1577,7 @@ DumpModuleObjfileHeaders(Stream &strm, ModuleList &module_list)
 }
 
 static void
-DumpModuleSymtab (CommandInterpreter &interpreter, Stream &strm, Module *module, SortOrder sort_order)
+DumpModuleSymtab (CommandInterpreter &interpreter, Stream &strm, Module *module, SortOrder sort_order, Mangled::NamePreference name_preference)
 {
     if (module)
     {
@@ -1586,7 +1586,7 @@ DumpModuleSymtab (CommandInterpreter &interpreter, Stream &strm, Module *module,
         {
             Symtab *symtab = sym_vendor->GetSymtab();
             if (symtab)
-                symtab->Dump(&strm, interpreter.GetExecutionContext().GetTargetPtr(), sort_order);
+                symtab->Dump(&strm, interpreter.GetExecutionContext().GetTargetPtr(), sort_order, name_preference);
         }
     }
 }
@@ -1981,7 +1981,7 @@ FindModulesByName (Target *target,
     if (check_global_list)
     {
         // Check the global list
-        std::lock_guard<std::recursive_mutex> guard(Module::GetAllocationModuleCollectionMutex());
+        Mutex::Locker locker(Module::GetAllocationModuleCollectionMutex());
         const size_t num_modules = Module::GetNumberAllocatedModules();
         ModuleSP module_sp;
         for (size_t image_idx = 0; image_idx<num_modules; ++image_idx)
@@ -2237,7 +2237,8 @@ public:
     public:
         CommandOptions (CommandInterpreter &interpreter) :
         Options(interpreter),
-        m_sort_order (eSortOrderNone)
+        m_sort_order (eSortOrderNone),
+        m_prefer_mangled(false,false)
         {
         }
 
@@ -2251,6 +2252,11 @@ public:
 
             switch (short_option)
             {
+                case 'm':
+                    m_prefer_mangled.SetCurrentValue(true);
+                    m_prefer_mangled.SetOptionWasSet();
+                    break;
+                    
                 case 's':
                     m_sort_order = (SortOrder) Args::StringToOptionEnum (option_arg, 
                                                                          g_option_table[option_idx].enum_values, 
@@ -2269,6 +2275,7 @@ public:
         OptionParsingStarting () override
         {
             m_sort_order = eSortOrderNone;
+            m_prefer_mangled.Clear();
         }
 
         const OptionDefinition*
@@ -2281,6 +2288,7 @@ public:
         static OptionDefinition g_option_table[];
 
         SortOrder m_sort_order;
+        OptionValueBoolean m_prefer_mangled;
     };
 
 protected:
@@ -2297,7 +2305,9 @@ protected:
         else
         {
             uint32_t num_dumped = 0;
-
+            
+            Mangled::NamePreference preference = (m_options.m_prefer_mangled ? Mangled::ePreferMangled : Mangled::ePreferDemangled);
+            
             uint32_t addr_byte_size = target->GetArchitecture().GetAddressByteSize();
             result.GetOutputStream().SetAddressByteSize(addr_byte_size);
             result.GetErrorStream().SetAddressByteSize(addr_byte_size);
@@ -2305,7 +2315,7 @@ protected:
             if (command.GetArgumentCount() == 0)
             {
                 // Dump all sections for all modules images
-                std::lock_guard<std::recursive_mutex> guard(target->GetImages().GetMutex());
+                Mutex::Locker modules_locker(target->GetImages().GetMutex());
                 const size_t num_modules = target->GetImages().GetSize();
                 if (num_modules > 0)
                 {
@@ -2321,7 +2331,8 @@ protected:
                         DumpModuleSymtab (m_interpreter,
                                           result.GetOutputStream(),
                                           target->GetImages().GetModulePointerAtIndexUnlocked(image_idx),
-                                          m_options.m_sort_order);
+                                          m_options.m_sort_order,
+                                          preference);
                     }
                 }
                 else
@@ -2352,7 +2363,7 @@ protected:
                                     result.GetOutputStream().EOL();
                                 }
                                 num_dumped++;
-                                DumpModuleSymtab (m_interpreter, result.GetOutputStream(), module, m_options.m_sort_order);
+                                DumpModuleSymtab (m_interpreter, result.GetOutputStream(), module, m_options.m_sort_order, preference);
                             }
                         }
                     }
@@ -2388,6 +2399,7 @@ OptionDefinition
 CommandObjectTargetModulesDumpSymtab::CommandOptions::g_option_table[] =
 {
     { LLDB_OPT_SET_1, false, "sort", 's', OptionParser::eRequiredArgument, nullptr, g_sort_option_enumeration, 0, eArgTypeSortOrder, "Supply a sort order when dumping the symbol table."},
+    { LLDB_OPT_SET_1, false, "show-mangled-names", 'm', OptionParser::eNoArgument, nullptr, nullptr, 0, eArgTypeNone, "Do not demangle symbol names before showing them."},
     { 0, false, nullptr, 0, 0, nullptr, nullptr, 0, eArgTypeNone, nullptr }
 };
 
@@ -2473,7 +2485,7 @@ protected:
                     else
                     {
                         // Check the global list
-                        std::lock_guard<std::recursive_mutex> guard(Module::GetAllocationModuleCollectionMutex());
+                        Mutex::Locker locker(Module::GetAllocationModuleCollectionMutex());
 
                         result.AppendWarningWithFormat("Unable to find an image that matches '%s'.\n", arg_cstr);
                     }
@@ -2535,7 +2547,7 @@ protected:
             {
                 // Dump all sections for all modules images
                 const ModuleList &target_modules = target->GetImages();
-                std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
+                Mutex::Locker modules_locker (target_modules.GetMutex());
                 const size_t num_modules = target_modules.GetSize();
                 if (num_modules > 0)
                 {
@@ -2636,7 +2648,7 @@ protected:
                 FileSpec file_spec(arg_cstr, false);
 
                 const ModuleList &target_modules = target->GetImages();
-                std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
+                Mutex::Locker modules_locker(target_modules.GetMutex());
                 const size_t num_modules = target_modules.GetSize();
                 if (num_modules > 0)
                 {
@@ -3293,19 +3305,16 @@ protected:
             }
 
             size_t num_modules = 0;
-
-            // This locker will be locked on the mutex in module_list_ptr if it is non-nullptr.
-            // Otherwise it will lock the AllocationModuleCollectionMutex when accessing
-            // the global module list directly.
-            std::unique_lock<std::recursive_mutex> guard(Module::GetAllocationModuleCollectionMutex(), std::defer_lock);
-
+            Mutex::Locker locker;      // This locker will be locked on the mutex in module_list_ptr if it is non-nullptr.
+                                       // Otherwise it will lock the AllocationModuleCollectionMutex when accessing
+                                       // the global module list directly.
             const ModuleList *module_list_ptr = nullptr;
             const size_t argc = command.GetArgumentCount();
             if (argc == 0)
             {
                 if (use_global_module_list)
                 {
-                    guard.lock();
+                    locker.Lock (Module::GetAllocationModuleCollectionMutex());
                     num_modules = Module::GetNumberAllocatedModules();
                 }
                 else
@@ -3334,11 +3343,9 @@ protected:
                 module_list_ptr = &module_list;
             }
 
-            std::unique_lock<std::recursive_mutex> lock;
             if (module_list_ptr != nullptr)
             {
-                lock = std::unique_lock<std::recursive_mutex>(module_list_ptr->GetMutex());
-
+                locker.Lock(module_list_ptr->GetMutex());
                 num_modules = module_list_ptr->GetSize();
             }
 
@@ -4097,7 +4104,7 @@ public:
             break;
         }
 
-        return true;
+        return false;
     }
 
     bool
@@ -4241,7 +4248,7 @@ protected:
                 // Dump all sections for all other modules
 
                 const ModuleList &target_modules = target->GetImages();
-                std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
+                Mutex::Locker modules_locker(target_modules.GetMutex());
                 const size_t num_modules = target_modules.GetSize();
                 if (num_modules > 0)
                 {

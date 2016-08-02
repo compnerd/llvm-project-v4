@@ -29,8 +29,6 @@ class ThreadsStackTracesTestCase(TestBase):
     #hence unwinding fail when we are stopped in __thread_start
     @expectedFailureAll(triple = 'mips*')
     @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24778")
-    @expectedFlakeyAndroid("llvm.org/26492", archs=["arm"])
-    @expectedFlakeyLinux("llvm.org/pr27687")
     @add_test_categories(['pyapi'])
     def test_stack_traces(self):
         """Test SBprocess and SBThread APIs with printing of the stack traces."""

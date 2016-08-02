@@ -212,7 +212,7 @@ ObjectFilePECOFF::ParseHeader ()
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         m_sect_headers.clear();
         m_data.SetByteOrder (eByteOrderLittle);
         lldb::offset_t offset = 0;
@@ -534,13 +534,13 @@ ObjectFilePECOFF::GetSymtab()
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         if (m_symtab_ap.get() == NULL)
         {
             SectionList *sect_list = GetSectionList();
             m_symtab_ap.reset(new Symtab(this));
-            std::lock_guard<std::recursive_mutex> guard(m_symtab_ap->GetMutex());
-
+            Mutex::Locker symtab_locker (m_symtab_ap->GetMutex());
+            
             const uint32_t num_syms = m_coff_header.nsyms;
 
             if (num_syms > 0 && m_coff_header.symoff > 0)
@@ -689,7 +689,7 @@ ObjectFilePECOFF::CreateSections (SectionList &unified_section_list)
         ModuleSP module_sp(GetModule());
         if (module_sp)
         {
-            std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+            lldb_private::Mutex::Locker locker(module_sp->GetMutex());
             const uint32_t nsects = m_sect_headers.size();
             ModuleSP module_sp (GetModule());
             for (uint32_t idx = 0; idx<nsects; ++idx)
@@ -719,6 +719,7 @@ ObjectFilePECOFF::CreateSections (SectionList &unified_section_list)
                 static ConstString g_sect_name_dwarf_debug_ranges (".debug_ranges");
                 static ConstString g_sect_name_dwarf_debug_str (".debug_str");
                 static ConstString g_sect_name_eh_frame (".eh_frame");
+                static ConstString g_sect_name_swift_ast (".swift_ast");
                 static ConstString g_sect_name_go_symtab (".gosymtab");
                 SectionType section_type = eSectionTypeOther;
                 if (m_sect_headers[idx].flags & llvm::COFF::IMAGE_SCN_CNT_CODE &&
@@ -763,6 +764,7 @@ ObjectFilePECOFF::CreateSections (SectionList &unified_section_list)
                 else if (const_sect_name == g_sect_name_dwarf_debug_ranges)    section_type = eSectionTypeDWARFDebugRanges;
                 else if (const_sect_name == g_sect_name_dwarf_debug_str)       section_type = eSectionTypeDWARFDebugStr;
                 else if (const_sect_name == g_sect_name_eh_frame)              section_type = eSectionTypeEHFrame;
+                else if (const_sect_name == g_sect_name_swift_ast)             section_type = eSectionTypeSwiftModules;
                 else if (const_sect_name == g_sect_name_go_symtab)             section_type = eSectionTypeGoSymtab;
                 else if (m_sect_headers[idx].flags & llvm::COFF::IMAGE_SCN_CNT_CODE)
                 {
@@ -847,7 +849,7 @@ ObjectFilePECOFF::Dump(Stream *s)
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         s->Printf("%p: ", static_cast<void*>(this));
         s->Indent();
         s->PutCString("ObjectFilePECOFF");

@@ -104,7 +104,6 @@ StringExtractor::GetChar (char fail_value)
 int
 StringExtractor::DecodeHexU8()
 {
-    SkipSpaces();
     if (GetBytesLeft() < 2)
     {
         return -1;
@@ -231,7 +230,6 @@ StringExtractor::GetHexMaxU32 (bool little_endian, uint32_t fail_value)
     uint32_t result = 0;
     uint32_t nibble_count = 0;
 
-    SkipSpaces();
     if (little_endian)
     {
         uint32_t shift_amount = 0;
@@ -294,7 +292,6 @@ StringExtractor::GetHexMaxU64 (bool little_endian, uint64_t fail_value)
     uint64_t result = 0;
     uint32_t nibble_count = 0;
 
-    SkipSpaces();
     if (little_endian)
     {
         uint32_t shift_amount = 0;

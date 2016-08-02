@@ -610,7 +610,7 @@ DWARFDebugInfoEntry::GetDIENamesAndRanges
         {
             if (die_ref.die_offset != DW_INVALID_OFFSET)
             {
-                DWARFDIE die = dwarf2Data->GetDIE(die_ref);
+                DWARFDIE die = dwarf2Data->DebugInfo()->GetDIE(die_ref);
                 if (die)
                     die.GetDIE()->GetDIENamesAndRanges(die.GetDWARF(), die.GetCU(), name, mangled, ranges, decl_file, decl_line, decl_column, call_file, call_line, call_column);
             }
@@ -1128,6 +1128,16 @@ DWARFDebugInfoEntry::GetAttributeValueAsUnsigned
     if (GetAttributeValue(dwarf2Data, cu, attr, form_value, nullptr, check_specification_or_abstract_origin))
         return form_value.Unsigned();
     return fail_value;
+}
+
+
+lldb::LanguageType
+DWARFDebugInfoEntry::GetLanguageAttributeValue (SymbolFileDWARF* dwarf2Data, const DWARFCompileUnit* cu) const
+{
+    const uint64_t language = GetAttributeValueAsUnsigned(dwarf2Data, cu, DW_AT_language, lldb::eLanguageTypeUnknown);
+    if (language == llvm::dwarf::DW_LANG_Swift)
+        return lldb::eLanguageTypeSwift;
+    return (lldb::LanguageType)language;
 }
 
 //----------------------------------------------------------------------

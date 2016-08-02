@@ -598,7 +598,6 @@ ProcessMachCore::GetMemoryRegionInfo(addr_t load_addr, MemoryRegionInfo &region_
                                                                            : MemoryRegionInfo::eNo);
             region_info.SetExecutable(permissions.Test(ePermissionsExecutable) ? MemoryRegionInfo::eYes
                                                                                : MemoryRegionInfo::eNo);
-            region_info.SetMapped(MemoryRegionInfo::eYes);
         }
         else if (load_addr < permission_entry->GetRangeBase())
         {
@@ -607,18 +606,11 @@ ProcessMachCore::GetMemoryRegionInfo(addr_t load_addr, MemoryRegionInfo &region_
             region_info.SetReadable(MemoryRegionInfo::eNo);
             region_info.SetWritable(MemoryRegionInfo::eNo);
             region_info.SetExecutable(MemoryRegionInfo::eNo);
-            region_info.SetMapped(MemoryRegionInfo::eNo);
         }
         return Error();
     }
 
-    region_info.GetRange().SetRangeBase(load_addr);
-    region_info.GetRange().SetRangeEnd(LLDB_INVALID_ADDRESS);
-    region_info.SetReadable(MemoryRegionInfo::eNo);
-    region_info.SetWritable(MemoryRegionInfo::eNo);
-    region_info.SetExecutable(MemoryRegionInfo::eNo);
-    region_info.SetMapped(MemoryRegionInfo::eNo);
-    return Error();
+    return Error("invalid address");
 }
 
 void

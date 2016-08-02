@@ -24,6 +24,7 @@
 #include "lldb/Core/StringList.h"
 #include "lldb/Core/Stream.h"
 #include "lldb/Core/StreamString.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Interpreter/OptionValue.h"
 
 namespace lldb_private {

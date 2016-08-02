@@ -118,12 +118,6 @@ ThreadPlanStepOverRange::IsEquivalentContext(const SymbolContext &context)
         {
             if (m_addr_context.function && m_addr_context.function == context.function)
             {
-                // It is okay to return to a different block of a straight function, we only have to 
-                // be more careful if returning from one inlined block to another.
-                if (m_addr_context.block->GetInlinedFunctionInfo() == nullptr
-                    && context.block->GetInlinedFunctionInfo() == nullptr)
-                    return true;
-                
                 if (m_addr_context.block && m_addr_context.block == context.block)
                     return true;
             }
@@ -238,7 +232,7 @@ ThreadPlanStepOverRange::ShouldStop (Event *event_ptr)
                 sc = frame_sp->GetSymbolContext (eSymbolContextEverything);
                 if (sc.line_entry.IsValid())
                 {
-                    if (sc.line_entry.original_file != m_addr_context.line_entry.original_file
+                    if (sc.line_entry.file != m_addr_context.line_entry.file
                          && sc.comp_unit == m_addr_context.comp_unit
                          && sc.function == m_addr_context.function)
                     {
@@ -262,7 +256,7 @@ ThreadPlanStepOverRange::ShouldStop (Event *event_ptr)
                                     // some code fragment by using #include <source-fragment.c> directly.
                                     LineEntry prev_line_entry;
                                     if (line_table->GetLineEntryAtIndex(entry_idx - 1, prev_line_entry)
-                                        && prev_line_entry.original_file == line_entry.original_file)
+                                        && prev_line_entry.file == line_entry.file)
                                     {
                                         SymbolContext prev_sc;
                                         Address prev_address = prev_line_entry.range.GetBaseAddress();
@@ -295,7 +289,7 @@ ThreadPlanStepOverRange::ShouldStop (Event *event_ptr)
                                         if (next_line_function != m_addr_context.function)
                                             break;
                                         
-                                        if (next_line_entry.original_file == m_addr_context.line_entry.original_file)
+                                        if (next_line_entry.file == m_addr_context.line_entry.file)
                                         {
                                             const bool abort_other_plans = false;
                                             const RunMode stop_other_threads = RunMode::eAllThreads;

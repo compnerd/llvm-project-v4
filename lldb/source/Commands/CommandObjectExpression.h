@@ -22,7 +22,7 @@
 #include "lldb/Interpreter/OptionGroupValueObjectDisplay.h"
 #include "lldb/Target/ExecutionContext.h"
 namespace lldb_private {
-
+    
 class CommandObjectExpression :
     public CommandObjectRaw,
     public IOHandlerDelegate
@@ -57,10 +57,12 @@ public:
         bool        top_level;
         bool        unwind_on_error;
         bool        ignore_breakpoints;
-        bool        allow_jit;
         bool        show_types;
         bool        show_summary;
         bool        debug;
+#ifdef LLDB_CONFIGURATION_DEBUG
+        bool        playground;
+#endif
         uint32_t    timeout;
         bool        try_all_threads;
         lldb::LanguageType language;
@@ -83,14 +85,14 @@ protected:
     void
     IOHandlerInputComplete(IOHandler &io_handler,
 			   std::string &line) override;
-    
+
     bool
     IOHandlerIsInputComplete (IOHandler &io_handler,
                               StringList &lines) override;
     
-    bool
-    DoExecute(const char *command,
-	      CommandReturnObject &result) override;
+    virtual bool
+    DoExecute (const char *command,
+               CommandReturnObject &result) override;
 
     bool
     EvaluateExpression (const char *expr,
@@ -105,6 +107,9 @@ protected:
     OptionGroupFormat m_format_options;
     OptionGroupValueObjectDisplay m_varobj_options;
     OptionGroupBoolean m_repl_option;
+#ifdef LLDB_CONFIGURATION_DEBUG
+    OptionGroupBoolean m_playground_option;
+#endif
     CommandOptions m_command_options;
     uint32_t m_expr_line_count;
     std::string m_expr_lines; // Multi-line expression support

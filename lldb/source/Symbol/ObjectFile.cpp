@@ -371,8 +371,10 @@ ObjectFile::GetAddressClass (addr_t file_addr)
                     case eSectionTypeDWARFDebugStrOffsets:
                     case eSectionTypeDWARFAppleNames:
                     case eSectionTypeDWARFAppleTypes:
+                    case eSectionTypeDWARFAppleExternalTypes:
                     case eSectionTypeDWARFAppleNamespaces:
                     case eSectionTypeDWARFAppleObjC:
+                    case eSectionTypeSwiftModules:
                         return eAddressClassDebug;
                     case eSectionTypeEHFrame:
                     case eSectionTypeARMexidx:
@@ -425,7 +427,10 @@ ObjectFile::GetAddressClass (addr_t file_addr)
             case eSymbolTypeObjCClass:      return eAddressClassRuntime;
             case eSymbolTypeObjCMetaClass:  return eAddressClassRuntime;
             case eSymbolTypeObjCIVar:       return eAddressClassRuntime;
+            case eSymbolTypeIVarOffset:     return eAddressClassRuntime;
+            case eSymbolTypeMetadata:       return eAddressClassRuntime;
             case eSymbolTypeReExported:     return eAddressClassRuntime;
+            case eSymbolTypeASTFile:        return eAddressClassDebug;
             }
         }
     }
@@ -600,7 +605,7 @@ ObjectFile::ClearSymtab ()
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_OBJECT));
         if (log)
             log->Printf ("%p ObjectFile::ClearSymtab () symtab = %p",
@@ -620,7 +625,7 @@ ObjectFile::GetSectionList(bool update_module_section_list)
             ModuleSP module_sp(GetModule());
             if (module_sp)
             {
-                std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+                lldb_private::Mutex::Locker locker(module_sp->GetMutex());
                 CreateSections(*module_sp->GetUnifiedSectionList());
             }
         }
@@ -639,7 +644,15 @@ ObjectFile::GetSymbolTypeFromName (llvm::StringRef name,
 {
     if (!name.empty())
     {
-        if (name.startswith("_OBJC_"))
+        if (name.startswith("_T"))
+        {
+            // Swift
+            if (name.startswith("_TM"))
+                return lldb::eSymbolTypeMetadata;
+            if (name.startswith("_TWvd"))
+                return lldb::eSymbolTypeIVarOffset;
+        }
+        else if (name.startswith("_OBJC_"))
         {
             // ObjC
             if (name.startswith("_OBJC_CLASS_$_"))

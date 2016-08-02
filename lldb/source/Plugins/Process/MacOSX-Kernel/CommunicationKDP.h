@@ -13,7 +13,6 @@
 // C Includes
 // C++ Includes
 #include <list>
-#include <mutex>
 #include <string>
 
 // Other libraries and framework includes
@@ -22,6 +21,7 @@
 #include "lldb/Core/Communication.h"
 #include "lldb/Core/Listener.h"
 #include "lldb/Core/StreamBuffer.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Host/Predicate.h"
 #include "lldb/Host/TimeValue.h"
 
@@ -109,7 +109,7 @@ public:
                                           uint32_t usec);
 
     bool
-    GetSequenceMutex(std::unique_lock<std::recursive_mutex> &lock);
+    GetSequenceMutex(lldb_private::Mutex::Locker& locker);
 
     bool
     CheckForPacket (const uint8_t *src, 
@@ -249,7 +249,7 @@ protected:
                                                 uint32_t timeout_usec);
 
     bool
-    WaitForNotRunningPrivate(const std::chrono::microseconds &timeout);
+    WaitForNotRunningPrivate (const lldb_private::TimeValue *timeout_ptr);
 
     void
     MakeRequestPacketHeader (CommandType request_type, 
@@ -324,7 +324,7 @@ protected:
     uint32_t m_addr_byte_size;
     lldb::ByteOrder m_byte_order;
     uint32_t m_packet_timeout;
-    std::recursive_mutex m_sequence_mutex; // Restrict access to sending/receiving packets to a single thread at a time
+    lldb_private::Mutex m_sequence_mutex;    // Restrict access to sending/receiving packets to a single thread at a time
     lldb_private::Predicate<bool> m_is_running;
     uint32_t m_session_key;
     uint8_t m_request_sequence_id;

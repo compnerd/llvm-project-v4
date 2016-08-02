@@ -16,7 +16,6 @@
 #include <limits.h>
 
 // C++ Includes
-#include <chrono>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -774,7 +773,8 @@ public:
     //------------------------------------------------------------------
     enum Warnings
     {
-        eWarningsOptimization = 1
+        eWarningsOptimization = 1,
+        eWarningsCantLoadSwift
     };
     
     typedef Range<lldb::addr_t, lldb::addr_t> LoadRange;
@@ -1001,14 +1001,16 @@ public:
     /// Subclasses should call Host::StartMonitoringChildProcess ()
     /// with:
     ///     callback = Process::SetHostProcessExitStatus
+    ///     callback_baton = nullptr
     ///     pid = Process::GetID()
     ///     monitor_signals = false
     //------------------------------------------------------------------
     static bool
-    SetProcessExitStatus(lldb::pid_t pid, // The process ID we want to monitor
+    SetProcessExitStatus(void *callback_baton,   // The callback baton which should be set to nullptr
+                         lldb::pid_t pid,        // The process ID we want to monitor
                          bool exited,
-                         int signo,   // Zero for no signal
-                         int status); // Exit value of process if signal is zero
+                         int signo,              // Zero for no signal
+                         int status);            // Exit value of process if signal is zero
 
     lldb::ByteOrder
     GetByteOrder () const;
@@ -1919,9 +1921,6 @@ public:
 
     //------------------------------------------------------------------
     /// Retrieve the list of shared libraries that are loaded for this process
-    /// This method is used on pre-macOS 10.12, pre-iOS 10, pre-tvOS 10, 
-    /// pre-watchOS 3 systems.  The following two methods are for newer versions
-    /// of those OSes.
     /// 
     /// For certain platforms, the time it takes for the DynamicLoader plugin to
     /// read all of the shared libraries out of memory over a slow communication
@@ -1950,35 +1949,6 @@ public:
         return StructuredData::ObjectSP();
     }
 
-    // On macOS 10.12, tvOS 10, iOS 10, watchOS 3 and newer, debugserver can return
-    // the full list of loaded shared libraries without needing any input.
-    virtual lldb_private::StructuredData::ObjectSP
-    GetLoadedDynamicLibrariesInfos ()
-    {
-        return StructuredData::ObjectSP();
-    }
-
-    // On macOS 10.12, tvOS 10, iOS 10, watchOS 3 and newer, debugserver can return
-    // information about binaries given their load addresses.
-    virtual lldb_private::StructuredData::ObjectSP
-    GetLoadedDynamicLibrariesInfos (const std::vector<lldb::addr_t> &load_addresses)
-    {
-        return StructuredData::ObjectSP();
-    }
-
-    //------------------------------------------------------------------
-    // Get information about the library shared cache, if that exists
-    //
-    // On macOS 10.12, tvOS 10, iOS 10, watchOS 3 and newer, debugserver can return
-    // information about the library shared cache (a set of standard libraries that are
-    // loaded at the same location for all processes on a system) in use.
-    //------------------------------------------------------------------
-    virtual lldb_private::StructuredData::ObjectSP
-    GetSharedCacheInfo ()
-    {
-        return StructuredData::ObjectSP();
-    }
-
     //------------------------------------------------------------------
     /// Print a user-visible warning about a module being built with optimization
     ///
@@ -1992,6 +1962,19 @@ public:
     //------------------------------------------------------------------
     void
     PrintWarningOptimization (const SymbolContext &sc);
+    
+    //------------------------------------------------------------------
+    /// Print a user-visible warning about a module having Swift settings incompatible with the current system
+    ///
+    /// Prints a async warning message to the user one time per Process for a Module
+    /// whose Swift AST sections couldn't be loaded because they aren't buildable on
+    /// the current machine.
+    ///
+    /// @param [in] module
+    ///     The affected Module.
+    //------------------------------------------------------------------
+    void
+    PrintWarningCantLoadSwift (const Module &module);
 
     virtual bool
     GetProcessInfo(ProcessInstanceInfo &info);
@@ -2470,32 +2453,6 @@ public:
     virtual lldb::addr_t
     ResolveIndirectFunction(const Address *address, Error &error);
 
-    //------------------------------------------------------------------
-    /// Locate the memory region that contains load_addr.
-    ///
-    /// If load_addr is within the address space the process has mapped
-    /// range_info will be filled in with the start and end of that range
-    /// as well as the permissions for that range and range_info.GetMapped
-    /// will return true.
-    ///
-    /// If load_addr is outside any mapped region then range_info will
-    /// have its start address set to load_addr and the end of the
-    /// range will indicate the start of the next mapped range or be
-    /// set to LLDB_INVALID_ADDRESS if there are no valid mapped ranges
-    /// between load_addr and the end of the process address space.
-    ///
-    /// GetMemoryRegionInfo will only return an error if it is
-    /// unimplemented for the current process.
-    ///
-    /// @param[in] load_addr
-    ///     The load address to query the range_info for.
-    ///
-    /// @param[out] range_info
-    ///     An range_info value containing the details of the range.
-    ///
-    /// @return
-    ///     An error value.
-    //------------------------------------------------------------------
     virtual Error
     GetMemoryRegionInfo (lldb::addr_t load_addr,
                          MemoryRegionInfo &range_info)
@@ -2504,19 +2461,6 @@ public:
         error.SetErrorString ("Process::GetMemoryRegionInfo() not supported");
         return error;
     }
-
-    //------------------------------------------------------------------
-    /// Obtain all the mapped memory regions within this process.
-    ///
-    /// @param[out] region_list
-    ///     A vector to contain MemoryRegionInfo objects for all mapped
-    ///     ranges.
-    ///
-    /// @return
-    ///     An error value.
-    //------------------------------------------------------------------
-    virtual Error
-    GetMemoryRegions (std::vector<lldb::MemoryRegionInfoSP>& region_list);
 
     virtual Error
     GetWatchpointSupportInfo (uint32_t &num)
@@ -2921,9 +2865,12 @@ public:
     // function releases the run lock after the stop. Setting use_run_lock to false
     // will avoid this behavior.
     lldb::StateType
-    WaitForProcessToStop(const std::chrono::microseconds &timeout, lldb::EventSP *event_sp_ptr = nullptr,
-                         bool wait_always = true, lldb::ListenerSP hijack_listener = lldb::ListenerSP(),
-                         Stream *stream = nullptr, bool use_run_lock = true);
+    WaitForProcessToStop(const TimeValue *timeout,
+                         lldb::EventSP *event_sp_ptr = nullptr,
+                         bool wait_always = true,
+                         lldb::ListenerSP hijack_listener = lldb::ListenerSP(),
+                         Stream *stream = nullptr,
+                         bool use_run_lock = true);
 
     uint32_t
     GetIOHandlerID () const
@@ -2945,7 +2892,8 @@ public:
     SyncIOHandler (uint32_t iohandler_id, uint64_t timeout_msec);
 
     lldb::StateType
-    WaitForStateChangedEvents(const std::chrono::microseconds &timeout, lldb::EventSP &event_sp,
+    WaitForStateChangedEvents(const TimeValue *timeout,
+                              lldb::EventSP &event_sp,
                               lldb::ListenerSP hijack_listener); // Pass an empty ListenerSP to use builtin listener
 
     //--------------------------------------------------------------------------------------
@@ -2962,13 +2910,18 @@ public:
     ///     Else this variable will be set to \b true or \b false to indicate if the process
     ///     needs to have its process IOHandler popped.
     ///
+    /// @param[out] pop_command_interpreter
+    ///     This variable will be set to \b true or \b false ot indicate if the process needs
+    ///     to have its command interpreter popped.
+    ///
     /// @return
     ///     \b true if the event describes a process state changed event, \b false otherwise.
     //--------------------------------------------------------------------------------------
     static bool
     HandleProcessStateChangedEvent (const lldb::EventSP &event_sp,
                                     Stream *stream,
-                                    bool &pop_process_io_handler);
+                                    bool &pop_process_io_handler,
+                                    bool &pop_command_interpreter);
 
     Event *
     PeekAtStateChangedEvents ();
@@ -3041,6 +2994,9 @@ public:
 
     virtual ObjCLanguageRuntime *
     GetObjCLanguageRuntime (bool retry_if_null = true);
+  
+    virtual SwiftLanguageRuntime *
+    GetSwiftLanguageRuntime (bool retry_if_null = true);
     
     bool
     IsPossibleDynamicValue (ValueObject& in_value);
@@ -3377,13 +3333,9 @@ protected:
     bool
     PrivateStateThreadIsValid () const
     {
-        lldb::StateType state = m_private_state.GetValue();
-        return state != lldb::eStateInvalid &&
-               state != lldb::eStateDetached &&
-               state != lldb::eStateExited &&
-               m_private_state_thread.IsJoinable();
+        return m_private_state_thread.IsJoinable();
     }
-
+    
     void
     ForceNextEventDelivery()
     {
@@ -3424,9 +3376,8 @@ protected:
     std::map<uint64_t, uint32_t> m_thread_id_to_index_id_map;
     int                         m_exit_status;          ///< The exit status of the process, or -1 if not set.
     std::string                 m_exit_string;          ///< A textual description of why a process exited.
-    std::mutex
-        m_exit_status_mutex; ///< Mutex so m_exit_status m_exit_string can be safely accessed from multiple threads
-    std::recursive_mutex m_thread_mutex;
+    Mutex                       m_exit_status_mutex;    ///< Mutex so m_exit_status m_exit_string can be safely accessed from multiple threads
+    Mutex                       m_thread_mutex;
     ThreadList                  m_thread_list_real;     ///< The threads for this process as are known to the protocol we are debugging with
     ThreadList                  m_thread_list;          ///< The threads for this process as the user will see them. This is usually the same as
                                                         ///< m_thread_list_real, but might be different if there is an OS plug-in creating memory threads
@@ -3447,11 +3398,11 @@ protected:
     lldb::ABISP                 m_abi_sp;
     lldb::IOHandlerSP           m_process_input_reader;
     Communication               m_stdio_communication;
-    std::recursive_mutex m_stdio_communication_mutex;
+    Mutex                       m_stdio_communication_mutex;
     bool                        m_stdin_forward;           /// Remember if stdin must be forwarded to remote debug server
     std::string                 m_stdout_data;
     std::string                 m_stderr_data;
-    std::recursive_mutex m_profile_data_comm_mutex;
+    Mutex                       m_profile_data_comm_mutex;
     std::vector<std::string>    m_profile_data;
     Predicate<uint32_t>         m_iohandler_sync;
     MemoryCache                 m_memory_cache;
@@ -3470,9 +3421,10 @@ protected:
     bool                        m_finalize_called; // This is set at the end of Process::Finalize()
     bool                        m_clear_thread_plans_on_stop;
     bool                        m_force_next_event_delivery;
+    bool                        m_destroy_in_process;
+    bool                        m_destroy_complete;
     lldb::StateType             m_last_broadcast_state;   /// This helps with the Public event coalescing in ShouldBroadcastEvent.
     std::map<lldb::addr_t,lldb::addr_t> m_resolved_indirect_addresses;
-    bool m_destroy_in_process;
     bool m_can_interpret_function_calls; // Some targets, e.g the OSX kernel, don't support the ability to modify the stack.
     WarningsCollection          m_warnings_issued;  // A set of object pointers which have already had warnings printed
     std::mutex                  m_run_thread_plan_lock;
@@ -3535,20 +3487,21 @@ protected:
     HaltPrivate();
 
     lldb::StateType
-    WaitForProcessStopPrivate(const std::chrono::microseconds &timeout, lldb::EventSP &event_sp);
+    WaitForProcessStopPrivate (const TimeValue *timeout, lldb::EventSP &event_sp);
 
     // This waits for both the state change broadcaster, and the control broadcaster.
     // If control_only, it only waits for the control broadcaster.
 
     bool
-    WaitForEventsPrivate(const std::chrono::microseconds &timeout, lldb::EventSP &event_sp, bool control_only);
+    WaitForEventsPrivate (const TimeValue *timeout, lldb::EventSP &event_sp, bool control_only);
 
     lldb::StateType
-    WaitForStateChangedEventsPrivate(const std::chrono::microseconds &timeout, lldb::EventSP &event_sp);
+    WaitForStateChangedEventsPrivate (const TimeValue *timeout, lldb::EventSP &event_sp);
 
     lldb::StateType
-    WaitForState(const std::chrono::microseconds &timeout, const lldb::StateType *match_states,
-                 const uint32_t num_match_states);
+    WaitForState (const TimeValue *timeout,
+                  const lldb::StateType *match_states,
+                  const uint32_t num_match_states);
 
     size_t
     WriteMemoryPrivate (lldb::addr_t addr, const void *buf, size_t size, Error &error);
@@ -3569,7 +3522,7 @@ protected:
     PushProcessIOHandler ();
     
     bool
-    PopProcessIOHandler ();
+    PopProcessIOHandler (bool pop_command_interpreter);
     
     bool
     ProcessIOHandlerIsActive ();

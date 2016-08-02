@@ -37,7 +37,6 @@
 #include "lldb/lldb-enumerations.h"
 
 class DWARFASTParserClang;
-class PDBASTParser;
 
 namespace lldb_private {
 
@@ -62,6 +61,8 @@ public:
     //------------------------------------------------------------------
     ClangASTContext(const char *triple = nullptr);
 
+    ClangASTContext (clang::ASTContext* ast_ctx);
+
     ~ClangASTContext() override;
 
     void
@@ -80,7 +81,7 @@ public:
     GetPluginNameStatic ();
 
     static lldb::TypeSystemSP
-    CreateInstance (lldb::LanguageType language, Module *module, Target *target);
+    CreateInstance (lldb::LanguageType language, Module *module, Target *target, const char *compiler_options);
     
     static void
     EnumerateSupportedLanguages(std::set<lldb::LanguageType> &languages_for_types, std::set<lldb::LanguageType> &languages_for_expressions);
@@ -255,6 +256,12 @@ public:
         return GetTranslationUnitDecl (getASTContext());
     }
     
+    //----------------------------------------------------------------------
+    // Copy "src" into this ClangASTContext.
+    //----------------------------------------------------------------------
+    CompilerType
+    CopyType (const CompilerType &src);
+
     static clang::Decl *
     CopyDecl (clang::ASTContext *dest_context, 
               clang::ASTContext *source_context,
@@ -325,6 +332,11 @@ public:
     static uint32_t
     GetNumBaseClasses (const clang::CXXRecordDecl *cxx_record_decl,
                        bool omit_empty_base_classes);
+
+    static uint32_t
+    GetIndexForRecordBase (const clang::RecordDecl *record_decl,
+                           const clang::CXXBaseSpecifier *base_spec,
+                           bool omit_empty_base_classes);
 
     CompilerType
     CreateRecordType(clang::DeclContext *decl_ctx,
@@ -502,7 +514,7 @@ public:
                            clang::DeclContext *decl_ctx, 
                            const Declaration &decl, 
                            const CompilerType &integer_qual_type);
-    
+
     //------------------------------------------------------------------
     // Integer type functions
     //------------------------------------------------------------------
@@ -533,8 +545,6 @@ public:
     //------------------------------------------------------------------
     DWARFASTParser *
     GetDWARFParser() override;
-    PDBASTParser *
-    GetPDBParser();
 
     //------------------------------------------------------------------
     // ClangASTContext callbacks for external source lookups.
@@ -707,19 +717,14 @@ public:
     
     bool
     IsPolymorphicClass (lldb::opaque_compiler_type_t type) override;
-
-    static bool
-    IsClassType(lldb::opaque_compiler_type_t type);
-
-    static bool
-    IsEnumType(lldb::opaque_compiler_type_t type);
-
-    bool
-    IsPossibleDynamicType(lldb::opaque_compiler_type_t type,
-                          CompilerType *target_type, // Can pass nullptr
-                          bool check_cplusplus,
-                          bool check_objc) override;
     
+    bool
+    IsPossibleDynamicType (lldb::opaque_compiler_type_t type,
+                           CompilerType *target_type, // Can pass nullptr
+                           bool check_cplusplus,
+                           bool check_objc,
+                           bool check_swift) override;
+
     bool
     IsRuntimeGeneratedType (lldb::opaque_compiler_type_t type) override;
     
@@ -792,6 +797,9 @@ public:
     
     CompilerType
     GetCanonicalType (lldb::opaque_compiler_type_t type) override;
+
+    CompilerType
+    GetInstanceType (lldb::opaque_compiler_type_t type) override;
     
     CompilerType
     GetFullyUnqualifiedType (lldb::opaque_compiler_type_t type) override;
@@ -812,6 +820,12 @@ public:
     
     TypeMemberFunctionImpl
     GetMemberFunctionAtIndex (lldb::opaque_compiler_type_t type, size_t idx) override;
+
+    static CompilerType
+    GetLValueReferenceType (const CompilerType& compiler_type);
+    
+    CompilerType
+    GetLValueReferenceType (lldb::opaque_compiler_type_t type) override;
     
     CompilerType
     GetNonReferenceType (lldb::opaque_compiler_type_t type) override;
@@ -823,7 +837,7 @@ public:
     GetPointerType (lldb::opaque_compiler_type_t type) override;
 
     CompilerType
-    GetLValueReferenceType (lldb::opaque_compiler_type_t type) override;
+    GetRValueReferenceType (const CompilerType& type);
 
     CompilerType
     GetRValueReferenceType (lldb::opaque_compiler_type_t type) override;
@@ -843,7 +857,13 @@ public:
     // If the current object represents a typedef type, get the underlying type
     CompilerType
     GetTypedefedType (lldb::opaque_compiler_type_t type) override;
-    
+
+    CompilerType
+    GetUnboundType (lldb::opaque_compiler_type_t type) override;
+
+    static CompilerType
+    RemoveFastQualifiers (const CompilerType& type);
+
     //----------------------------------------------------------------------
     // Create related types using the current type's AST
     //----------------------------------------------------------------------
@@ -862,6 +882,9 @@ public:
     
     uint64_t
     GetBitSize (lldb::opaque_compiler_type_t type, ExecutionContextScope *exe_scope) override;
+    
+    uint64_t
+    GetByteStride (lldb::opaque_compiler_type_t type) override;
     
     lldb::Encoding
     GetEncoding (lldb::opaque_compiler_type_t type, uint64_t &count) override;
@@ -1116,8 +1139,9 @@ public:
                    size_t data_byte_size,
                    uint32_t bitfield_bit_size,
                    uint32_t bitfield_bit_offset,
-                   ExecutionContextScope *exe_scope) override;
-    
+                   ExecutionContextScope *exe_scope,
+                   bool is_base_class) override;
+
     void
     DumpSummary (lldb::opaque_compiler_type_t type,
                  ExecutionContext *exe_ctx,
@@ -1207,7 +1231,6 @@ protected:
     std::unique_ptr<clang::SelectorTable>           m_selector_table_ap;
     std::unique_ptr<clang::Builtin::Context>        m_builtins_ap;
     std::unique_ptr<DWARFASTParserClang>            m_dwarf_ast_parser_ap;
-    std::unique_ptr<PDBASTParser>                   m_pdb_ast_parser_ap;
     std::unique_ptr<ClangASTSource>                 m_scratch_ast_source_ap;
     std::unique_ptr<clang::MangleContext>           m_mangle_ctx_ap;
     CompleteTagDeclCallback                         m_callback_tag_decl;

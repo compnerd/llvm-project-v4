@@ -16,6 +16,7 @@
 
 // Other libraries and framework includes
 // Project includes
+#include "lldb/Host/Mutex.h"
 
 namespace lldb_private
 {
@@ -206,33 +207,36 @@ public:
         return AdaptedConstIterator<C, E, A>(m_container.end());
     }
 };
-
-template <typename C, typename E, E (*A)(typename C::const_iterator &), typename MutexType>
-class LockingAdaptedIterable : public AdaptedIterable<C, E, A>
+    
+template <typename C, typename E, E (*A)(typename C::const_iterator &)> class LockingAdaptedIterable : public AdaptedIterable<C, E, A>
 {
 public:
-    LockingAdaptedIterable(C &container, MutexType &mutex) : AdaptedIterable<C, E, A>(container), m_mutex(&mutex)
+    LockingAdaptedIterable (C &container, Mutex &mutex) :
+        AdaptedIterable<C,E,A>(container),
+        m_mutex(&mutex)
     {
-        m_mutex->lock();
+        m_mutex->Lock();
     }
-
-    LockingAdaptedIterable(LockingAdaptedIterable &&rhs) : AdaptedIterable<C, E, A>(rhs), m_mutex(rhs.m_mutex)
+    
+    LockingAdaptedIterable (LockingAdaptedIterable &&rhs) :
+        AdaptedIterable<C,E,A>(rhs),
+        m_mutex(rhs.m_mutex)
     {
         rhs.m_mutex = nullptr;
     }
-
-    ~LockingAdaptedIterable()
+    
+    ~LockingAdaptedIterable ()
     {
         if (m_mutex)
-            m_mutex->unlock();
+            m_mutex->Unlock();
     }
-
+    
 private:
-    MutexType *m_mutex = nullptr;
+    Mutex *m_mutex = nullptr;
 
     DISALLOW_COPY_AND_ASSIGN(LockingAdaptedIterable);
 };
-
+    
 } // namespace lldb_private
 
 #endif // liblldb_Iterable_h_

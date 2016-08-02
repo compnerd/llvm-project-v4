@@ -186,9 +186,13 @@ AppleObjCRuntime::GetObjectDescription (Stream &strm, Value &value, ExecutionCon
     options.SetStopOthers(true);
     options.SetIgnoreBreakpoints(true);
     options.SetTimeoutUsec(PO_FUNCTION_TIMEOUT_USEC);
-
-    ExpressionResults results =
-        m_print_object_caller_up->ExecuteFunction(exe_ctx, &wrapper_struct_addr, options, diagnostics, ret);
+    options.SetLanguage(lldb::eLanguageTypeObjC_plus_plus);
+    
+    ExpressionResults results = m_print_object_caller_up->ExecuteFunction (exe_ctx,
+                                                                           &wrapper_struct_addr,
+                                                                           options,
+                                                                           diagnostics,
+                                                                           ret);
     if (results != eExpressionCompleted)
     {
         strm.Printf("Error evaluating Print Object function: %d.\n", results);
@@ -260,13 +264,22 @@ AppleObjCRuntime::GetPrintForDebuggerAddr()
 bool
 AppleObjCRuntime::CouldHaveDynamicValue (ValueObject &in_value)
 {
-    return in_value.GetCompilerType().IsPossibleDynamicType (NULL,
-                                                          false, // do not check C++
-                                                          true); // check ObjC
+    return CouldHaveDynamicValue(in_value,
+                                 /* allow_swift = */ false);
 }
 
 bool
-AppleObjCRuntime::GetDynamicTypeAndAddress (ValueObject &in_value, 
+AppleObjCRuntime::CouldHaveDynamicValue (ValueObject &in_value,
+                                         bool allow_swift)
+{
+    return in_value.GetCompilerType().IsPossibleDynamicType (NULL,
+                                                             false, // do not check C++
+                                                             true,  // check ObjC
+                                                             allow_swift);
+}
+
+bool
+AppleObjCRuntime::GetDynamicTypeAndAddress (ValueObject &in_value,
                                             lldb::DynamicValueType use_dynamic, 
                                             TypeAndOrName &class_type_or_name, 
                                             Address &address,
@@ -305,6 +318,20 @@ AppleObjCRuntime::FixUpDynamicType (const TypeAndOrName& type_and_or_name,
         ret.SetName(corrected_name.c_str());
     }
     return ret;
+}
+
+bool
+AppleObjCRuntime::GetDynamicTypeAndAddress (ValueObject &in_value,
+                                            lldb::DynamicValueType use_dynamic,
+                                            TypeAndOrName &class_type_or_name,
+                                            Address &address,
+                                            Value::ValueType &value_type,
+                                            bool allow_swift)
+{
+    if (!allow_swift)
+        return GetDynamicTypeAndAddress(in_value, use_dynamic, class_type_or_name, address, value_type);
+    else
+        return false;
 }
 
 bool
@@ -394,8 +421,8 @@ AppleObjCRuntime::GetObjCVersion (Process *process, ModuleSP &objc_module_sp)
         return ObjCRuntimeVersions::eObjC_VersionUnknown;
 
     const ModuleList &target_modules = target.GetImages();
-    std::lock_guard<std::recursive_mutex> gaurd(target_modules.GetMutex());
-
+    Mutex::Locker modules_locker(target_modules.GetMutex());
+    
     size_t num_images = target_modules.GetSize();
     for (size_t i = 0; i < num_images; i++)
     {
@@ -524,7 +551,7 @@ AppleObjCRuntime::ReadObjCLibraryIfNeeded (const ModuleList &module_list)
 {
     if (!HasReadObjCLibrary ())
     {
-        std::lock_guard<std::recursive_mutex> guard(module_list.GetMutex());
+        Mutex::Locker locker (module_list.GetMutex ());
 
         size_t num_modules = module_list.GetSize();
         for (size_t i = 0; i < num_modules; i++)

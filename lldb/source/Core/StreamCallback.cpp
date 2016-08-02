@@ -18,8 +18,13 @@
 using namespace lldb;
 using namespace lldb_private;
 
-StreamCallback::StreamCallback(lldb::LogOutputCallback callback, void *baton)
-    : Stream(0, 4, eByteOrderBig), m_callback(callback), m_baton(baton), m_accumulated_data(), m_collection_mutex()
+
+StreamCallback::StreamCallback (lldb::LogOutputCallback callback, void *baton) :
+    Stream (0, 4, eByteOrderBig),
+    m_callback (callback),
+    m_baton (baton),
+    m_accumulated_data (),
+    m_collection_mutex ()
 {
 }
 
@@ -30,7 +35,7 @@ StreamCallback::~StreamCallback ()
 StreamString &
 StreamCallback::FindStreamForThread(lldb::tid_t cur_tid)
 {
-    std::lock_guard<std::mutex> guard(m_collection_mutex);
+    Mutex::Locker locker(m_collection_mutex);
     collection::iterator iter = m_accumulated_data.find (cur_tid);
     if (iter == m_accumulated_data.end())
     {

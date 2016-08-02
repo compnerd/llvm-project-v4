@@ -49,7 +49,7 @@ class GoASTContext : public TypeSystem
     GetPluginNameStatic ();
 
     static lldb::TypeSystemSP
-    CreateInstance (lldb::LanguageType language, Module *module, Target *target);
+    CreateInstance (lldb::LanguageType language, Module *module, Target *target, const char *compiler_options);
     
     static void
     EnumerateSupportedLanguages(std::set<lldb::LanguageType> &languages_for_types, std::set<lldb::LanguageType> &languages_for_expressions);
@@ -171,8 +171,10 @@ class GoASTContext : public TypeSystem
     bool IsIntegerType(lldb::opaque_compiler_type_t type, bool &is_signed) override;
 
     bool IsPossibleDynamicType(lldb::opaque_compiler_type_t type,
-                               CompilerType *target_type, // Can pass nullptr
-                               bool check_cplusplus, bool check_objc) override;
+                                       CompilerType *target_type, // Can pass nullptr
+                                       bool check_cplusplus,
+                                       bool check_objc,
+                                       bool check_swift) override;
 
     bool IsPointerType(lldb::opaque_compiler_type_t type, CompilerType *pointee_type = nullptr) override;
 
@@ -206,7 +208,7 @@ class GoASTContext : public TypeSystem
     lldb::LanguageType GetMinimumLanguage(lldb::opaque_compiler_type_t type) override;
 
     lldb::TypeClass GetTypeClass(lldb::opaque_compiler_type_t type) override;
-
+    
     //----------------------------------------------------------------------
     // Creating related types
     //----------------------------------------------------------------------
@@ -214,6 +216,8 @@ class GoASTContext : public TypeSystem
     CompilerType GetArrayElementType(lldb::opaque_compiler_type_t type, uint64_t *stride = nullptr) override;
 
     CompilerType GetCanonicalType(lldb::opaque_compiler_type_t type) override;
+    
+    CompilerType GetInstanceType (lldb::opaque_compiler_type_t type) override { return CompilerType(this, type); }
 
     // Returns -1 if this isn't a function of if the function doesn't have a prototype
     // Returns a value >= 0 if there is a prototype.
@@ -236,6 +240,8 @@ class GoASTContext : public TypeSystem
     //----------------------------------------------------------------------
 
     uint64_t GetBitSize(lldb::opaque_compiler_type_t type, ExecutionContextScope *exe_scope) override;
+    
+    uint64_t GetByteStride (lldb::opaque_compiler_type_t type) override { return 0; }
 
     lldb::Encoding GetEncoding(lldb::opaque_compiler_type_t type, uint64_t &count) override;
 
@@ -316,9 +322,16 @@ class GoASTContext : public TypeSystem
                    uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset, bool show_types, bool show_summary,
                    bool verbose, uint32_t depth) override;
 
-    bool DumpTypeValue(lldb::opaque_compiler_type_t type, Stream *s, lldb::Format format, const DataExtractor &data,
-                       lldb::offset_t data_offset, size_t data_byte_size, uint32_t bitfield_bit_size,
-                       uint32_t bitfield_bit_offset, ExecutionContextScope *exe_scope) override;
+    virtual bool DumpTypeValue(lldb::opaque_compiler_type_t type,
+                               Stream *s,
+                               lldb::Format format,
+                               const DataExtractor &data,
+                               lldb::offset_t data_offset,
+                               size_t data_byte_size,
+                               uint32_t bitfield_bit_size,
+                               uint32_t bitfield_bit_offset,
+                               ExecutionContextScope *exe_scope,
+                               bool is_base_class) override;
 
     void DumpTypeDescription(lldb::opaque_compiler_type_t type) override; // Dump to stdout
 
@@ -363,7 +376,9 @@ class GoASTContext : public TypeSystem
     bool IsTypedefType(lldb::opaque_compiler_type_t type) override;
 
     // If the current object represents a typedef type, get the underlying type
-    CompilerType GetTypedefedType(lldb::opaque_compiler_type_t type) override;
+    CompilerType GetTypedefedType(void *type) override;
+    
+    CompilerType GetUnboundType (lldb::opaque_compiler_type_t type) override { return CompilerType(this, type); }
 
     bool IsVectorType(lldb::opaque_compiler_type_t type, CompilerType *element_type, uint64_t *size) override;
 
@@ -371,6 +386,8 @@ class GoASTContext : public TypeSystem
 
     CompilerType GetNonReferenceType(lldb::opaque_compiler_type_t type) override;
 
+    CompilerType GetLValueReferenceType (lldb::opaque_compiler_type_t type) override { return CompilerType(this, type); }
+    
     bool IsReferenceType(lldb::opaque_compiler_type_t type, CompilerType *pointee_type = nullptr, bool *is_rvalue = nullptr) override;
 
   private:

@@ -408,8 +408,6 @@ FileSpec::SetFile (const char *pathname, bool resolve, PathSyntax syntax)
         m_is_resolved = true;
     }
 
-    Normalize(resolved, syntax);
-
     llvm::StringRef resolve_path_ref(resolved.c_str());
     size_t dir_end = ParentPathEnd(resolve_path_ref, syntax);
     if (dir_end == 0)
@@ -1622,7 +1620,7 @@ FileSpec::IsSourceImplementationFile () const
     ConstString extension (GetFileNameExtension());
     if (extension)
     {
-        static RegularExpression g_source_file_regex ("^([cC]|[mM]|[mM][mM]|[cC][pP][pP]|[cC]\\+\\+|[cC][xX][xX]|[cC][cC]|[cC][pP]|[sS]|[aA][sS][mM]|[fF]|[fF]77|[fF]90|[fF]95|[fF]03|[fF][oO][rR]|[fF][tT][nN]|[fF][pP][pP]|[aA][dD][aA]|[aA][dD][bB]|[aA][dD][sS])$");
+        static RegularExpression g_source_file_regex ("^([cC]|[mM]|[mM][mM]|[cC][pP][pP]|[cC]\\+\\+|[cC][xX][xX]|[cC][cC]|[cC][pP]|[sS]|[aA][sS][mM]|[fF]|[fF]77|[fF]90|[fF]95|[fF]03|[fF][oO][rR]|[fF][tT][nN]|[fF][pP][pP]|[aA][dD][aA]|[aA][dD][bB]|[aA][dD][sS]|[sS][wW][iI][fF][tT])$");
         return g_source_file_regex.Execute (extension.GetCString());
     }
     return false;

@@ -502,7 +502,6 @@ class PythonCallable : public PythonObject
 public:
     struct ArgInfo {
         size_t count;
-        bool is_bound_method : 1;
         bool has_varargs : 1;
         bool has_kwargs : 1;
     };

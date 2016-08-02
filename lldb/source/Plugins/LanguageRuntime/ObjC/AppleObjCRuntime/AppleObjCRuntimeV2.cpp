@@ -62,6 +62,10 @@
 #include "AppleObjCDeclVendor.h"
 #include "AppleObjCTrampolineHandler.h"
 
+#include "clang/AST/ASTContext.h"
+#include "clang/AST/DeclObjC.h"
+
+#include <vector>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -80,7 +84,12 @@ extern "C"
     char *strncpy (char * s1, const char * s2, size_t n);
     int printf(const char * format, ...);
 }
-#define DEBUG_PRINTF(fmt, ...) if (should_log) printf(fmt, ## __VA_ARGS__)
+//#define ENABLE_DEBUG_PRINTF // COMMENT THIS LINE OUT PRIOR TO CHECKIN
+#ifdef ENABLE_DEBUG_PRINTF
+#define DEBUG_PRINTF(fmt, ...) printf(fmt, ## __VA_ARGS__)
+#else
+#define DEBUG_PRINTF(fmt, ...)
+#endif
 
 typedef struct _NXMapTable {
     void *prototype;
@@ -106,8 +115,7 @@ struct ClassInfo
 uint32_t
 __lldb_apple_objc_v2_get_dynamic_class_info (void *gdb_objc_realized_classes_ptr,
                                              void *class_infos_ptr,
-                                             uint32_t class_infos_byte_size,
-                                             uint32_t should_log)
+                                             uint32_t class_infos_byte_size)
 {
     DEBUG_PRINTF ("gdb_objc_realized_classes_ptr = %p\n", gdb_objc_realized_classes_ptr);
     DEBUG_PRINTF ("class_infos_ptr = %p\n", class_infos_ptr);
@@ -165,7 +173,12 @@ extern "C"
     int printf(const char * format, ...);
 }
 
-#define DEBUG_PRINTF(fmt, ...) if (should_log) printf(fmt, ## __VA_ARGS__)
+// #define ENABLE_DEBUG_PRINTF // COMMENT THIS LINE OUT PRIOR TO CHECKIN
+#ifdef ENABLE_DEBUG_PRINTF
+#define DEBUG_PRINTF(fmt, ...) printf(fmt, ## __VA_ARGS__)
+#else
+#define DEBUG_PRINTF(fmt, ...)
+#endif
 
 
 struct objc_classheader_t {
@@ -214,13 +227,12 @@ struct ClassInfo
 uint32_t
 __lldb_apple_objc_v2_get_shared_cache_class_info (void *objc_opt_ro_ptr,
                                                   void *class_infos_ptr,
-                                                  uint32_t class_infos_byte_size,
-                                                  uint32_t should_log)
+                                                  uint32_t class_infos_byte_size)
 {
     uint32_t idx = 0;
     DEBUG_PRINTF ("objc_opt_ro_ptr = %p\n", objc_opt_ro_ptr);
     DEBUG_PRINTF ("class_infos_ptr = %p\n", class_infos_ptr);
-    DEBUG_PRINTF ("class_infos_byte_size = %u (%llu class infos)\n", class_infos_byte_size, (uint64_t)(class_infos_byte_size/sizeof(ClassInfo)));
+    DEBUG_PRINTF ("class_infos_byte_size = %u (%" PRIu64 " class infos)\n", class_infos_byte_size, (size_t)(class_infos_byte_size/sizeof(ClassInfo)));
     if (objc_opt_ro_ptr)
     {
         const objc_opt_t *objc_opt = (objc_opt_t *)objc_opt_ro_ptr;
@@ -249,7 +261,6 @@ __lldb_apple_objc_v2_get_shared_cache_class_info (void *objc_opt_ro_ptr,
             else
                 clsopt = (const objc_clsopt_t*)((uint8_t *)objc_opt + objc_opt->clsopt_offset);
             const size_t max_class_infos = class_infos_byte_size/sizeof(ClassInfo);
-            DEBUG_PRINTF("max_class_infos = %llu\n", (uint64_t)max_class_infos);
             ClassInfo *class_infos = (ClassInfo *)class_infos_ptr;
             int32_t invalidEntryOffset = 0;
             // this is safe to do because the version field order is invariant
@@ -261,21 +272,13 @@ __lldb_apple_objc_v2_get_shared_cache_class_info (void *objc_opt_ro_ptr,
             DEBUG_PRINTF ("clsopt->capacity = %u\n", clsopt->capacity);
             DEBUG_PRINTF ("clsopt->mask = 0x%8.8x\n", clsopt->mask);
             DEBUG_PRINTF ("classOffsets = %p\n", classOffsets);
-            DEBUG_PRINTF("invalidEntryOffset = %d\n", invalidEntryOffset);
             for (uint32_t i=0; i<clsopt->capacity; ++i)
             {
                 const int32_t clsOffset = classOffsets[i].clsOffset;
-                DEBUG_PRINTF("clsOffset[%u] = %u\n", i, clsOffset);
                 if (clsOffset & 1)
-                {
-                    DEBUG_PRINTF("clsOffset & 1\n");
                     continue; // duplicate
-                }
                 else if (clsOffset == invalidEntryOffset)
-                {
-                    DEBUG_PRINTF("clsOffset == invalidEntryOffset\n");
                     continue; // invalid offset
-                }
                 
                 if (class_infos && idx < max_class_infos)
                 {
@@ -288,10 +291,6 @@ __lldb_apple_objc_v2_get_shared_cache_class_info (void *objc_opt_ro_ptr,
                     for (unsigned char c = *s; c; c = *++s)
                         h = ((h << 5) + h) + c;
                     class_infos[idx].hash = h;
-                }
-                else
-                {
-                    DEBUG_PRINTF("not(class_infos && idx < max_class_infos)\n");
                 }
                 ++idx;
             }
@@ -379,35 +378,37 @@ ExtractRuntimeGlobalSymbol (Process* process,
     }
 }
 
-AppleObjCRuntimeV2::AppleObjCRuntimeV2(Process *process, const ModuleSP &objc_module_sp)
-    : AppleObjCRuntime(process),
-      m_get_class_info_code(),
-      m_get_class_info_args(LLDB_INVALID_ADDRESS),
-      m_get_class_info_args_mutex(),
-      m_get_shared_cache_class_info_code(),
-      m_get_shared_cache_class_info_args(LLDB_INVALID_ADDRESS),
-      m_get_shared_cache_class_info_args_mutex(),
-      m_decl_vendor_ap(),
-      m_isa_hash_table_ptr(LLDB_INVALID_ADDRESS),
-      m_hash_signature(),
-      m_has_object_getClass(false),
-      m_loaded_objc_opt(false),
-      m_non_pointer_isa_cache_ap(NonPointerISACache::CreateInstance(*this, objc_module_sp)),
-      m_tagged_pointer_vendor_ap(TaggedPointerVendorV2::CreateInstance(*this, objc_module_sp)),
-      m_encoding_to_type_sp(),
-      m_noclasses_warning_emitted(false)
+AppleObjCRuntimeV2::AppleObjCRuntimeV2 (Process *process,
+                                        const ModuleSP &objc_module_sp) :
+    AppleObjCRuntime (process),
+    m_get_class_info_code(),
+    m_get_class_info_args (LLDB_INVALID_ADDRESS),
+    m_get_class_info_args_mutex (Mutex::eMutexTypeNormal),
+    m_get_shared_cache_class_info_code(),
+    m_get_shared_cache_class_info_args (LLDB_INVALID_ADDRESS),
+    m_get_shared_cache_class_info_args_mutex (Mutex::eMutexTypeNormal),
+    m_decl_vendor_ap (),
+    m_isa_hash_table_ptr (LLDB_INVALID_ADDRESS),
+    m_hash_signature (),
+    m_has_object_getClass (false),
+    m_loaded_objc_opt (false),
+    m_non_pointer_isa_cache_ap(NonPointerISACache::CreateInstance(*this,objc_module_sp)),
+    m_tagged_pointer_vendor_ap(TaggedPointerVendorV2::CreateInstance(*this,objc_module_sp)),
+    m_encoding_to_type_sp(),
+    m_warn_if_no_classes_cached{false,false},
+    m_noclasses_warning_emitted(false)
 {
     static const ConstString g_gdb_object_getClass("gdb_object_getClass");
-    m_has_object_getClass =
-        (objc_module_sp->FindFirstSymbolWithNameAndType(g_gdb_object_getClass, eSymbolTypeCode) != NULL);
+    m_has_object_getClass = (objc_module_sp->FindFirstSymbolWithNameAndType(g_gdb_object_getClass, eSymbolTypeCode) != NULL);
 }
 
 bool
 AppleObjCRuntimeV2::GetDynamicTypeAndAddress (ValueObject &in_value,
-                                              DynamicValueType use_dynamic, 
-                                              TypeAndOrName &class_type_or_name, 
+                                              lldb::DynamicValueType use_dynamic,
+                                              TypeAndOrName &class_type_or_name,
                                               Address &address,
-                                              Value::ValueType &value_type)
+                                              Value::ValueType &value_type,
+                                              bool allow_swift)
 {
     // We should never get here with a null process...
     assert (m_process != NULL);
@@ -426,7 +427,7 @@ AppleObjCRuntimeV2::GetDynamicTypeAndAddress (ValueObject &in_value,
     value_type = Value::ValueType::eValueTypeScalar;
 
     // Make sure we can have a dynamic value before starting...
-    if (CouldHaveDynamicValue (in_value))
+    if (CouldHaveDynamicValue (in_value, allow_swift))
     {
         // First job, pull out the address at 0 offset from the object  That will be the ISA pointer.
         ClassDescriptorSP objc_class_sp (GetNonKVOClassDescriptor (in_value));
@@ -461,8 +462,23 @@ AppleObjCRuntimeV2::GetDynamicTypeAndAddress (ValueObject &in_value,
                 }
             }
         }
-    }    
+    }
     return class_type_or_name.IsEmpty() == false;
+}
+
+bool
+AppleObjCRuntimeV2::GetDynamicTypeAndAddress (ValueObject &in_value,
+                                              DynamicValueType use_dynamic, 
+                                              TypeAndOrName &class_type_or_name, 
+                                              Address &address,
+                                              Value::ValueType &value_type)
+{
+    return GetDynamicTypeAndAddress(in_value,
+                                    use_dynamic,
+                                    class_type_or_name,
+                                    address,
+                                    value_type,
+                                    /* allow_swift = */ false);
 }
 
 //------------------------------------------------------------------
@@ -601,7 +617,7 @@ protected:
         {
             auto iterators_pair = objc_runtime->GetDescriptorIteratorPair();
             auto iterator = iterators_pair.first;
-            auto &std_out = result.GetOutputStream();
+            auto &out = result.GetOutputStream();
             for(; iterator != iterators_pair.second; iterator++)
             {
                 if (iterator->second)
@@ -609,15 +625,15 @@ protected:
                     const char* class_name = iterator->second->GetClassName().AsCString("<unknown>");
                     if (regex_up && class_name && !regex_up->Execute(class_name))
                         continue;
-                    std_out.Printf("isa = 0x%" PRIx64, iterator->first);
-                    std_out.Printf(" name = %s", class_name);
-                    std_out.Printf(" instance size = %" PRIu64, iterator->second->GetInstanceSize());
-                    std_out.Printf(" num ivars = %" PRIuPTR, (uintptr_t)iterator->second->GetNumIVars());
+                    out.Printf("isa = 0x%" PRIx64, iterator->first);
+                    out.Printf(" name = %s", class_name);
+                    out.Printf(" instance size = %" PRIu64, iterator->second->GetInstanceSize());
+                    out.Printf(" num ivars = %" PRIuPTR, (uintptr_t)iterator->second->GetNumIVars());
                     if (auto superclass = iterator->second->GetSuperclass())
                     {
-                        std_out.Printf(" superclass = %s", superclass->GetClassName().AsCString("<unknown>"));
+                        out.Printf(" superclass = %s", superclass->GetClassName().AsCString("<unknown>"));
                     }
-                    std_out.Printf("\n");
+                    out.Printf("\n");
                     if (m_options.m_verbose)
                     {
                         for(size_t i = 0;
@@ -625,23 +641,23 @@ protected:
                             i++)
                         {
                             auto ivar = iterator->second->GetIVarAtIndex(i);
-                            std_out.Printf("  ivar name = %s type = %s size = %" PRIu64 " offset = %" PRId32 "\n",
+                            out.Printf("  ivar name = %s type = %s size = %" PRIu64 " offset = %" PRId32 "\n",
                                                             ivar.m_name.AsCString("<unknown>"),
                                                             ivar.m_type.GetDisplayTypeName().AsCString("<unknown>"),
                                                             ivar.m_size,
                                                             ivar.m_offset);
                         }
                         iterator->second->Describe(nullptr,
-                                                   [objc_runtime, &std_out] (const char* name, const char* type) -> bool {
-                                                       std_out.Printf("  instance method name = %s type = %s\n",
-                                                                      name,
-                                                                      type);
+                                                   [objc_runtime, &out] (const char* name, const char* type) -> bool {
+                                                       out.Printf("  instance method name = %s type = %s\n",
+                                                                  name,
+                                                                  type);
                                                        return false;
                                                    },
-                                                   [objc_runtime, &std_out] (const char* name, const char* type) -> bool {
-                                                       std_out.Printf("  class method name = %s type = %s\n",
-                                                                      name,
-                                                                      type);
+                                                   [objc_runtime, &out] (const char* name, const char* type) -> bool {
+                                                       out.Printf("  class method name = %s type = %s\n",
+                                                                  name,
+                                                                  type);
                                                        return false;
                                                    },
                                                    nullptr);
@@ -651,7 +667,7 @@ protected:
                 {
                     if (regex_up && !regex_up->Execute(""))
                         continue;
-                    std_out.Printf("isa = 0x%" PRIx64 " has no associated class.\n", iterator->first);
+                    out.Printf("isa = 0x%" PRIx64 " has no associated class.\n", iterator->first);
                 }
             }
             result.SetStatus(lldb::eReturnStatusSuccessFinishResult);
@@ -1439,7 +1455,6 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapDynamic(RemoteNXMapTable &hash_table
         value.SetValueType (Value::eValueTypeScalar);
         value.SetCompilerType (clang_uint32_t_type);
         arguments.PushValue (value);
-        arguments.PushValue (value);
         
         get_class_info_function = m_get_class_info_code->MakeFunctionCaller(clang_uint32_t_type,
                                                                             arguments,
@@ -1478,17 +1493,15 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapDynamic(RemoteNXMapTable &hash_table
                                                             err);
     
     if (class_infos_addr == LLDB_INVALID_ADDRESS)
-        return DescriptorMapUpdateResult::Fail();
-
-    std::lock_guard<std::mutex> guard(m_get_class_info_args_mutex);
-
+      return DescriptorMapUpdateResult::Fail();
+    
+    Mutex::Locker locker(m_get_class_info_args_mutex);
+    
     // Fill in our function argument values
     arguments.GetValueAtIndex(0)->GetScalar() = hash_table.GetTableLoadAddress();
     arguments.GetValueAtIndex(1)->GetScalar() = class_infos_addr;
     arguments.GetValueAtIndex(2)->GetScalar() = class_infos_byte_size;
-    arguments.GetValueAtIndex(3)->GetScalar() = (GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES) == nullptr ? 0 : 1);
 
-    
     bool success = false;
 
     diagnostics.Clear();
@@ -1704,7 +1717,6 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapSharedCache()
         //value.SetContext (Value::eContextTypeClangType, clang_uint32_t_type);
         value.SetCompilerType (clang_uint32_t_type);
         arguments.PushValue (value);
-        arguments.PushValue (value);
         
         get_shared_cache_class_info_function = m_get_shared_cache_class_info_code->MakeFunctionCaller(clang_uint32_t_type,
                                                                                                       arguments,
@@ -1733,15 +1745,13 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapSharedCache()
     
     if (class_infos_addr == LLDB_INVALID_ADDRESS)
         return DescriptorMapUpdateResult::Fail();
-
-    std::lock_guard<std::mutex> guard(m_get_shared_cache_class_info_args_mutex);
-
+    
+    Mutex::Locker locker(m_get_shared_cache_class_info_args_mutex);
+    
     // Fill in our function argument values
     arguments.GetValueAtIndex(0)->GetScalar() = objc_opt_ptr;
     arguments.GetValueAtIndex(1)->GetScalar() = class_infos_addr;
     arguments.GetValueAtIndex(2)->GetScalar() = class_infos_byte_size;
-    arguments.GetValueAtIndex(3)->GetScalar() = (GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES) == nullptr ? 0 : 1);
-    
 
     bool success = false;
     bool any_found = false;
@@ -1838,7 +1848,7 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapSharedCache()
 }
 
 bool
-AppleObjCRuntimeV2::UpdateISAToDescriptorMapFromMemory (RemoteNXMapTable &hash_table)
+AppleObjCRuntimeV2::UpdateISAToDescriptorMapFromMemory (RemoteNXMapTable &hash_table, uint32_t &discovered_classes_count)
 {
     Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS));
     
@@ -1869,7 +1879,7 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapFromMemory (RemoteNXMapTable &hash_t
         }
     }
     
-    return num_map_table_isas > 0;
+    return ((discovered_classes_count = num_map_table_isas) > 0);
 }
 
 lldb::addr_t
@@ -1913,7 +1923,9 @@ void
 AppleObjCRuntimeV2::UpdateISAToDescriptorMapIfNeeded()
 {
     Timer scoped_timer (__PRETTY_FUNCTION__, __PRETTY_FUNCTION__);
-    
+
+    bool found_dynamic = true, found_in_shared_cache = true;
+
     // Else we need to check with our process to see when the map was updated.
     Process *process = GetProcess();
 
@@ -1947,14 +1959,14 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapIfNeeded()
             const uint32_t num_classes_to_warn_at = 500;
             
             DescriptorMapUpdateResult shared_cache_update_result = UpdateISAToDescriptorMapSharedCache();
-            
+
             // warn if:
             // - we could not run either expression
             // - we found fewer than num_classes_to_warn_at classes total
             if ((false == shared_cache_update_result.m_update_ran) || (false == dynamic_update_result.m_update_ran))
-                WarnIfNoClassesCached();
+                WarnIfNoClassesFound(true);
             else if (dynamic_update_result.m_num_found + shared_cache_update_result.m_num_found < num_classes_to_warn_at)
-                WarnIfNoClassesCached();
+                WarnIfNoClassesFound(true);
             else
                 m_loaded_objc_opt = true;
         }
@@ -1965,10 +1977,34 @@ AppleObjCRuntimeV2::UpdateISAToDescriptorMapIfNeeded()
     }
 }
 
+static bool
+DoesProcessHaveSharedCache (Process& process)
+{
+    PlatformSP platform_sp = process.GetTarget().GetPlatform();
+    if (!platform_sp)
+        return true; // this should not happen
+
+    ConstString platform_plugin_name = platform_sp->GetPluginName();
+    if (platform_plugin_name)
+    {
+        llvm::StringRef platform_plugin_name_sr = platform_plugin_name.GetStringRef();
+        if (platform_plugin_name_sr.endswith("-simulator"))
+            return false;
+    }
+
+    return true;
+}
+
 void
-AppleObjCRuntimeV2::WarnIfNoClassesCached ()
+AppleObjCRuntimeV2::WarnIfNoClassesFound (bool globally)
 {
     if (m_noclasses_warning_emitted)
+                return;
+
+    if (globally && m_warn_if_no_classes_cached.globally)
+        return;
+    
+    if (!globally && m_warn_if_no_classes_cached.in_shared_cache)
         return;
 
     if (m_process &&
@@ -1981,11 +2017,22 @@ AppleObjCRuntimeV2::WarnIfNoClassesCached ()
     }
 
     Debugger &debugger(GetProcess()->GetTarget().GetDebugger());
-    
-    if (debugger.GetAsyncOutputStream())
+    StreamSP debugger_async_out_sp = debugger.GetAsyncOutputStream();
+    if (debugger_async_out_sp)
     {
-        debugger.GetAsyncOutputStream()->PutCString("warning: could not load any Objective-C class information from the dyld shared cache. This will significantly reduce the quality of type information available.\n");
-        m_noclasses_warning_emitted = true;
+        if (globally)
+        {
+            debugger_async_out_sp->PutCString("warning: could not load any Objective-C class information. This will significantly reduce the quality of type information available.\n");
+            m_warn_if_no_classes_cached.globally = true;
+        }
+        else
+        {
+            // the iDevices simulators do not have the objc_opt_ro class table
+            // so don't actually complain to the user
+            if (DoesProcessHaveSharedCache(*m_process))
+                debugger_async_out_sp->PutCString("warning: could not load any Objective-C class information from the dyld shared cache. This will significantly reduce the quality of type information available.\n");
+            m_warn_if_no_classes_cached.in_shared_cache = true;
+        }
     }
 }
 

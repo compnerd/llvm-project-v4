@@ -19,6 +19,7 @@
 #include "lldb/lldb-private.h"
 #include "lldb/Core/StructuredData.h"
 #include "lldb/Core/UserID.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"

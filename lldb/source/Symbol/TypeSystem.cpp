@@ -10,6 +10,7 @@
 
 #include <set>
 
+#include "lldb/Core/Error.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Symbol/CompilerType.h"
 
@@ -32,7 +33,7 @@ TypeSystem::CreateInstance (lldb::LanguageType language, Module *module)
     TypeSystemCreateInstance create_callback;
     while ((create_callback = PluginManager::GetTypeSystemCreateCallbackAtIndex (i++)) != nullptr)
     {
-        lldb::TypeSystemSP type_system_sp = create_callback(language, module, nullptr);
+        lldb::TypeSystemSP type_system_sp = create_callback(language, module, nullptr, nullptr);
         if (type_system_sp)
             return type_system_sp;
     }
@@ -41,13 +42,13 @@ TypeSystem::CreateInstance (lldb::LanguageType language, Module *module)
 }
 
 lldb::TypeSystemSP
-TypeSystem::CreateInstance (lldb::LanguageType language, Target *target)
+TypeSystem::CreateInstance (lldb::LanguageType language, Target *target, const char *compiler_options)
 {
     uint32_t i = 0;
     TypeSystemCreateInstance create_callback;
     while ((create_callback = PluginManager::GetTypeSystemCreateCallbackAtIndex (i++)) != nullptr)
     {
-        lldb::TypeSystemSP type_system_sp = create_callback(language, nullptr, target);
+        lldb::TypeSystemSP type_system_sp = create_callback(language, nullptr, target, compiler_options);
         if (type_system_sp)
             return type_system_sp;
     }
@@ -121,6 +122,32 @@ TypeSystem::IsMeaninglessWithoutDynamicResolution (void* type)
     return false;
 }
 
+Error
+TypeSystem::IsCompatible ()
+{
+    // Assume a language is compatible. Override this virtual function
+    // in your TypeSystem plug-in if version checking is desired.
+    return Error();
+}
+
+ConstString
+TypeSystem::GetDisplayTypeName (void *type)
+{
+    return GetTypeName(type);
+}
+
+ConstString
+TypeSystem::GetTypeSymbolName (void *type)
+{
+    return GetTypeName(type);
+}
+
+ConstString
+TypeSystem::GetMangledTypeName (void *type)
+{
+    return GetTypeName(type);
+}
+
 ConstString
 TypeSystem::DeclGetMangledName (void *opaque_decl)
 {
@@ -163,12 +190,22 @@ TypeSystem::DeclContextFindDeclByName (void *opaque_decl_ctx,
 
 #pragma mark TypeSystemMap
 
-TypeSystemMap::TypeSystemMap() : m_mutex(), m_map(), m_clear_in_progress(false)
+TypeSystemMap::TypeSystemMap() :
+    m_mutex (),
+    m_map (),
+    m_clear_in_progress(false)
 {
 }
 
+
 TypeSystemMap::~TypeSystemMap()
 {
+}
+
+void
+TypeSystemMap::operator =(const TypeSystemMap &rhs)
+{
+    m_map = rhs.m_map;
 }
 
 void
@@ -176,7 +213,7 @@ TypeSystemMap::Clear ()
 {
     collection map;
     {
-        std::lock_guard<std::mutex> guard(m_mutex);
+        Mutex::Locker locker (m_mutex);
         map = m_map;
         m_clear_in_progress = true;
     }
@@ -192,7 +229,7 @@ TypeSystemMap::Clear ()
     }
     map.clear();
     {
-        std::lock_guard<std::mutex> guard(m_mutex);
+        Mutex::Locker locker (m_mutex);
         m_map.clear();
         m_clear_in_progress = false;
     }
@@ -202,7 +239,7 @@ TypeSystemMap::Clear ()
 void
 TypeSystemMap::ForEach (std::function <bool(TypeSystem *)> const &callback)
 {
-    std::lock_guard<std::mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     // Use a std::set so we only call the callback once for each unique
     // TypeSystem instance
     std::set<TypeSystem *> visited;
@@ -221,7 +258,7 @@ TypeSystemMap::ForEach (std::function <bool(TypeSystem *)> const &callback)
 TypeSystem *
 TypeSystemMap::GetTypeSystemForLanguage (lldb::LanguageType language, Module *module, bool can_create)
 {
-    std::lock_guard<std::mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     collection::iterator pos = m_map.find(language);
     if (pos != m_map.end())
         return pos->second.get();
@@ -247,9 +284,9 @@ TypeSystemMap::GetTypeSystemForLanguage (lldb::LanguageType language, Module *mo
 }
 
 TypeSystem *
-TypeSystemMap::GetTypeSystemForLanguage (lldb::LanguageType language, Target *target, bool can_create)
+TypeSystemMap::GetTypeSystemForLanguage (lldb::LanguageType language, Target *target, bool can_create, const char *compiler_options)
 {
-    std::lock_guard<std::mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     collection::iterator pos = m_map.find(language);
     if (pos != m_map.end())
         return pos->second.get();
@@ -272,10 +309,24 @@ TypeSystemMap::GetTypeSystemForLanguage (lldb::LanguageType language, Target *ta
     // Cache even if we get a shared pointer that contains null type system back
     lldb::TypeSystemSP type_system_sp;
     if (!m_clear_in_progress)
-        type_system_sp = TypeSystem::CreateInstance (language, target);
+        type_system_sp = TypeSystem::CreateInstance (language, target, compiler_options);
 
     AddToMap(language, type_system_sp);
     return type_system_sp.get();
+}
+
+void
+TypeSystemMap::RemoveTypeSystemsForLanguage (lldb::LanguageType language)
+{
+    Mutex::Locker locker (m_mutex);
+    collection::iterator pos = m_map.find(language);
+    // If we are clearing the map, we don't need to remove this individual
+    // item.  It will go away soon enough.
+    if (!m_clear_in_progress)
+    {
+        if (pos != m_map.end())
+            m_map.erase(pos);
+    }
 }
 
 void

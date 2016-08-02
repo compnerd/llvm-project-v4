@@ -23,10 +23,22 @@ using namespace std;
 #include <sys/types.h>
 #include <unistd.h>
 
+// Note that although hogging the CPU while waiting for a variable to change
+// would be terrible in production code, it's great for testing since it
+// avoids a lot of messy context switching to get multiple threads synchronized.
+#define do_nothing()
+
+#define pseudo_barrier_wait(bar) \
+    --bar;                       \
+    while (bar > 0)              \
+        do_nothing();
+
+#define pseudo_barrier_init(bar, count) (bar = count)
+
 typedef std::vector<std::pair<unsigned, void*(*)(void*)> > action_counts;
 typedef std::vector<pthread_t> thread_vector;
 
-pseudo_barrier_t g_barrier;
+std::atomic_int g_barrier;
 int g_breakpoint = 0;
 int g_sigusr1_count = 0;
 std::atomic_int g_watchme;
@@ -127,12 +139,12 @@ int dotest()
     // Actions are triggered immediately after the thread is spawned
     unsigned num_breakpoint_threads = 1;
     unsigned num_watchpoint_threads = 0;
-    unsigned num_signal_threads = 1;
+    unsigned num_signal_threads = 0;
     unsigned num_crash_threads = 0;
 
     // Actions below are triggered after a 1-second delay
     unsigned num_delay_breakpoint_threads = 0;
-    unsigned num_delay_watchpoint_threads = 0;
+    unsigned num_delay_watchpoint_threads = 1;
     unsigned num_delay_signal_threads = 0;
     unsigned num_delay_crash_threads = 0;
 

@@ -136,8 +136,6 @@ RegisterInfo g_register_infos[] = {
      nullptr},
 };
 
-static size_t k_num_register_infos = llvm::array_lengthof(g_register_infos);
-
 // Array of lldb register numbers used to define the set of all General Purpose Registers
 uint32_t g_gpr_reg_indices[] = {eRegisterIndexRax, eRegisterIndexRbx,   eRegisterIndexRcx, eRegisterIndexRdx,
                                 eRegisterIndexRdi, eRegisterIndexRsi,   eRegisterIndexR8,  eRegisterIndexR9,
@@ -171,9 +169,7 @@ RegisterContextWindows_x64::GetRegisterCount()
 const RegisterInfo *
 RegisterContextWindows_x64::GetRegisterInfoAtIndex(size_t reg)
 {
-    if (reg < k_num_register_infos)
-        return &g_register_infos[reg];
-    return NULL;
+    return &g_register_infos[reg];
 }
 
 size_t

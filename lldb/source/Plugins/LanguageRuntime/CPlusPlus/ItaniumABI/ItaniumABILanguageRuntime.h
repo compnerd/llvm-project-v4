@@ -20,7 +20,6 @@
 // Project includes
 #include "lldb/lldb-private.h"
 #include "lldb/Breakpoint/BreakpointResolver.h"
-#include "lldb/Symbol/Type.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/CPPLanguageRuntime.h"
 #include "lldb/Core/Value.h"

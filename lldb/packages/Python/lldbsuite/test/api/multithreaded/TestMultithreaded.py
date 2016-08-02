@@ -10,7 +10,9 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 import subprocess
+import unittest2
 
+@unittest2.skip("rdar://problem/23640718")  # sometimes causing TIMEOUT
 class SBBreakpointCallbackCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
@@ -37,6 +39,7 @@ class SBBreakpointCallbackCase(TestBase):
     @skipIfNoSBHeaders
     @skipIfWindows # clang-cl does not support throw or catch (llvm.org/pr24538)
     @expectedFlakeyFreeBSD
+    @expectedFlakeyLinux # Driver occasionally returns '1' as exit status
     @expectedFailureAll("llvm.org/pr23139", oslist=["linux"], compiler="gcc", compiler_version=[">=","4.9"], archs=["x86_64"])
     def test_sb_api_listener_event_process_state(self):
         """ Test that a registered SBListener receives events when a process

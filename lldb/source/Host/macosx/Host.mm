@@ -557,10 +557,10 @@ LaunchInNewTerminalWithAppleScript (const char *exe_path, ProcessLaunchInfo &lau
 // On MacOSX CrashReporter will display a string for each shared library if
 // the shared library has an exported symbol named "__crashreporter_info__".
 
-static std::mutex &
-GetCrashReporterMutex()
+static Mutex&
+GetCrashReporterMutex ()
 {
-    static std::mutex g_mutex;
+    static Mutex g_mutex;
     return g_mutex;
 }
 
@@ -574,8 +574,8 @@ void
 Host::SetCrashDescriptionWithFormat (const char *format, ...)
 {
     static StreamString g_crash_description;
-    std::lock_guard<std::mutex> guard(GetCrashReporterMutex());
-
+    Mutex::Locker locker (GetCrashReporterMutex ());
+    
     if (format)
     {
         va_list args;
@@ -594,7 +594,7 @@ Host::SetCrashDescriptionWithFormat (const char *format, ...)
 void
 Host::SetCrashDescription (const char *cstr)
 {
-    std::lock_guard<std::mutex> guard(GetCrashReporterMutex());
+    Mutex::Locker locker (GetCrashReporterMutex ());
     static std::string g_crash_description;
     if (cstr)
     {
@@ -1335,6 +1335,7 @@ Host::LaunchProcess (ProcessLaunchInfo &launch_info)
                 callback = Process::SetProcessExitStatus;
 
             StartMonitoringChildProcess (callback,
+                                         NULL, 
                                          pid, 
                                          monitor_signals);
         }
@@ -1449,8 +1450,7 @@ Host::ShellExpandArguments (ProcessLaunchInfo &launch_info)
 }
 
 HostThread
-Host::StartMonitoringChildProcess(const Host::MonitorChildProcessCallback &callback, lldb::pid_t pid,
-                                  bool monitor_signals)
+Host::StartMonitoringChildProcess(Host::MonitorChildProcessCallback callback, void *callback_baton, lldb::pid_t pid, bool monitor_signals)
 {
     unsigned long mask = DISPATCH_PROC_EXIT;
     if (monitor_signals)
@@ -1465,17 +1465,21 @@ Host::StartMonitoringChildProcess(const Host::MonitorChildProcessCallback &callb
                                                          ::dispatch_get_global_queue (DISPATCH_QUEUE_PRIORITY_DEFAULT,0));
 
     if (log)
-        log->Printf("Host::StartMonitoringChildProcess "
-                    "(callback, pid=%i, monitor_signals=%i) "
-                    "source = %p\n",
-                    static_cast<int>(pid), monitor_signals, reinterpret_cast<void *>(source));
+        log->Printf ("Host::StartMonitoringChildProcess (callback=%p, baton=%p, pid=%i, monitor_signals=%i) source = %p\n",
+                     callback,
+                     callback_baton,
+                     (int)pid,
+                     monitor_signals,
+                     source);
 
     if (source)
     {
-        Host::MonitorChildProcessCallback callback_copy = callback;
+#ifndef __clang_analyzer__
+        // This works around a bug in the static analyzer where it claims "dispatch_release" isn't a valid identifier.
         ::dispatch_source_set_cancel_handler (source, ^{
             ::dispatch_release (source);
         });
+#endif
         ::dispatch_source_set_event_handler (source, ^{
 
             int status= 0;
@@ -1524,8 +1528,8 @@ Host::StartMonitoringChildProcess(const Host::MonitorChildProcessCallback &callb
                                  signal,
                                  exit_status);
 
-                if (callback_copy)
-                    cancel = callback_copy(pid, exited, signal, exit_status);
+                if (callback)
+                    cancel = callback (callback_baton, pid, exited, signal, exit_status);
 
                 if (exited || cancel)
                 {

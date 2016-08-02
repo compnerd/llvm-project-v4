@@ -496,10 +496,13 @@ ClangASTSource::FindExternalLexicalDecls (const DeclContext *decl_context,
 
     if (TagDecl *original_tag_decl = dyn_cast<TagDecl>(original_decl))
     {
-        ExternalASTSource *external_source = original_ctx->getExternalSource();
+        if (original_tag_decl->hasExternalLexicalStorage() || original_tag_decl->hasExternalVisibleStorage())
+        {
+            ExternalASTSource *external_source = original_ctx->getExternalSource();
 
-        if (external_source)
-            external_source->CompleteType (original_tag_decl);
+            if (external_source)
+                external_source->CompleteType (original_tag_decl);
+        }
     }
 
     const DeclContext *original_decl_context = dyn_cast<DeclContext>(original_decl);
@@ -708,7 +711,7 @@ ClangASTSource::FindExternalVisibleDecls (NameSearchContext &context,
     else
     {
         const ModuleList &target_images = m_target->GetImages();
-        std::lock_guard<std::recursive_mutex> guard(target_images.GetMutex());
+        Mutex::Locker modules_locker (target_images.GetMutex());
 
         for (size_t i = 0, e = target_images.GetSize(); i < e; ++i)
         {
@@ -1827,7 +1830,7 @@ ClangASTSource::CompleteNamespaceMap (ClangASTImporter::NamespaceMapSP &namespac
     else
     {
         const ModuleList &target_images = m_target->GetImages();
-        std::lock_guard<std::recursive_mutex> guard(target_images.GetMutex());
+        Mutex::Locker modules_locker(target_images.GetMutex());
 
         CompilerDeclContext null_namespace_decl;
 
@@ -1911,7 +1914,7 @@ ClangASTSource::GuardedCopyType (const CompilerType &src_type)
         m_ast_importer_sp->CopyType(m_ast_context, src_ast->getASTContext(), ClangUtil::GetQualType(src_type));
 
     SetImportInProgress(false);
-
+    
     if (copied_qual_type.getAsOpaquePtr() && copied_qual_type->getCanonicalTypeInternal().isNull())
         // this shouldn't happen, but we're hardening because the AST importer seems to be generating bad types
         // on occasion.
@@ -1924,7 +1927,7 @@ clang::NamedDecl *
 NameSearchContext::AddVarDecl(const CompilerType &type)
 {
     assert (type && "Type for variable must be valid!");
-
+    
     if (!type.IsValid())
         return NULL;
 
@@ -1939,7 +1942,7 @@ NameSearchContext::AddVarDecl(const CompilerType &type)
     clang::NamedDecl *Decl = VarDecl::Create(*ast, const_cast<DeclContext *>(m_decl_context), SourceLocation(),
                                              SourceLocation(), ii, ClangUtil::GetQualType(type), 0, SC_Static);
     m_decls.push_back(Decl);
-
+    
     return Decl;
 }
 

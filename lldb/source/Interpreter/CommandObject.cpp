@@ -276,7 +276,7 @@ CommandObject::CheckRequirements (CommandReturnObject &result)
         {
             Target *target = m_exe_ctx.GetTargetPtr();
             if (target)
-                m_api_locker = std::unique_lock<std::recursive_mutex>(target->GetAPIMutex());
+                m_api_locker.Lock (target->GetAPIMutex());
         }
     }
 
@@ -336,8 +336,7 @@ void
 CommandObject::Cleanup ()
 {
     m_exe_ctx.Clear();
-    if (m_api_locker.owns_lock())
-        m_api_locker.unlock();
+    m_api_locker.Unlock();
 }
 
 int

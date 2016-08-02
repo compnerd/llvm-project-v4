@@ -83,22 +83,19 @@ Args::~Args ()
 }
 
 void
-Args::Dump (Stream &s, const char *label_name) const
+Args::Dump (Stream *s)
 {
-    if (!label_name)
-        return;
-
     const size_t argc = m_argv.size();
     for (size_t i=0; i<argc; ++i)
     {
-        s.Indent();
+        s->Indent();
         const char *arg_cstr = m_argv[i];
         if (arg_cstr)
-            s.Printf("%s[%zi]=\"%s\"\n", label_name, i, arg_cstr);
+            s->Printf("argv[%zi]=\"%s\"\n", i, arg_cstr);
         else
-            s.Printf("%s[%zi]=NULL\n", label_name, i);
+            s->Printf("argv[%zi]=NULL\n", i);
     }
-    s.EOL();
+    s->EOL();
 }
 
 bool
@@ -578,8 +575,8 @@ Args::ParseOptions (Options &options)
             }
         }
     }
-    std::unique_lock<std::mutex> lock;
-    OptionParser::Prepare(lock);
+    Mutex::Locker options_locker(NULL);
+    OptionParser::Prepare(options_locker);
     int val;
     while (1)
     {
@@ -690,7 +687,11 @@ Args::StringToAddress (const ExecutionContext *exe_ctx, const char *s, lldb::add
                 options.SetUnwindOnError(true);
                 options.SetKeepInMemory(false);
                 options.SetTryAllThreads(true);
-                
+                // Treat all "address expression" calculations as if they were
+                // ObjC++ expressions.  Most of the time address expressions are
+                // simple things like addresses plus offset or registers,
+                // and those aren't available in swift.
+                options.SetLanguage(eLanguageTypeObjC_plus_plus);
                 ExpressionResults expr_result = target->EvaluateExpression(s,
                                                                            exe_ctx->GetFramePtr(),
                                                                            valobj_sp,
@@ -1262,8 +1263,8 @@ Args::ParseAliasOptions (Options &options,
         }
     }
 
-    std::unique_lock<std::mutex> lock;
-    OptionParser::Prepare(lock);
+    Mutex::Locker options_locker(NULL);
+    OptionParser::Prepare(options_locker);
     int val;
     while (1)
     {
@@ -1440,8 +1441,8 @@ Args::ParseArgsForCompletion
         }
     }
 
-    std::unique_lock<std::mutex> lock;
-    OptionParser::Prepare(lock);
+    Mutex::Locker options_locker(NULL);
+    OptionParser::Prepare(options_locker);
     OptionParser::EnableError(false);
 
     int val;
@@ -1609,6 +1610,117 @@ Args::ParseArgsForCompletion
                                                            OptionArgElement::eBareDash));
         
     }
+}
+
+bool
+Args::GetOptionValueAsString(const char *option, std::string &value)
+{
+    for (size_t ai = 0, ae = GetArgumentCount();
+         ai != ae;
+         ++ai)
+    {
+        const char *arg = GetArgumentAtIndex(ai);
+        const char *option_loc = strstr(arg, option);
+    
+        const bool is_long_option = (option[0] == '-' &&
+                                     option[1] == '-');
+        
+        if (option_loc == arg)
+        {
+            const char *after_option = option_loc + strlen(option);
+            
+            switch (*after_option)
+            {
+                default:
+                    if (is_long_option)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        value = after_option;
+                        return true;
+                    }
+                    break;
+                case '=':
+                    value = after_option + 1;
+                    return true;
+                case '\0':
+                {
+                    const char *next_value = GetArgumentAtIndex(ai+1);
+                    if (next_value)
+                    {
+                        value = next_value;
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    
+    return false;
+}
+
+int
+Args::GetOptionValuesAsStrings(const char *option, std::vector<std::string> &value)
+{
+    int ret = 0;
+    
+    for (size_t ai = 0, ae = GetArgumentCount();
+         ai != ae;
+         ++ai)
+    {
+        const char *arg = GetArgumentAtIndex(ai);
+        const char *option_loc = strstr(arg, option);
+        
+        const bool is_long_option = (option[0] == '-' &&
+                                     option[1] == '-');
+        
+        if (option_loc == arg)
+        {
+            const char *after_option = option_loc + strlen(option);
+            
+            switch (*after_option)
+            {
+                default:
+                    if (is_long_option)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        value.push_back(after_option);
+                        ++ret;
+                    }
+                    break;
+                case '=':
+                    value.push_back(after_option + 1);
+                    ++ret;
+                    break;
+                case '\0':
+                {
+                    const char *next_value = GetArgumentAtIndex(ai+1);
+                    if (next_value)
+                    {
+                        value.push_back(next_value);
+                        ++ret;
+                        ++ai;
+                        break;
+                    }
+                    else
+                    {
+                        return ret;
+                    }
+                }
+            }
+        }
+    }
+    
+    return ret;
 }
 
 void

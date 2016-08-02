@@ -31,7 +31,7 @@ class GoPersistentExpressionState : public PersistentExpressionState
   public:
     GoPersistentExpressionState();
 
-    ConstString GetNextPersistentVariableName() override;
+    ConstString GetNextPersistentVariableName(bool is_error = false) override;
 
     void RemovePersistentVariable(lldb::ExpressionVariableSP variable) override;
 
@@ -62,26 +62,24 @@ class GoPersistentExpressionState : public PersistentExpressionState
 class GoUserExpression : public UserExpression
 {
   public:
-      GoUserExpression(ExecutionContextScope &exe_scope, const char *expr, const char *expr_prefix,
-                       lldb::LanguageType language, ResultType desired_type, const EvaluateExpressionOptions &options);
+    GoUserExpression(ExecutionContextScope &exe_scope, const char *expr, const char *expr_prefix,
+                     lldb::LanguageType language, ResultType desired_type, const EvaluateExpressionOptions &options);
 
-      bool
-      Parse(DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx,
-            lldb_private::ExecutionPolicy execution_policy, bool keep_result_in_memory,
-            bool generate_debug_info) override;
+    bool
+    Parse(DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx, lldb_private::ExecutionPolicy execution_policy,
+          bool keep_result_in_memory, bool generate_debug_info, uint32_t line_offset) override;
 
-      bool
-      CanInterpret() override
-      {
-          return true;
-      }
-      bool
-      FinalizeJITExecution(DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx,
-                           lldb::ExpressionVariableSP &result,
-                           lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS,
-                           lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS) override
-      {
-          return true;
+    bool
+    CanInterpret() override
+    {
+        return true;
+    }
+    bool
+    FinalizeJITExecution(DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx, lldb::ExpressionVariableSP &result,
+                         lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS,
+                         lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS) override
+    {
+        return true;
     }
 
   protected:

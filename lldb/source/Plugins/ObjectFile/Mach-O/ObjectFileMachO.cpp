@@ -32,7 +32,6 @@
 #include "lldb/Host/FileSpec.h"
 #include "lldb/Symbol/DWARFCallFrameInfo.h"
 #include "lldb/Symbol/ObjectFile.h"
-#include "lldb/Target/DynamicLoader.h"
 #include "lldb/Target/MemoryRegionInfo.h"
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
@@ -1218,7 +1217,7 @@ ObjectFileMachO::ParseHeader ()
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         bool can_parse = false;
         lldb::offset_t offset = 0;
         m_data.SetByteOrder (endian::InlHostByteOrder());
@@ -1383,8 +1382,10 @@ ObjectFileMachO::GetAddressClass (lldb::addr_t file_addr)
                     case eSectionTypeDWARFDebugStrOffsets:
                     case eSectionTypeDWARFAppleNames:
                     case eSectionTypeDWARFAppleTypes:
+                    case eSectionTypeDWARFAppleExternalTypes:
                     case eSectionTypeDWARFAppleNamespaces:
                     case eSectionTypeDWARFAppleObjC:
+                    case eSectionTypeSwiftModules:
                         return eAddressClassDebug;
 
                     case eSectionTypeEHFrame:
@@ -1445,7 +1446,10 @@ ObjectFileMachO::GetAddressClass (lldb::addr_t file_addr)
             case eSymbolTypeObjCClass:      return eAddressClassRuntime;
             case eSymbolTypeObjCMetaClass:  return eAddressClassRuntime;
             case eSymbolTypeObjCIVar:       return eAddressClassRuntime;
+            case eSymbolTypeIVarOffset:     return eAddressClassRuntime;
+            case eSymbolTypeMetadata:       return eAddressClassRuntime;
             case eSymbolTypeReExported:     return eAddressClassRuntime;
+            case eSymbolTypeASTFile:        return eAddressClassDebug;
             }
         }
     }
@@ -1458,11 +1462,11 @@ ObjectFileMachO::GetSymtab()
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         if (m_symtab_ap.get() == NULL)
         {
             m_symtab_ap.reset(new Symtab(this));
-            std::lock_guard<std::recursive_mutex> symtab_guard(m_symtab_ap->GetMutex());
+            Mutex::Locker symtab_locker (m_symtab_ap->GetMutex());
             ParseSymtab ();
             m_symtab_ap->Finalize ();
         }
@@ -1826,12 +1830,15 @@ ObjectFileMachO::CreateSections (SectionList &unified_section_list)
                                     static ConstString g_sect_name_dwarf_debug_str ("__debug_str");
                                     static ConstString g_sect_name_dwarf_apple_names ("__apple_names");
                                     static ConstString g_sect_name_dwarf_apple_types ("__apple_types");
+                                    static ConstString g_sect_name_dwarf_apple_exttypes ("__apple_exttypes");
                                     static ConstString g_sect_name_dwarf_apple_namespaces ("__apple_namespac");
                                     static ConstString g_sect_name_dwarf_apple_objc ("__apple_objc");
                                     static ConstString g_sect_name_eh_frame ("__eh_frame");
                                     static ConstString g_sect_name_compact_unwind ("__unwind_info");
                                     static ConstString g_sect_name_text ("__text");
                                     static ConstString g_sect_name_data ("__data");
+                                    static ConstString g_sect_name_swift_ast_old ("__ast");
+                                    static ConstString g_sect_name_swift_ast ("__swift_ast");
                                     static ConstString g_sect_name_go_symtab ("__gosymtab");
 
                                     if (section_name == g_sect_name_dwarf_debug_abbrev)
@@ -1860,6 +1867,8 @@ ObjectFileMachO::CreateSections (SectionList &unified_section_list)
                                         sect_type = eSectionTypeDWARFAppleNames;
                                     else if (section_name == g_sect_name_dwarf_apple_types)
                                         sect_type = eSectionTypeDWARFAppleTypes;
+                                    else if (section_name == g_sect_name_dwarf_apple_exttypes)
+                                        sect_type = eSectionTypeDWARFAppleExternalTypes;
                                     else if (section_name == g_sect_name_dwarf_apple_namespaces)
                                         sect_type = eSectionTypeDWARFAppleNamespaces;
                                     else if (section_name == g_sect_name_dwarf_apple_objc)
@@ -1874,6 +1883,9 @@ ObjectFileMachO::CreateSections (SectionList &unified_section_list)
                                         sect_type = eSectionTypeCompactUnwind;
                                     else if (section_name == g_sect_name_cfstring)
                                         sect_type = eSectionTypeDataObjCCFStrings;
+                                    else if (section_name == g_sect_name_swift_ast ||
+                                             section_name == g_sect_name_swift_ast_old)
+                                        sect_type = eSectionTypeSwiftModules;
                                     else if (section_name == g_sect_name_go_symtab)
                                         sect_type = eSectionTypeGoSymtab;
                                     else if (section_name == g_sect_name_objc_data ||
@@ -2127,10 +2139,51 @@ struct TrieEntryWithOffset
     }
 };
 
+static LazyBool
+CalculateNameIsSwift(std::vector<llvm::StringRef> &nameSlices)
+{
+    // Currently a symbol is defined to possibly be in the Trie only if
+    // it is a swift symbol. Swift mangled names start with "__T" so we
+    // need to see if the nameSlices start with "__T", but of course
+    // this could be broken up into at most 3 entries.
+
+    llvm::StringRef swift_prefix("__T");
+
+    for (const auto &name : nameSlices)
+    {
+        const size_t name_len = name.size();
+        const size_t swift_prefix_len = swift_prefix.size(); // This length changes as we trim it down so we must always fetch it
+        if (swift_prefix_len > name_len)
+        {
+            // The remaining swift prefix is longer than the current
+            // name slice, so if the prefix starts with the name, then
+            // trim characters off the swift prefix and keep looking,
+            // else we are done if the swift prefix doesn't start with
+            // the name
+            if (swift_prefix.startswith(name))
+                swift_prefix = swift_prefix.substr(name_len);
+            else
+                return eLazyBoolNo;
+        }
+        else
+        {
+            // The current name slice is greater than or equal to
+            // the remaining prefix, so just test if it starts with
+            // the prefix and we are done
+            if (name.startswith(swift_prefix))
+                return eLazyBoolYes;
+            else
+                return eLazyBoolNo;
+        }
+    }
+    return eLazyBoolCalculate;
+}
+
 static bool
 ParseTrieEntries (DataExtractor &data,
                   lldb::offset_t offset,
                   const bool is_arm,
+                  const LazyBool symbol_is_swift,
                   std::vector<llvm::StringRef> &nameSlices,
                   std::set<lldb::addr_t> &resolver_addresses,
                   std::vector<TrieEntryWithOffset>& output)
@@ -2163,7 +2216,7 @@ ParseTrieEntries (DataExtractor &data,
 				e.entry.other = 0;
 		}
         // Only add symbols that are reexport symbols with a valid import name
-        if (EXPORT_SYMBOL_FLAGS_REEXPORT & e.entry.flags && import_name && import_name[0])
+        if ((EXPORT_SYMBOL_FLAGS_REEXPORT & e.entry.flags && import_name && import_name[0]) || symbol_is_swift == eLazyBoolYes)
         {
             std::string name;
             if (!nameSlices.empty())
@@ -2192,15 +2245,19 @@ ParseTrieEntries (DataExtractor &data,
             nameSlices.push_back(llvm::StringRef(cstr));
         else
             return false; // Corrupt data
+
+        const LazyBool child_symbol_is_swift = (symbol_is_swift == eLazyBoolCalculate) ? CalculateNameIsSwift(nameSlices) : symbol_is_swift;
+
         lldb::offset_t childNodeOffset = data.GetULEB128(&children_offset);
 		if (childNodeOffset)
         {
             if (!ParseTrieEntries(data,
-                                 childNodeOffset,
-                                 is_arm,
-                                 nameSlices,
-                                 resolver_addresses,
-                                 output))
+                                  childNodeOffset,
+                                  is_arm,
+                                  child_symbol_is_swift,
+                                  nameSlices,
+                                  resolver_addresses,
+                                  output))
             {
                 return false;
             }
@@ -2233,6 +2290,105 @@ ObjectFileMachO::GetSharedCacheUUID (FileSpec dyld_shared_cache, const ByteOrder
         }
     }
     return dsc_uuid;
+}
+
+static SymbolType
+GetSymbolType (const char * &symbol_name,
+               const char * &symbol_name_non_abi_mangled,
+               bool &demangled_is_synthesized,
+               const SectionSP &text_section_sp,
+               const SectionSP &data_section_sp,
+               const SectionSP &data_dirty_section_sp,
+               const SectionSP &data_const_section_sp,
+               const SectionSP &objc_section_sp,
+               const SectionSP &symbol_section)
+{
+    SymbolType type = eSymbolTypeInvalid;
+
+    const char *symbol_sect_name = symbol_section->GetName().AsCString();
+    if (symbol_section->IsDescendant (text_section_sp.get()))
+    {
+        if (symbol_section->IsClear(S_ATTR_PURE_INSTRUCTIONS |
+                                    S_ATTR_SELF_MODIFYING_CODE |
+                                    S_ATTR_SOME_INSTRUCTIONS))
+            type = eSymbolTypeData;
+        else
+            type = eSymbolTypeCode;
+    }
+    else if (symbol_section->IsDescendant(data_section_sp.get()) ||
+             symbol_section->IsDescendant(data_dirty_section_sp.get()) ||
+             symbol_section->IsDescendant(data_const_section_sp.get()))
+    {
+        if (symbol_sect_name && ::strstr (symbol_sect_name, "__objc") == symbol_sect_name)
+        {
+            type = eSymbolTypeRuntime;
+
+            if (symbol_name)
+            {
+                llvm::StringRef symbol_name_ref(symbol_name);
+                if (symbol_name_ref.startswith("_OBJC_"))
+                {
+                    static const llvm::StringRef g_objc_v2_prefix_class ("_OBJC_CLASS_$_");
+                    static const llvm::StringRef g_objc_v2_prefix_metaclass ("_OBJC_METACLASS_$_");
+                    static const llvm::StringRef g_objc_v2_prefix_ivar ("_OBJC_IVAR_$_");
+                    if (symbol_name_ref.startswith(g_objc_v2_prefix_class))
+                    {
+                        symbol_name_non_abi_mangled = symbol_name + 1;
+                        symbol_name = symbol_name + g_objc_v2_prefix_class.size();
+                        type = eSymbolTypeObjCClass;
+                        demangled_is_synthesized = true;
+                    }
+                    else if (symbol_name_ref.startswith(g_objc_v2_prefix_metaclass))
+                    {
+                        symbol_name_non_abi_mangled = symbol_name + 1;
+                        symbol_name = symbol_name + g_objc_v2_prefix_metaclass.size();
+                        type = eSymbolTypeObjCMetaClass;
+                        demangled_is_synthesized = true;
+                    }
+                    else if (symbol_name_ref.startswith(g_objc_v2_prefix_ivar))
+                    {
+                        symbol_name_non_abi_mangled = symbol_name + 1;
+                        symbol_name = symbol_name + g_objc_v2_prefix_ivar.size();
+                        type = eSymbolTypeObjCIVar;
+                        demangled_is_synthesized = true;
+                    }
+                }
+                else if (symbol_name_ref.startswith("__TM"))
+                {
+                    type = eSymbolTypeMetadata;
+                }
+            }
+        }
+        else if (symbol_sect_name && ::strstr (symbol_sect_name, "__gcc_except_tab") == symbol_sect_name)
+        {
+            type = eSymbolTypeException;
+        }
+        else
+        {
+            type = eSymbolTypeData;
+        }
+    }
+    else if (symbol_sect_name && ::strstr (symbol_sect_name, "__IMPORT") == symbol_sect_name)
+    {
+        type = eSymbolTypeTrampoline;
+    }
+    else if (symbol_section->IsDescendant(objc_section_sp.get()))
+    {
+        type = eSymbolTypeRuntime;
+        if (symbol_name && symbol_name[0] == '.')
+        {
+            llvm::StringRef symbol_name_ref(symbol_name);
+            static const llvm::StringRef g_objc_v1_prefix_class (".objc_class_name_");
+            if (symbol_name_ref.startswith(g_objc_v1_prefix_class))
+            {
+                symbol_name_non_abi_mangled = symbol_name;
+                symbol_name = symbol_name + g_objc_v1_prefix_class.size();
+                type = eSymbolTypeObjCClass;
+                demangled_is_synthesized = true;
+            }
+        }
+    }
+    return type;
 }
 
 size_t
@@ -2665,6 +2821,8 @@ ObjectFileMachO::ParseSymtab ()
 
         std::vector<TrieEntryWithOffset> trie_entries;
         std::set<lldb::addr_t> resolver_addresses;
+        std::set<lldb::addr_t> symbol_file_addresses;
+
 
         if (dyld_trie_data.GetByteSize() > 0)
         {
@@ -2672,6 +2830,7 @@ ObjectFileMachO::ParseSymtab ()
             ParseTrieEntries (dyld_trie_data,
                               0,
                               is_arm,
+                              eLazyBoolNo, // eLazyBoolCalculate,
                               nameSlices,
                               resolver_addresses,
                               trie_entries);
@@ -2935,6 +3094,12 @@ ObjectFileMachO::ParseSymtab ()
                                                         // symbol type.  This is a temporary hack to make sure the ObjectiveC symbols get treated
                                                         // correctly.  To do this right, we should coalesce all the GSYM & global symbols that have the
                                                         // same address.
+
+                                                        if (symbol_name && symbol_name[0] == '_' && symbol_name[1] == '_'  && symbol_name[2] == 'T' && symbol_name[3] == 'M' && symbol_name[4] == 'd')
+                                                        {
+                                                            add_nlist = false;
+                                                            break;
+                                                        }
 
                                                         is_gsym = true;
                                                         sym[sym_idx].SetExternal(true);
@@ -3433,6 +3598,10 @@ ObjectFileMachO::ParseSymtab ()
                                                                                         demangled_is_synthesized = true;
                                                                                     }
                                                                                 }
+                                                                                else if (symbol_name_ref.startswith("__TM"))
+                                                                                {
+                                                                                    type = eSymbolTypeMetadata;
+                                                                                }
                                                                             }
                                                                         }
                                                                         else if (symbol_sect_name && ::strstr (symbol_sect_name, "__gcc_except_tab") == symbol_sect_name)
@@ -3503,6 +3672,11 @@ ObjectFileMachO::ParseSymtab ()
                                                 }
                                                 if (symbol_section)
                                                 {
+                                                    // Keep track of the symbols we added by address in case we have other sources
+                                                    // for symbols where we only want to add a symbol if it isn't already in the
+                                                    // symbol table.
+                                                    symbol_file_addresses.insert(nlist.n_value);
+
                                                     const addr_t section_file_addr = symbol_section->GetFileAddress();
                                                     if (symbol_byte_size == 0 && function_starts_count > 0)
                                                     {
@@ -3643,6 +3817,25 @@ ObjectFileMachO::ParseSymtab ()
                                                                     sym[GSYM_sym_idx].SetFlags (nlist.n_type << 16 | nlist.n_desc);
                                                                     sym[sym_idx].Clear();
                                                                     continue;
+                                                                }
+                                                                else
+                                                                {
+                                                                    if (symbol_name &&
+                                                                        symbol_name[0] == '_' &&
+                                                                        symbol_name[1] == 'T')
+                                                                    {
+                                                                        if (symbol_name[2] == 'W' &&
+                                                                            symbol_name[3] == 'v' &&
+                                                                            symbol_name[4] == 'd')
+                                                                        {
+                                                                            type = eSymbolTypeIVarOffset;
+                                                                        }
+                                                                        else if (symbol_name[2] == 'M' &&
+                                                                                 symbol_name[3] != 0)
+                                                                        {
+                                                                            type = eSymbolTypeMetadata;
+                                                                        }
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -3791,6 +3984,12 @@ ObjectFileMachO::ParseSymtab ()
                         // symbol type.  This is a temporary hack to make sure the ObjectiveC symbols get treated
                         // correctly.  To do this right, we should coalesce all the GSYM & global symbols that have the
                         // same address.
+                        if (symbol_name && symbol_name[0] == '_' && symbol_name[1] == '_'  && symbol_name[2] == 'T' && symbol_name[3] == 'M' && symbol_name[4] == 'd')
+                        {
+                            add_nlist = false;
+                            break;
+                        }
+                        
                         is_gsym = true;
                         sym[sym_idx].SetExternal(true);
 
@@ -4141,6 +4340,11 @@ ObjectFileMachO::ParseSymtab ()
                         type = eSymbolTypeAdditional;
                         break;
 
+                    case N_AST:
+                        // A path to a compiler AST file
+                        type = eSymbolTypeASTFile;
+                        break;
+
                     default: break;
                     }
                 }
@@ -4291,6 +4495,10 @@ ObjectFileMachO::ParseSymtab ()
                                                         demangled_is_synthesized = true;
                                                     }
                                                 }
+                                                else if (symbol_name_ref.startswith("__TM"))
+                                                {
+                                                    type = eSymbolTypeMetadata;
+                                                }
                                             }
                                         }
                                         else
@@ -4367,6 +4575,11 @@ ObjectFileMachO::ParseSymtab ()
 
                     if (symbol_section)
                     {
+                        // Keep track of the symbols we added by address in case we have other sources
+                        // for symbols where we only want to add a symbol if it isn't already in the
+                        // symbol table.
+                        symbol_file_addresses.insert(nlist.n_value);
+
                         const addr_t section_file_addr = symbol_section->GetFileAddress();
                         if (symbol_byte_size == 0 && function_starts_count > 0)
                         {
@@ -4500,8 +4713,44 @@ ObjectFileMachO::ParseSymtab ()
                                         // We just need the flags from the linker symbol, so put these flags
                                         // into the N_GSYM flags to avoid duplicate symbols in the symbol table
                                         sym[GSYM_sym_idx].SetFlags (nlist.n_type << 16 | nlist.n_desc);
+
+                                        if (gsym_name[0] == '_' &&
+                                            gsym_name[1] == 'T')
+                                        {
+                                            if (gsym_name[2] == 'W' &&
+                                                gsym_name[3] == 'v' &&
+                                                gsym_name[4] == 'd')
+                                            {
+                                                sym[GSYM_sym_idx].SetType(eSymbolTypeIVarOffset);
+                                            }
+                                            else if (gsym_name[2] == 'M' &&
+                                                     gsym_name[3] != 0)
+                                            {
+                                                sym[GSYM_sym_idx].SetType(eSymbolTypeMetadata);
+                                            }
+                                        }
+                                        
                                         sym[sym_idx].Clear();
                                         continue;
+                                    }
+                                    else
+                                    {
+                                        if (symbol_name &&
+                                            symbol_name[0] == '_' &&
+                                            symbol_name[1] == 'T')
+                                        {
+                                            if (symbol_name[2] == 'W' &&
+                                                symbol_name[3] == 'v' &&
+                                                symbol_name[4] == 'd')
+                                            {
+                                                type = eSymbolTypeIVarOffset;
+                                            }
+                                            else if (symbol_name[2] == 'M' &&
+                                                     symbol_name[3] != 0)
+                                            {
+                                                type = eSymbolTypeMetadata;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -4544,6 +4793,60 @@ ObjectFileMachO::ParseSymtab ()
         }
 
         uint32_t synthetic_sym_id = symtab_load_command.nsyms;
+
+        // Check the trie for any symbols that are in the trie only and make symbols for those
+        if (!trie_entries.empty())
+        {
+            for (const auto &e : trie_entries)
+            {
+                // Don't handle the re-exported symbols here, just the symbols that were in the trie only
+                if (e.entry.name && !e.entry.import_name && symbol_file_addresses.find(e.entry.address) == symbol_file_addresses.end())
+                {
+                    SectionSP symbol_section = section_list->FindSectionContainingFileAddress(e.entry.address);
+                    if (symbol_section)
+                    {
+                        const addr_t section_file_addr = symbol_section->GetFileAddress();
+
+                        // Keep track of the symbols we added by address in case we have other sources
+                        // for symbols where we only want to add a symbol if it isn't already in the
+                        // symbol table.
+                        symbol_file_addresses.insert(e.entry.address);
+
+                        if (e.entry.address >= section_file_addr)
+                        {
+                            const uint64_t symbol_value = e.entry.address - section_file_addr;
+
+                            const char *symbol_name = e.entry.name.GetCString();
+                            const char *symbol_name_non_abi_mangled = nullptr;
+                            bool demangled_is_synthesized = false;
+                            SymbolType type = GetSymbolType (symbol_name,
+                                                             symbol_name_non_abi_mangled,
+                                                             demangled_is_synthesized,
+                                                             text_section_sp,
+                                                             data_section_sp,
+                                                             data_dirty_section_sp,
+                                                             data_const_section_sp,
+                                                             objc_section_sp,
+                                                             symbol_section);
+
+                            // Make a synthetic symbol to describe re-exported symbol.
+                            if (sym_idx >= num_syms)
+                                sym = symtab->Resize (++num_syms);
+                            sym[sym_idx].SetID (synthetic_sym_id++);
+                            sym[sym_idx].GetMangled() = Mangled(e.entry.name, true);
+                            sym[sym_idx].SetType (type);
+                            sym[sym_idx].SetIsSynthetic (true);
+                            sym[sym_idx].GetAddressRef().SetSection (symbol_section);
+                            sym[sym_idx].GetAddressRef().SetOffset (symbol_value);
+                            if (demangled_is_synthesized)
+                                sym[sym_idx].SetDemangledNameIsSynthesized(true);
+
+                            ++sym_idx;
+                        }
+                    }
+                }
+            }
+        }
 
         if (function_starts_count > 0)
         {
@@ -4767,7 +5070,7 @@ ObjectFileMachO::Dump (Stream *s)
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         s->Printf("%p: ", static_cast<void*>(this));
         s->Indent();
         if (m_header.magic == MH_MAGIC_64 || m_header.magic == MH_CIGAM_64)
@@ -4923,7 +5226,7 @@ ObjectFileMachO::GetUUID (lldb_private::UUID* uuid)
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         lldb::offset_t offset = MachHeaderSizeFromMagic(m_header.magic);
         return GetUUID (m_header, m_data, offset, *uuid);
     }
@@ -4937,7 +5240,7 @@ ObjectFileMachO::GetDependentModules (FileSpecList& files)
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         struct load_command load_cmd;
         lldb::offset_t offset = MachHeaderSizeFromMagic(m_header.magic);
         std::vector<std::string> rpath_paths;
@@ -5065,7 +5368,7 @@ ObjectFileMachO::GetEntryPointAddress ()
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         struct load_command load_cmd;
         lldb::offset_t offset = MachHeaderSizeFromMagic(m_header.magic);
         uint32_t i;
@@ -5215,7 +5518,7 @@ ObjectFileMachO::GetNumThreadContexts ()
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         if (!m_thread_context_offsets_valid)
         {
             m_thread_context_offsets_valid = true;
@@ -5249,7 +5552,7 @@ ObjectFileMachO::GetThreadContextAtIndex (uint32_t idx, lldb_private::Thread &th
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         if (!m_thread_context_offsets_valid)
             GetNumThreadContexts ();
 
@@ -5385,7 +5688,7 @@ ObjectFileMachO::GetVersion (uint32_t *versions, uint32_t num_versions)
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         struct dylib_command load_cmd;
         lldb::offset_t offset = MachHeaderSizeFromMagic(m_header.magic);
         uint32_t version_cmd = 0;
@@ -5440,7 +5743,7 @@ ObjectFileMachO::GetArchitecture (ArchSpec &arch)
     ModuleSP module_sp(GetModule());
     if (module_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
         return GetArchitecture (m_header, m_data, MachHeaderSizeFromMagic(m_header.magic), arch);
     }
     return false;
@@ -5450,13 +5753,43 @@ UUID
 ObjectFileMachO::GetProcessSharedCacheUUID (Process *process)
 {
     UUID uuid;
-    if (process && process->GetDynamicLoader())
+    if (process)
     {
-        DynamicLoader *dl = process->GetDynamicLoader();
-        addr_t load_address;
-        LazyBool using_shared_cache;
-        LazyBool private_shared_cache;
-        dl->GetSharedCacheInformation (load_address, uuid, using_shared_cache, private_shared_cache);
+        addr_t all_image_infos = process->GetImageInfoAddress();
+
+        // The address returned by GetImageInfoAddress may be the address of dyld (don't want)
+        // or it may be the address of the dyld_all_image_infos structure (want).  The first four
+        // bytes will be either the version field (all_image_infos) or a Mach-O file magic constant.
+        // Version 13 and higher of dyld_all_image_infos is required to get the sharedCacheUUID field.
+
+        Error err;
+        uint32_t version_or_magic = process->ReadUnsignedIntegerFromMemory (all_image_infos, 4, -1, err);
+        if (version_or_magic != static_cast<uint32_t>(-1)
+            && version_or_magic != MH_MAGIC
+            && version_or_magic != MH_CIGAM
+            && version_or_magic != MH_MAGIC_64
+            && version_or_magic != MH_CIGAM_64
+            && version_or_magic >= 13)
+        {
+            addr_t sharedCacheUUID_address = LLDB_INVALID_ADDRESS;
+            int wordsize = process->GetAddressByteSize();
+            if (wordsize == 8)
+            {
+                sharedCacheUUID_address = all_image_infos + 160;  // sharedCacheUUID <mach-o/dyld_images.h>
+            }
+            if (wordsize == 4)
+            {
+                sharedCacheUUID_address = all_image_infos + 84;   // sharedCacheUUID <mach-o/dyld_images.h>
+            }
+            if (sharedCacheUUID_address != LLDB_INVALID_ADDRESS)
+            {
+                uuid_t shared_cache_uuid;
+                if (process->ReadMemory (sharedCacheUUID_address, shared_cache_uuid, sizeof (uuid_t), err) == sizeof (uuid_t))
+                {
+                    uuid.SetBytes (shared_cache_uuid);
+                }
+            }
+        }
     }
     return uuid;
 }

@@ -121,12 +121,6 @@ protected:
     Emulate_DADDiu (llvm::MCInst& insn);
 
     bool
-    Emulate_DSUBU_DADDU (llvm::MCInst& insn);
-
-    bool
-    Emulate_LUI (llvm::MCInst& insn);
-
-    bool
     Emulate_SD (llvm::MCInst& insn);
 
     bool

@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 // Other libraries and framework includes
 // Project includes
@@ -28,6 +29,15 @@
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/UserSettingsController.h"
+#include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
+#include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
+#include "lldb/Interpreter/Args.h"
+#include "lldb/Interpreter/OptionValueBoolean.h"
+#include "lldb/Interpreter/OptionValueEnumeration.h"
+#include "lldb/Interpreter/OptionValueFileSpec.h"
+#include "lldb/Symbol/SwiftASTContext.h"
+#include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Target/ABI.h"
 #include "lldb/Expression/Expression.h"
 #include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Target/ExecutionContextScope.h"
@@ -148,12 +158,27 @@ public:
     FileSpecList &
     GetDebugFileSearchPaths ();
     
+    FileSpec &
+    GetSDKPath ();
+
     FileSpecList &
     GetClangModuleSearchPaths ();
+
+    FileSpecList &
+    GetSwiftFrameworkSearchPaths ();
+    
+    FileSpecList &
+    GetSwiftModuleSearchPaths ();
+
+    FileSpec &
+    GetModuleCachePath ();
     
     bool
     GetEnableAutoImportClangModules () const;
     
+    bool
+    GetUseAllCompilerFlags() const;
+
     bool
     GetEnableAutoApplyFixIts () const;
     
@@ -198,7 +223,7 @@ public:
 
     const char *
     GetExpressionPrefixContentsAsCString ();
-
+    
     bool
     GetUseHexImmediates() const;
 
@@ -290,14 +315,20 @@ public:
         m_stop_others (true),
         m_debug (false),
         m_trap_exceptions (true),
+        m_repl (false),
+        m_playground (false),
         m_generate_debug_info (false),
+        m_ansi_color_errors (false),
         m_result_is_internal (false),
         m_auto_apply_fixits (true),
         m_use_dynamic (lldb::eNoDynamicValues),
         m_timeout_usec (default_timeout),
         m_one_thread_timeout_usec (0),
+        m_expr_number(0),
         m_cancel_callback (nullptr),
-        m_cancel_callback_baton (nullptr)
+        m_cancel_callback_baton (nullptr),
+        m_pound_line_file (),
+        m_pound_line_line (0)
     {
     }
     
@@ -510,6 +541,20 @@ public:
         m_repl = b;
     }
     
+    bool
+    GetPlaygroundTransformEnabled () const
+    {
+        return m_playground;
+    }
+    
+    void
+    SetPlaygroundTransformEnabled (bool b)
+    {
+        m_playground = b;
+        if (b)
+            m_language = lldb::eLanguageTypeSwift;
+    }
+    
     void
     SetCancelCallback (lldb::ExpressionCancelCallback callback, void *baton)
     {
@@ -552,6 +597,9 @@ public:
         return m_pound_line_line;
     }
 
+    uint32_t
+    GetExpressionNumber () const;
+
     void
     SetResultIsInternal (bool b)
     {
@@ -589,6 +637,7 @@ private:
     bool m_debug;
     bool m_trap_exceptions;
     bool m_repl;
+    bool m_playground;
     bool m_generate_debug_info;
     bool m_ansi_color_errors;
     bool m_result_is_internal;
@@ -596,6 +645,7 @@ private:
     lldb::DynamicValueType m_use_dynamic;
     uint32_t m_timeout_usec;
     uint32_t m_one_thread_timeout_usec;
+    mutable uint32_t m_expr_number; // A 1 based integer that increases with each expression type (normal, expr, function, etc)
     lldb::ExpressionCancelCallback m_cancel_callback;
     void *m_cancel_callback_baton;
     // If m_pound_line_file is not empty and m_pound_line_line is non-zero,
@@ -726,8 +776,8 @@ public:
     static const lldb::TargetPropertiesSP &
     GetGlobalProperties();
 
-    std::recursive_mutex &
-    GetAPIMutex()
+    Mutex &
+    GetAPIMutex ()
     {
         return m_mutex;
     }
@@ -1074,7 +1124,7 @@ public:
     /// dependent modules that are discovered from the object files, or
     /// discovered at runtime as things are dynamically loaded.
     ///
-    /// Setting the executable causes any of the current dependent
+    /// Setting the executable causes any of the current dependant
     /// image information to be cleared and replaced with the static
     /// dependent image information found by calling
     /// ObjectFile::GetDependentModules (FileSpecList&) on the main
@@ -1300,11 +1350,51 @@ public:
     PathMappingList &
     GetImageSearchPathList ();
     
+#ifdef __clang_analyzer__
+    // This enables an analyzer warning for unchecked use of the TypeSystem * returned by this call.
+    // It tells the analyzer that the return value is something that has been null-checked once.
+    // The analyzer will then assume that it must be null-checked at every use, which is what we want.
     TypeSystem *
-    GetScratchTypeSystemForLanguage (Error *error, lldb::LanguageType language, bool create_on_demand = true);
+    GetScratchTypeSystemForLanguage (Error *error,
+                                     lldb::LanguageType language,
+                                     bool create_on_demand = true,
+                                     const char *compiler_options = nullptr) __attribute__ ((always_inline))
+    {
+        TypeSystem *ret = GetScratchTypeSystemForLanguageImpl(error, language, create_on_demand, compiler_options);
+        return ret ? ret : nullptr;
+    }
+        
+    TypeSystem *
+    GetScratchTypeSystemForLanguageImpl (Error *error,
+                                         lldb::LanguageType language,
+                                         bool create_on_demand = true,
+                                         const char *compiler_options = nullptr);
+#else
+    TypeSystem *
+    GetScratchTypeSystemForLanguage (Error *error,
+                                     lldb::LanguageType language,
+                                     bool create_on_demand = true,
+                                     const char *compiler_options = nullptr);
+#endif
+    
+#ifdef __clang_analyzer__
+    // See GetScratchTypeSystemForLanguage
+    PersistentExpressionState *
+    GetPersistentExpressionStateForLanguage (lldb::LanguageType language) __attribute__ ((always_inline))
+    {
+        PersistentExpressionState *ret = GetPersistentExpressionStateForLanguageImpl(language);
+        return ret ? ret : nullptr;
+    }
     
     PersistentExpressionState *
+    GetPersistentExpressionStateForLanguageImpl (lldb::LanguageType language);
+#else
+    PersistentExpressionState *
     GetPersistentExpressionStateForLanguage (lldb::LanguageType language);
+#endif
+    
+    const TypeSystemMap &
+    GetTypeSystemMap ();
     
     // Creates a UserExpression for the given language, the rest of the parameters have the
     // same meaning as for the UserExpression constructor.
@@ -1342,12 +1432,44 @@ public:
                                    const char *name,
                                    Error &error);
 
+#ifdef __clang_analyzer__
+    // See GetScratchTypeSystemForLanguage()
+    ClangASTContext *
+    GetScratchClangASTContext(bool create_on_demand=true) __attribute__ ((always_inline))
+    {
+        ClangASTContext *ret = GetScratchClangASTContextImpl(create_on_demand);
+        
+        return ret ? ret : nullptr;
+    }
+    
+    ClangASTContext *
+    GetScratchClangASTContextImpl(bool create_on_demand=true);
+#else
     ClangASTContext *
     GetScratchClangASTContext(bool create_on_demand=true);
+#endif
     
     lldb::ClangASTImporterSP
     GetClangASTImporter();
     
+#ifdef __clang_analyzer__
+    // See GetScratchTypeSystemForLanguage()
+    SwiftASTContext *
+    GetScratchSwiftASTContext(Error &error, bool create_on_demand=true, const char *extra_options = nullptr) __attribute__ ((always_inline))
+    {
+        SwiftASTContext *ret = GetScratchSwiftASTContextImpl(error, create_on_demand, extra_options);
+        
+        return ret ? ret : nullptr;
+    }
+    
+    SwiftASTContext *
+    GetScratchSwiftASTContextImpl(Error &error, bool create_on_demand=true, const char *extra_options = nullptr);
+#else
+    SwiftASTContext *
+    GetScratchSwiftASTContext(Error &error, bool create_on_demand=true, const char *extra_options = nullptr);
+#endif
+
+
     //----------------------------------------------------------------------
     // Install any files through the platform that need be to installed
     // prior to launching or attaching.
@@ -1395,6 +1517,12 @@ public:
                         lldb::ValueObjectSP &result_valobj_sp,
                         const EvaluateExpressionOptions& options = EvaluateExpressionOptions(),
                         std::string *fixed_expression = nullptr);
+
+    // Look up a symbol by name and type in both the target's symbols and the persistent symbols from the
+    // expression parser.  The symbol_type is ignored in that case, for now we don't have symbol types for the
+    // persistent variables.
+    lldb::addr_t
+    FindLoadAddrForNameInSymbolsAndPersistentVariables(ConstString name_const_str, lldb::SymbolType symbol_type);
 
     lldb::ExpressionVariableSP
     GetPersistentVariable(const ConstString &name);
@@ -1607,8 +1735,7 @@ protected:
     //------------------------------------------------------------------
     Debugger &      m_debugger;
     lldb::PlatformSP m_platform_sp;     ///< The platform for this target.
-    std::recursive_mutex
-        m_mutex; ///< An API mutex that is used by the lldb::SB* classes make the SB interface thread safe
+    Mutex           m_mutex;            ///< An API mutex that is used by the lldb::SB* classes make the SB interface thread safe
     ArchSpec        m_arch;
     ModuleList      m_images;           ///< The list of images for this process (shared libraries and anything dynamically loaded).
     SectionLoadHistory m_section_load_history;
@@ -1624,6 +1751,7 @@ protected:
     lldb::SearchFilterSP  m_search_filter_sp;
     PathMappingList m_image_search_paths;
     TypeSystemMap m_scratch_type_system_map;
+    std::map<lldb::LanguageType, bool> m_cant_make_scratch_type_system;
     
     typedef std::map<lldb::LanguageType, lldb::REPLSP> REPLMap;
     REPLMap m_repl_map;

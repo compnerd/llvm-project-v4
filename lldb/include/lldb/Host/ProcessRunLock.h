@@ -18,6 +18,8 @@
 // Other libraries and framework includes
 // Project includes
 #include "lldb/lldb-defines.h"
+#include "lldb/Host/Mutex.h"
+#include "lldb/Host/Condition.h"
 
 //----------------------------------------------------------------------
 /// Enumerations for broadcasting.

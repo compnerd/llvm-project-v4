@@ -15,7 +15,6 @@
 
 // C++ Includes
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -29,6 +28,7 @@
 #include "lldb/Core/Stream.h"
 #include "lldb/Core/StringList.h"
 #include "lldb/Core/ValueObjectList.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Host/Predicate.h"
 
 namespace curses
@@ -605,7 +605,7 @@ namespace lldb_private {
                                          StringList &matches,
                                          void *baton);
 #endif
-
+        
     protected:
 #ifndef LLDB_DISABLE_LIBEDIT
         std::unique_ptr<Editline> m_editline_ap;
@@ -709,70 +709,80 @@ namespace lldb_private {
     class IOHandlerStack
     {
     public:
-        IOHandlerStack() : m_stack(), m_mutex(), m_top(nullptr) {}
-
-        ~IOHandlerStack() = default;
-
-        size_t
-        GetSize() const
+        IOHandlerStack () :
+            m_stack(),
+            m_mutex(Mutex::eMutexTypeRecursive),
+            m_top (nullptr),
+            m_repl_active (false),
+            m_repl_enabled (false)
         {
-            std::lock_guard<std::recursive_mutex> guard(m_mutex);
+        }
+        
+        ~IOHandlerStack() = default;
+        
+        size_t
+        GetSize () const
+        {
+            Mutex::Locker locker (m_mutex);
             return m_stack.size();
         }
-
+        
         void
-        Push(const lldb::IOHandlerSP &sp)
+        Push (const lldb::IOHandlerSP& sp)
         {
             if (sp)
             {
-                std::lock_guard<std::recursive_mutex> guard(m_mutex);
-                sp->SetPopped(false);
-                m_stack.push_back(sp);
+                Mutex::Locker locker (m_mutex);
+                sp->SetPopped (false);
+                m_stack.push_back (sp);
                 // Set m_top the non-locking IsTop() call
                 m_top = sp.get();
+
+                UpdateREPLIsActive();
             }
         }
-
+        
         bool
-        IsEmpty() const
+        IsEmpty () const
         {
-            std::lock_guard<std::recursive_mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             return m_stack.empty();
         }
-
+        
         lldb::IOHandlerSP
-        Top()
+        Top ()
         {
             lldb::IOHandlerSP sp;
             {
-                std::lock_guard<std::recursive_mutex> guard(m_mutex);
+                Mutex::Locker locker (m_mutex);
                 if (!m_stack.empty())
                     sp = m_stack.back();
             }
             return sp;
         }
-
+        
         void
-        Pop()
+        Pop ()
         {
-            std::lock_guard<std::recursive_mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             if (!m_stack.empty())
             {
-                lldb::IOHandlerSP sp(m_stack.back());
+                lldb::IOHandlerSP sp (m_stack.back());
                 m_stack.pop_back();
-                sp->SetPopped(true);
+                sp->SetPopped (true);
             }
             // Set m_top the non-locking IsTop() call
-
             m_top = (m_stack.empty() ? nullptr : m_stack.back().get());
+
+            UpdateREPLIsActive();
         }
 
-        std::recursive_mutex &
+        Mutex &
         GetMutex()
         {
             return m_mutex;
         }
-
+      
         bool
         IsTop (const lldb::IOHandlerSP &io_handler_sp) const
         {
@@ -780,12 +790,13 @@ namespace lldb_private {
         }
 
         bool
-        CheckTopIOHandlerTypes(IOHandler::Type top_type, IOHandler::Type second_top_type)
+        CheckTopIOHandlerTypes (IOHandler::Type top_type, IOHandler::Type second_top_type)
         {
-            std::lock_guard<std::recursive_mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             const size_t num_io_handlers = m_stack.size();
-            return (num_io_handlers >= 2 && m_stack[num_io_handlers - 1]->GetType() == top_type &&
-                    m_stack[num_io_handlers - 2]->GetType() == second_top_type);
+            return (num_io_handlers >= 2 &&
+                    m_stack[num_io_handlers-1]->GetType() == top_type &&
+                    m_stack[num_io_handlers-2]->GetType() == second_top_type);
         }
 
         ConstString
@@ -806,15 +817,82 @@ namespace lldb_private {
             return ((m_top != nullptr) ? m_top->GetHelpPrologue() : nullptr);
         }
 
+        // Returns true if the REPL is the active IOHandler or if it is just
+        // below the Process IOHandler.
+        bool
+        REPLIsActive()
+        {
+            // This is calculated and cached by UpdateREPLIsActive() as IOHandlers
+            // are pushed and popped since it gets called for all process events.
+            return m_repl_active;
+        }
+
+        // Returns true if any REPL IOHandlers are anywhere on the stack
+        bool
+        REPLIsEnabled()
+        {
+            // This is calculated and cached by UpdateREPLIsActive() as IOHandlers
+            // are pushed and popped since it gets called for all process events.
+            return m_repl_enabled;
+            
+        }
+
         void
         PrintAsync (Stream *stream, const char *s, size_t len);
 
     protected:
+        void
+        UpdateREPLIsActive()
+        {
+            m_repl_active = false;
+            m_repl_enabled = false;
+            // This function should only be called when the mutex is locked...
+            if (m_top)
+            {
+                switch (m_top->GetType())
+                {
+                case IOHandler::Type::ProcessIO:
+                    // Check the REPL is underneath the process IO handler...
+                    if (m_stack.size() > 1)
+                    {
+                        if (m_stack[m_stack.size()-2]->GetType() == IOHandler::Type::REPL)
+                        {
+                            m_repl_active = true;
+                            m_repl_enabled = true;
+                        }
+                    }
+                    break;
+
+                case IOHandler::Type::REPL:
+                    m_repl_active = true;
+                    m_repl_enabled = true;
+                    break;
+                    
+                default:
+                    break;
+                }
+            }
+            
+            if (!m_repl_enabled)
+            {
+                for (const auto &io_handler_sp: m_stack)
+                {
+                    if (io_handler_sp->GetType() == IOHandler::Type::REPL)
+                    {
+                        m_repl_enabled = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         typedef std::vector<lldb::IOHandlerSP> collection;
         collection m_stack;
-        mutable std::recursive_mutex m_mutex;
+        mutable Mutex m_mutex;
         IOHandler *m_top;
-
+        bool m_repl_active;  // REPL is the active IOHandler or right underneath the process IO handler
+        bool m_repl_enabled; // REPL is on IOHandler stack somewhere
+        
     private:
         DISALLOW_COPY_AND_ASSIGN (IOHandlerStack);
     };

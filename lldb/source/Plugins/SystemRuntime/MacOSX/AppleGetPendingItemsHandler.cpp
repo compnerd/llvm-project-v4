@@ -100,12 +100,12 @@ extern \"C\"                                                                    
 }                                                                                                               \n\
 ";
 
-AppleGetPendingItemsHandler::AppleGetPendingItemsHandler(Process *process)
-    : m_process(process),
-      m_get_pending_items_impl_code(),
-      m_get_pending_items_function_mutex(),
-      m_get_pending_items_return_buffer_addr(LLDB_INVALID_ADDRESS),
-      m_get_pending_items_retbuffer_mutex()
+AppleGetPendingItemsHandler::AppleGetPendingItemsHandler (Process *process) :
+    m_process (process),
+    m_get_pending_items_impl_code (),
+    m_get_pending_items_function_mutex(),
+    m_get_pending_items_return_buffer_addr (LLDB_INVALID_ADDRESS),
+    m_get_pending_items_retbuffer_mutex()
 {
 }
 
@@ -114,13 +114,14 @@ AppleGetPendingItemsHandler::~AppleGetPendingItemsHandler ()
 }
 
 void
-AppleGetPendingItemsHandler::Detach()
+AppleGetPendingItemsHandler::Detach ()
 {
+
     if (m_process && m_process->IsAlive() && m_get_pending_items_return_buffer_addr != LLDB_INVALID_ADDRESS)
     {
-        std::unique_lock<std::mutex> lock(m_get_pending_items_retbuffer_mutex, std::defer_lock);
-        lock.try_lock(); // Even if we don't get the lock, deallocate the buffer
-        m_process->DeallocateMemory(m_get_pending_items_return_buffer_addr);
+        Mutex::Locker locker;
+        locker.TryLock (m_get_pending_items_retbuffer_mutex);  // Even if we don't get the lock, deallocate the buffer
+        m_process->DeallocateMemory (m_get_pending_items_return_buffer_addr);
     }
 }
 
@@ -139,7 +140,7 @@ lldb::addr_t
 AppleGetPendingItemsHandler::SetupGetPendingItemsFunction(Thread &thread, ValueList &get_pending_items_arglist)
 {
     ThreadSP thread_sp (thread.shared_from_this());
-    ExecutionContext exe_ctx (thread_sp);
+    ExecutionContext exe_ctx(thread.shared_from_this());
     DiagnosticManager diagnostics;
     Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SYSTEM_RUNTIME));
 
@@ -148,8 +149,8 @@ AppleGetPendingItemsHandler::SetupGetPendingItemsFunction(Thread &thread, ValueL
 
     // Scope for mutex locker:
     {
-        std::lock_guard<std::mutex> guard(m_get_pending_items_function_mutex);
-
+        Mutex::Locker locker(m_get_pending_items_function_mutex);
+        
         // First stage is to make the ClangUtility to hold our injected function:
 
         if (!m_get_pending_items_impl_code.get())
@@ -297,7 +298,8 @@ AppleGetPendingItemsHandler::GetPendingItems (Thread &thread, addr_t queue, addr
     page_to_free_size_value.SetValueType (Value::eValueTypeScalar);
     page_to_free_size_value.SetCompilerType (clang_uint64_type);
 
-    std::lock_guard<std::mutex> guard(m_get_pending_items_retbuffer_mutex);
+
+    Mutex::Locker locker(m_get_pending_items_retbuffer_mutex);
     if (m_get_pending_items_return_buffer_addr == LLDB_INVALID_ADDRESS)
     {
         addr_t bufaddr = process_sp->AllocateMemory (32, ePermissionsReadable | ePermissionsWritable, error);

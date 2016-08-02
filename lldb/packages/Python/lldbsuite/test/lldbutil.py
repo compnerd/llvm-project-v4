@@ -12,7 +12,6 @@ import collections
 import os
 import re
 import sys
-import time
 
 # Third-party modules
 from six import StringIO as SixStringIO
@@ -750,15 +749,14 @@ def print_stacktraces(process, string_buffer = False):
     if string_buffer:
         return output.getvalue()
 
-def expect_state_changes(test, listener, process, states, timeout = 5):
+def expect_state_changes(test, listener, states, timeout = 5):
     """Listens for state changed events on the listener and makes sure they match what we
     expect. Stop-and-restart events (where GetRestartedFromEvent() returns true) are ignored."""
 
     for expected_state in states:
         def get_next_event():
             event = lldb.SBEvent()
-            if not listener.WaitForEventForBroadcasterWithType(timeout, process.GetBroadcaster(),
-                    lldb.SBProcess.eBroadcastBitStateChanged, event):
+            if not listener.WaitForEvent(timeout, event):
                 test.fail("Timed out while waiting for a transition to state %s" %
                     lldb.SBDebugger.StateAsCString(expected_state))
             return event
@@ -962,6 +960,30 @@ class RecursiveDecentFormatter(BasicFormatter):
                     BasicFormatter.format(self, child, buffer=output, indent=new_indent)
 
         return output.getvalue()
+
+def check_variable (test, valobj, use_dynamic = False, summary = None, value = None, typename = None, num_children = None,use_synthetic=True):
+    test.assertTrue(valobj.IsValid(), "variable %s is not valid" % (valobj.GetName() if valobj else "<unknown>"))
+    if use_dynamic:
+            valobj = valobj.GetDynamicValue(lldb.eDynamicCanRunTarget)
+            test.assertTrue(valobj.IsValid(), "dynamic value of %s is not valid" % (valobj.GetName() if valobj else "<unknown>"))
+            test.assertTrue(valobj.IsDynamic(), "dynamic value of %s is not dynamic" % (valobj.GetName() if valobj else "<unknown>"))
+    if use_synthetic: valobj.SetPreferSyntheticValue(True)
+    if summary:
+            test.assertTrue(valobj.GetSummary() == summary, "expected summary: '%s' - actual summary: '%s'" % (summary,valobj.GetSummary() if valobj else "<unknown>"))
+    if value:
+            test.assertTrue(valobj.GetValue() == value, "expected value: '%s' - actual value: '%s'" % (value,valobj.GetValue() if valobj else "<unknown>"))
+    if typename:
+            test.assertTrue(valobj.GetTypeName() == typename, "expected typename: '%s' - actual typename: '%s'" % (typename,valobj.GetTypeName() if valobj else "<unknown>"))
+    if num_children:
+            test.assertTrue(valobj.GetNumChildren() == num_children, "expected num children: '%s' - actual num children: '%s'" % (num_children,valobj.GetNumChildren() if valobj else "<unknown>"))
+
+def check_children (test, valobj, thecallable):
+    test.assertTrue(valobj.IsValid(), "variable %s is not valid" % (valobj.GetName() if valobj else "<unknown>"))
+    i = 0
+    while i < valobj.GetNumChildren():
+        child = valobj.GetChildAtIndex(i)
+        test.assertTrue(thecallable(child,i), "child %d failed the test" % (i))
+        i = i + 1
 
 # ===========================================================
 # Utility functions for path manipulation on remote platforms

@@ -13,9 +13,8 @@
 // C Includes
 
 // C++ Includes
-#include <mutex>
-#include <queue>
 #include <set>
+#include <queue>
 
 // Other libraries and framework includes
 #include "lldb/Target/Process.h"
@@ -213,7 +212,7 @@ protected:
     lldb_private::Module *m_module;
 
     /// Message queue notifying this instance of inferior process state changes.
-    std::recursive_mutex m_message_mutex;
+    lldb_private::Mutex m_message_mutex;
     std::queue<ProcessMessage> m_message_queue;
 
     /// Drive any exit events to completion.

@@ -27,7 +27,7 @@ class ClangDiagnostic : public Diagnostic
 {
 public:
     typedef std::vector<clang::FixItHint> FixItList;
-    
+
     static inline bool classof(const ClangDiagnostic *) { return true; }
     static inline bool classof(const Diagnostic *diag) {
         return diag->getKind() == eDiagnosticOriginClang;

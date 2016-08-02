@@ -461,7 +461,7 @@ AppleObjCTrampolineHandler::AppleObjCVTables::InitializeVTableSymbols ()
         Target &target = process_sp->GetTarget();
         
         const ModuleList &target_modules = target.GetImages();
-        std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
+        Mutex::Locker modules_locker(target_modules.GetMutex());
         size_t num_modules = target_modules.GetSize();
         if (!m_objc_module_sp)
         {
@@ -751,8 +751,8 @@ AppleObjCTrampolineHandler::SetupDispatchFunction(Thread &thread, ValueList &dis
 
     // Scope for mutex locker:
     {
-        std::lock_guard<std::mutex> guard(m_impl_function_mutex);
-
+        Mutex::Locker locker(m_impl_function_mutex);
+        
         // First stage is to make the ClangUtility to hold our injected function:
 
         if (!m_impl_code.get())
@@ -818,7 +818,7 @@ AppleObjCTrampolineHandler::SetupDispatchFunction(Thread &thread, ValueList &dis
     // if other threads were calling into here, but actually it isn't because we allocate a new args structure for
     // this call by passing args_addr = LLDB_INVALID_ADDRESS...
 
-    if (!impl_function_caller->WriteFunctionArguments(exe_ctx, args_addr, dispatch_values, diagnostics))
+    if (impl_function_caller->WriteFunctionArguments(exe_ctx, args_addr, dispatch_values, diagnostics))
     {
         if (log)
         {

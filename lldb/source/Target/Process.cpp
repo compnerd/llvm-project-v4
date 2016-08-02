@@ -49,6 +49,7 @@
 #include "lldb/Target/MemoryHistory.h"
 #include "lldb/Target/MemoryRegionInfo.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
+#include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/OperatingSystem.h"
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
@@ -716,100 +717,107 @@ Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp) :
     // defaulting to using the Host's UnixSignals.
 }
 
-Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp, const UnixSignalsSP &unix_signals_sp)
-    : ProcessProperties(this),
-      UserID(LLDB_INVALID_PROCESS_ID),
-      Broadcaster((target_sp->GetDebugger().GetBroadcasterManager()), Process::GetStaticBroadcasterClass().AsCString()),
-      m_target_sp(target_sp),
-      m_public_state(eStateUnloaded),
-      m_private_state(eStateUnloaded),
-      m_private_state_broadcaster(nullptr, "lldb.process.internal_state_broadcaster"),
-      m_private_state_control_broadcaster(nullptr, "lldb.process.internal_state_control_broadcaster"),
-      m_private_state_listener_sp(Listener::MakeListener("lldb.process.internal_state_listener")),
-      m_mod_id(),
-      m_process_unique_id(0),
-      m_thread_index_id(0),
-      m_thread_id_to_index_id_map(),
-      m_exit_status(-1),
-      m_exit_string(),
-      m_exit_status_mutex(),
-      m_thread_mutex(),
-      m_thread_list_real(this),
-      m_thread_list(this),
-      m_extended_thread_list(this),
-      m_extended_thread_stop_id(0),
-      m_queue_list(this),
-      m_queue_list_stop_id(0),
-      m_notifications(),
-      m_image_tokens(),
-      m_listener_sp(listener_sp),
-      m_breakpoint_site_list(),
-      m_dynamic_checkers_ap(),
-      m_unix_signals_sp(unix_signals_sp),
-      m_abi_sp(),
-      m_process_input_reader(),
-      m_stdio_communication("process.stdio"),
-      m_stdio_communication_mutex(),
-      m_stdin_forward(false),
-      m_stdout_data(),
-      m_stderr_data(),
-      m_profile_data_comm_mutex(),
-      m_profile_data(),
-      m_iohandler_sync(0),
-      m_memory_cache(*this),
-      m_allocated_memory_cache(*this),
-      m_should_detach(false),
-      m_next_event_action_ap(),
-      m_public_run_lock(),
-      m_private_run_lock(),
-      m_stop_info_override_callback(nullptr),
-      m_finalizing(false),
-      m_finalize_called(false),
-      m_clear_thread_plans_on_stop(false),
-      m_force_next_event_delivery(false),
-      m_last_broadcast_state(eStateInvalid),
-      m_destroy_in_process(false),
-      m_can_interpret_function_calls(false),
-      m_warnings_issued(),
-      m_run_thread_plan_lock(),
-      m_can_jit(eCanJITDontKnow)
+Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp, const UnixSignalsSP &unix_signals_sp) :
+    ProcessProperties (this),
+    UserID (LLDB_INVALID_PROCESS_ID),
+    Broadcaster ((target_sp->GetDebugger().GetBroadcasterManager()), Process::GetStaticBroadcasterClass().AsCString()),
+    m_target_sp (target_sp),
+    m_public_state (eStateUnloaded),
+    m_private_state (eStateUnloaded),
+    m_private_state_broadcaster(nullptr, "lldb.process.internal_state_broadcaster"),
+    m_private_state_control_broadcaster(nullptr, "lldb.process.internal_state_control_broadcaster"),
+    m_private_state_listener_sp (Listener::MakeListener("lldb.process.internal_state_listener")),
+    m_mod_id (),
+    m_process_unique_id(0),
+    m_thread_index_id (0),
+    m_thread_id_to_index_id_map (),
+    m_exit_status (-1),
+    m_exit_string (),
+    m_exit_status_mutex(),
+    m_thread_mutex (Mutex::eMutexTypeRecursive),
+    m_thread_list_real (this),
+    m_thread_list (this),
+    m_extended_thread_list (this),
+    m_extended_thread_stop_id (0),
+    m_queue_list (this),
+    m_queue_list_stop_id (0),
+    m_notifications (),
+    m_image_tokens (),
+    m_listener_sp (listener_sp),
+    m_breakpoint_site_list (),
+    m_dynamic_checkers_ap (),
+    m_unix_signals_sp (unix_signals_sp),
+    m_abi_sp (),
+    m_process_input_reader (),
+    m_stdio_communication ("process.stdio"),
+    m_stdio_communication_mutex (Mutex::eMutexTypeRecursive),
+    m_stdin_forward (false),
+    m_stdout_data (),
+    m_stderr_data (),
+    m_profile_data_comm_mutex (Mutex::eMutexTypeRecursive),
+    m_profile_data (),
+    m_iohandler_sync (0),
+    m_memory_cache (*this),
+    m_allocated_memory_cache (*this),
+    m_should_detach (false),
+    m_next_event_action_ap(),
+    m_public_run_lock (),
+    m_private_run_lock (),
+    m_stop_info_override_callback(nullptr),
+    m_finalizing (false),
+    m_finalize_called (false),
+    m_clear_thread_plans_on_stop (false),
+    m_force_next_event_delivery (false),
+    m_destroy_in_process (false),
+    m_destroy_complete (false),
+    m_last_broadcast_state (eStateInvalid),
+    m_can_interpret_function_calls(false),
+    m_warnings_issued (),
+    m_run_thread_plan_lock(),
+    m_can_jit(eCanJITDontKnow)
 {
-    CheckInWithManager();
+    CheckInWithManager ();
 
-    Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+    Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_OBJECT));
     if (log)
-        log->Printf("%p Process::Process()", static_cast<void *>(this));
+        log->Printf ("%p Process::Process()", static_cast<void*>(this));
 
     if (!m_unix_signals_sp)
         m_unix_signals_sp = std::make_shared<UnixSignals>();
 
-    SetEventName(eBroadcastBitStateChanged, "state-changed");
-    SetEventName(eBroadcastBitInterrupt, "interrupt");
-    SetEventName(eBroadcastBitSTDOUT, "stdout-available");
-    SetEventName(eBroadcastBitSTDERR, "stderr-available");
-    SetEventName(eBroadcastBitProfileData, "profile-data-available");
+    SetEventName (eBroadcastBitStateChanged, "state-changed");
+    SetEventName (eBroadcastBitInterrupt, "interrupt");
+    SetEventName (eBroadcastBitSTDOUT, "stdout-available");
+    SetEventName (eBroadcastBitSTDERR, "stderr-available");
+    SetEventName (eBroadcastBitProfileData, "profile-data-available");
 
-    m_private_state_control_broadcaster.SetEventName(eBroadcastInternalStateControlStop, "control-stop");
-    m_private_state_control_broadcaster.SetEventName(eBroadcastInternalStateControlPause, "control-pause");
-    m_private_state_control_broadcaster.SetEventName(eBroadcastInternalStateControlResume, "control-resume");
+    m_private_state_control_broadcaster.SetEventName (eBroadcastInternalStateControlStop  , "control-stop"  );
+    m_private_state_control_broadcaster.SetEventName (eBroadcastInternalStateControlPause , "control-pause" );
+    m_private_state_control_broadcaster.SetEventName (eBroadcastInternalStateControlResume, "control-resume");
 
-    m_listener_sp->StartListeningForEvents(this, eBroadcastBitStateChanged | eBroadcastBitInterrupt |
-                                                     eBroadcastBitSTDOUT | eBroadcastBitSTDERR |
-                                                     eBroadcastBitProfileData);
+    m_listener_sp->StartListeningForEvents (this,
+                                      eBroadcastBitStateChanged |
+                                      eBroadcastBitInterrupt |
+                                      eBroadcastBitSTDOUT |
+                                      eBroadcastBitSTDERR |
+                                      eBroadcastBitProfileData);
 
     m_private_state_listener_sp->StartListeningForEvents(&m_private_state_broadcaster,
-                                                         eBroadcastBitStateChanged | eBroadcastBitInterrupt);
+                                                     eBroadcastBitStateChanged |
+                                                     eBroadcastBitInterrupt);
 
-    m_private_state_listener_sp->StartListeningForEvents(
-        &m_private_state_control_broadcaster, eBroadcastInternalStateControlStop | eBroadcastInternalStateControlPause |
-                                                  eBroadcastInternalStateControlResume);
+    m_private_state_listener_sp->StartListeningForEvents(&m_private_state_control_broadcaster,
+                                                     eBroadcastInternalStateControlStop |
+                                                     eBroadcastInternalStateControlPause |
+                                                     eBroadcastInternalStateControlResume);
     // We need something valid here, even if just the default UnixSignalsSP.
-    assert(m_unix_signals_sp && "null m_unix_signals_sp after initialization");
+    assert (m_unix_signals_sp && "null m_unix_signals_sp after initialization");
 
     // Allow the platform to override the default cache line size
-    OptionValueSP value_sp = m_collection_sp->GetPropertyAtIndex(nullptr, true, ePropertyMemCacheLineSize)->GetValue();
+    OptionValueSP value_sp =
+        m_collection_sp->GetPropertyAtIndex(nullptr, true, ePropertyMemCacheLineSize)->GetValue();
     uint32_t platform_cache_line_size = target_sp->GetPlatform()->GetDefaultMemoryCacheLineSize();
-    if (!value_sp->OptionWasSet() && platform_cache_line_size != 0)
+    if (! value_sp->OptionWasSet() && platform_cache_line_size != 0)
         value_sp->SetUInt64Value(platform_cache_line_size);
 }
 
@@ -978,8 +986,10 @@ Process::SyncIOHandler (uint32_t iohandler_id, uint64_t timeout_msec)
     if (!m_process_input_reader)
         return;
 
+    TimeValue timeout = TimeValue::Now();
+    timeout.OffsetWithMicroSeconds(timeout_msec*1000);
     uint32_t new_iohandler_id = 0;
-    m_iohandler_sync.WaitForValueNotEqualTo(iohandler_id, new_iohandler_id, std::chrono::milliseconds(timeout_msec));
+    m_iohandler_sync.WaitForValueNotEqualTo(iohandler_id, new_iohandler_id, &timeout);
 
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_PROCESS));
     if (log)
@@ -987,8 +997,12 @@ Process::SyncIOHandler (uint32_t iohandler_id, uint64_t timeout_msec)
 }
 
 StateType
-Process::WaitForProcessToStop(const std::chrono::microseconds &timeout, EventSP *event_sp_ptr, bool wait_always,
-                              ListenerSP hijack_listener_sp, Stream *stream, bool use_run_lock)
+Process::WaitForProcessToStop (const TimeValue *timeout,
+                               EventSP *event_sp_ptr,
+                               bool wait_always,
+                               ListenerSP hijack_listener_sp,
+                               Stream *stream,
+                               bool use_run_lock)
 {
     // We can't just wait for a "stopped" event, because the stopped event may have restarted the target.
     // We have to actually check each event, and in the case of a stopped event check the restarted flag
@@ -1003,7 +1017,8 @@ Process::WaitForProcessToStop(const std::chrono::microseconds &timeout, EventSP 
 
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_PROCESS));
     if (log)
-        log->Printf("Process::%s (timeout = %llu)", __FUNCTION__, static_cast<unsigned long long>(timeout.count()));
+        log->Printf ("Process::%s (timeout = %p)", __FUNCTION__,
+                     static_cast<const void*>(timeout));
 
     if (!wait_always &&
         StateIsStoppedState(state, true) &&
@@ -1022,12 +1037,13 @@ Process::WaitForProcessToStop(const std::chrono::microseconds &timeout, EventSP 
     while (state != eStateInvalid)
     {
         EventSP event_sp;
-        state = WaitForStateChangedEvents(timeout, event_sp, hijack_listener_sp);
+        state = WaitForStateChangedEvents (timeout, event_sp, hijack_listener_sp);
         if (event_sp_ptr && event_sp)
             *event_sp_ptr = event_sp;
 
         bool pop_process_io_handler = (hijack_listener_sp.get() != nullptr);
-        Process::HandleProcessStateChangedEvent (event_sp, stream, pop_process_io_handler);
+        bool pop_command_interpreter = false;
+        Process::HandleProcessStateChangedEvent (event_sp, stream, pop_process_io_handler, pop_command_interpreter);
 
         switch (state)
         {
@@ -1058,24 +1074,51 @@ Process::WaitForProcessToStop(const std::chrono::microseconds &timeout, EventSP 
     return state;
 }
 
+static bool
+BreakpointSiteMatchesREPLBreakpoint (const BreakpointSiteSP &bp_site_sp)
+{
+    if (bp_site_sp)
+    {
+        size_t owner_idx = 0;
+        BreakpointLocationSP bp_loc_sp = bp_site_sp->GetOwnerAtIndex(owner_idx);
+        while (bp_loc_sp)
+        {
+            Breakpoint &bp = bp_loc_sp->GetBreakpoint();
+            if (bp.IsInternal())
+            {
+                const char *kind = bp.GetBreakpointKind();
+                if (kind && strcmp(kind, "REPL") == 0)
+                    return true;
+            }
+            bp_loc_sp = bp_site_sp->GetOwnerAtIndex(++owner_idx);
+        }
+    }
+    return false;
+}
+
 bool
 Process::HandleProcessStateChangedEvent (const EventSP &event_sp,
                                          Stream *stream,
-                                         bool &pop_process_io_handler)
+                                         bool &pop_process_io_handler,
+                                         bool &pop_command_interpreter)
 {
     const bool handle_pop = pop_process_io_handler;
 
     pop_process_io_handler = false;
     ProcessSP process_sp = Process::ProcessEventData::GetProcessFromEvent(event_sp.get());
-
+    pop_command_interpreter = false;
+    
     if (!process_sp)
         return false;
-
-    StateType event_state = Process::ProcessEventData::GetStateFromEvent (event_sp.get());
-    if (event_state == eStateInvalid)
+    
+    StateType state = Process::ProcessEventData::GetStateFromEvent (event_sp.get());
+    if (state == eStateInvalid)
         return false;
+    
+    const bool repl_is_active = process_sp->GetTarget().GetDebugger().REPLIsActive();
+    const bool repl_is_enabled = process_sp->GetTarget().GetDebugger().REPLIsEnabled();
 
-    switch (event_state)
+    switch (state)
     {
         case eStateInvalid:
         case eStateUnloaded:
@@ -1083,32 +1126,36 @@ Process::HandleProcessStateChangedEvent (const EventSP &event_sp,
         case eStateLaunching:
         case eStateStepping:
         case eStateDetached:
-            if (stream)
+        {
+            if (!repl_is_active && stream)
                 stream->Printf("Process %" PRIu64 " %s\n",
                                process_sp->GetID(),
-                               StateAsCString (event_state));
-            if (event_state == eStateDetached)
+                               StateAsCString (state));
+            
+            if (state == eStateDetached)
                 pop_process_io_handler = true;
+        }
             break;
 
         case eStateConnected:
         case eStateRunning:
             // Don't be chatty when we run...
             break;
-
+            
         case eStateExited:
-            if (stream)
+            if (!repl_is_active && stream)
                 process_sp->GetStatus(*stream);
             pop_process_io_handler = true;
             break;
-
+            
         case eStateStopped:
         case eStateCrashed:
         case eStateSuspended:
+        {
             // Make sure the program hasn't been auto-restarted:
-            if (Process::ProcessEventData::GetRestartedFromEvent (event_sp.get()))
+            if (event_sp && Process::ProcessEventData::GetRestartedFromEvent (event_sp.get()))
             {
-                if (stream)
+                if (!repl_is_active && stream)
                 {
                     size_t num_reasons = Process::ProcessEventData::GetNumRestartedReasons(event_sp.get());
                     if (num_reasons > 0)
@@ -1117,16 +1164,16 @@ Process::HandleProcessStateChangedEvent (const EventSP &event_sp,
                         if (num_reasons == 1)
                         {
                             const char *reason = Process::ProcessEventData::GetRestartedReasonAtIndex (event_sp.get(), 0);
-                            stream->Printf ("Process %" PRIu64 " stopped and restarted: %s\n",
-                                            process_sp->GetID(),
-                                            reason ? reason : "<UNKNOWN REASON>");
+                            stream->Printf("Process %" PRIu64 " stopped and restarted: %s\n",
+                                           process_sp->GetID(),
+                                           reason ? reason : "<UNKNOWN REASON>");
                         }
                         else
                         {
-                            stream->Printf ("Process %" PRIu64 " stopped and restarted, reasons:\n",
-                                            process_sp->GetID());
-
-
+                            stream->Printf("Process %" PRIu64 " stopped and restarted, reasons:\n",
+                                           process_sp->GetID());
+                            
+                            
                             for (size_t i = 0; i < num_reasons; i++)
                             {
                                 const char *reason = Process::ProcessEventData::GetRestartedReasonAtIndex (event_sp.get(), i);
@@ -1138,12 +1185,15 @@ Process::HandleProcessStateChangedEvent (const EventSP &event_sp,
             }
             else
             {
+                bool check_for_repl_breakpoint = false;
+                bool is_repl_breakpoint = false;
+                ThreadSP curr_thread;
                 // Lock the thread list so it doesn't change on us, this is the scope for the locker:
                 {
                     ThreadList &thread_list = process_sp->GetThreadList();
-                    std::lock_guard<std::recursive_mutex> guard(thread_list.GetMutex());
-
-                    ThreadSP curr_thread (thread_list.GetSelectedThread());
+                    Mutex::Locker locker (thread_list.GetMutex());
+                    
+                    curr_thread = thread_list.GetSelectedThread();
                     ThreadSP thread;
                     StopReason curr_thread_stop_reason = eStopReasonInvalid;
                     if (curr_thread)
@@ -1185,6 +1235,8 @@ Process::HandleProcessStateChangedEvent (const EventSP &event_sp,
                                 case eStopReasonTrace:
                                 case eStopReasonBreakpoint:
                                 case eStopReasonWatchpoint:
+                                    check_for_repl_breakpoint = repl_is_enabled;
+                                    LLVM_FALLTHROUGH;
                                 case eStopReasonException:
                                 case eStopReasonExec:
                                 case eStopReasonThreadExiting:
@@ -1193,72 +1245,146 @@ Process::HandleProcessStateChangedEvent (const EventSP &event_sp,
                                         other_thread = thread;
                                     break;
                                 case eStopReasonPlanComplete:
+                                    check_for_repl_breakpoint = repl_is_enabled;
                                     if (!plan_thread)
                                         plan_thread = thread;
                                     break;
                             }
                         }
                         if (plan_thread)
+                        {
                             thread_list.SetSelectedThreadByID (plan_thread->GetID());
+                            curr_thread = plan_thread;
+                        }
                         else if (other_thread)
+                        {
                             thread_list.SetSelectedThreadByID (other_thread->GetID());
+                            curr_thread = other_thread;
+                        }
                         else
                         {
                             if (curr_thread && curr_thread->IsValid())
                                 thread = curr_thread;
                             else
+                            {
                                 thread = thread_list.GetThreadAtIndex(0);
-
+                                curr_thread = thread;
+                            }
+                            
                             if (thread)
                                 thread_list.SetSelectedThreadByID (thread->GetID());
                         }
                     }
+                    else
+                    {
+                        switch (curr_thread_stop_reason)
+                        {
+                            case eStopReasonBreakpoint:
+                            case eStopReasonWatchpoint:
+                                check_for_repl_breakpoint = repl_is_enabled;
+                                break;
+                            case eStopReasonPlanComplete:
+                                // We might have hit a breakpoint during our REPL evaluation and be stopped
+                                // at the REPL breakpoint
+                                check_for_repl_breakpoint = repl_is_enabled;
+                                break;
+                            default:
+                                break;
+                        }
+                    }
                 }
+                
+                BreakpointSiteSP bp_site_sp;
+                if (check_for_repl_breakpoint)
+                {
+                    // Make sure this isn't the internal "REPL" breakpoint
+                    if (curr_thread)
+                    {
+                        StopInfoSP stop_info_sp = curr_thread->GetStopInfo();
+                        if (stop_info_sp)
+                        {
+                            bp_site_sp = process_sp->GetBreakpointSiteList().FindByID(stop_info_sp->GetValue());
+                            if (bp_site_sp)
+                            {
+                                is_repl_breakpoint = BreakpointSiteMatchesREPLBreakpoint (bp_site_sp);
+                            }
+                        }
+                        
+                        // Only check the breakpoint site for the current PC if the stop reason didn't have
+                        // a valid breakpoint site
+                        if (!bp_site_sp)
+                        {
+                            // We might have stopped with a eStopReasonPlanComplete, see the PC is at
+                            
+                            lldb::StackFrameSP frame_sp = curr_thread->GetStackFrameAtIndex(0);
+                            if (frame_sp)
+                            {
+                                bp_site_sp = process_sp->GetBreakpointSiteList().FindByAddress(frame_sp->GetStackID().GetPC());
+                                if (bp_site_sp)
+                                    is_repl_breakpoint = BreakpointSiteMatchesREPLBreakpoint (bp_site_sp);
+                            }
+                        }
+                    }
+                }
+                
                 // Drop the ThreadList mutex by here, since GetThreadStatus below might have to run code,
                 // e.g. for Data formatters, and if we hold the ThreadList mutex, then the process is going to
                 // have a hard time restarting the process.
-                if (stream)
+                
+                if ((repl_is_enabled == false) ||
+                    (repl_is_active == true && (bp_site_sp && !is_repl_breakpoint)) ||
+                    (repl_is_active == false && !is_repl_breakpoint))
                 {
-                    Debugger &debugger = process_sp->GetTarget().GetDebugger();
-                    if (debugger.GetTargetList().GetSelectedTarget().get() == &process_sp->GetTarget())
+                    if (stream)
                     {
-                        const bool only_threads_with_stop_reason = true;
-                        const uint32_t start_frame = 0;
-                        const uint32_t num_frames = 1;
-                        const uint32_t num_frames_with_source = 1;
-                        process_sp->GetStatus(*stream);
-                        process_sp->GetThreadStatus (*stream,
-                                                     only_threads_with_stop_reason,
-                                                     start_frame,
-                                                     num_frames,
-                                                     num_frames_with_source);
-                    }
-                    else
-                    {
-                        uint32_t target_idx = debugger.GetTargetList().GetIndexOfTarget(process_sp->GetTarget().shared_from_this());
-                        if (target_idx != UINT32_MAX)
-                            stream->Printf ("Target %d: (", target_idx);
+                        Debugger &debugger = process_sp->GetTarget().GetDebugger();
+                        if (debugger.GetTargetList().GetSelectedTarget().get() == &process_sp->GetTarget())
+                        {
+                            const bool only_threads_with_stop_reason = true;
+                            const uint32_t start_frame = 0;
+                            const uint32_t num_frames = 1;
+                            const uint32_t num_frames_with_source = 1;
+                            process_sp->GetStatus(*stream);
+                            process_sp->GetThreadStatus (*stream,
+                                                         only_threads_with_stop_reason,
+                                                         start_frame,
+                                                         num_frames,
+                                                         num_frames_with_source);
+                        }
                         else
-                            stream->Printf ("Target <unknown index>: (");
-                        process_sp->GetTarget().Dump (stream, eDescriptionLevelBrief);
-                        stream->Printf (") stopped.\n");
+                        {
+                            uint32_t target_idx = debugger.GetTargetList().GetIndexOfTarget(process_sp->GetTarget().shared_from_this());
+                            if (target_idx != UINT32_MAX)
+                                stream->Printf ("Target %d: (", target_idx);
+                            else
+                                stream->Printf ("Target <unknown index>: (");
+                            process_sp->GetTarget().Dump (stream, eDescriptionLevelBrief);
+                            stream->Printf (") stopped.\n");
+                        }
                     }
                 }
-
+                
                 // Pop the process IO handler
                 pop_process_io_handler = true;
+                
+                // If the REPL is enabled, but not active, and we hit the REPL breakpoint, we need to pop
+                // off the command interpreter after the process IO Handler
+                if (repl_is_enabled && !repl_is_active && is_repl_breakpoint)
+                    pop_command_interpreter = true;
             }
-            break;
+        }
+        break;
     }
-
+    
     if (handle_pop && pop_process_io_handler)
-        process_sp->PopProcessIOHandler();
+        process_sp->PopProcessIOHandler(pop_command_interpreter);
 
     return true;
 }
 
 StateType
-Process::WaitForState(const std::chrono::microseconds &timeout, const StateType *match_states,
+Process::WaitForState(const TimeValue *timeout,
+                      const StateType *match_states,
                       const uint32_t num_match_states)
 {
     EventSP event_sp;
@@ -1299,14 +1425,13 @@ Process::RestoreProcessEvents ()
 }
 
 StateType
-Process::WaitForStateChangedEvents(const std::chrono::microseconds &timeout, EventSP &event_sp,
-                                   ListenerSP hijack_listener_sp)
+Process::WaitForStateChangedEvents (const TimeValue *timeout, EventSP &event_sp, ListenerSP hijack_listener_sp)
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_PROCESS));
 
     if (log)
-        log->Printf("Process::%s (timeout = %llu, event_sp)...", __FUNCTION__,
-                    static_cast<unsigned long long>(timeout.count()));
+        log->Printf ("Process::%s (timeout = %p, event_sp)...", __FUNCTION__,
+                     static_cast<const void*>(timeout));
 
     ListenerSP listener_sp = hijack_listener_sp;
     if (!listener_sp)
@@ -1325,8 +1450,9 @@ Process::WaitForStateChangedEvents(const std::chrono::microseconds &timeout, Eve
     }
 
     if (log)
-        log->Printf("Process::%s (timeout = %llu, event_sp) => %s", __FUNCTION__,
-                    static_cast<unsigned long long>(timeout.count()), StateAsCString(state));
+        log->Printf ("Process::%s (timeout = %p, event_sp) => %s",
+                     __FUNCTION__, static_cast<const void*>(timeout),
+                     StateAsCString(state));
     return state;
 }
 
@@ -1359,13 +1485,13 @@ Process::PeekAtStateChangedEvents ()
 }
 
 StateType
-Process::WaitForStateChangedEventsPrivate(const std::chrono::microseconds &timeout, EventSP &event_sp)
+Process::WaitForStateChangedEventsPrivate (const TimeValue *timeout, EventSP &event_sp)
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_PROCESS));
 
     if (log)
-        log->Printf("Process::%s (timeout = %llu, event_sp)...", __FUNCTION__,
-                    static_cast<unsigned long long>(timeout.count()));
+        log->Printf ("Process::%s (timeout = %p, event_sp)...", __FUNCTION__,
+                     static_cast<const void*>(timeout));
 
     StateType state = eStateInvalid;
     if (m_private_state_listener_sp->WaitForEventForBroadcasterWithType (timeout,
@@ -1379,20 +1505,20 @@ Process::WaitForStateChangedEventsPrivate(const std::chrono::microseconds &timeo
     // to the command-line, and that could disable the log, which would render the
     // log we got above invalid.
     if (log)
-        log->Printf("Process::%s (timeout = %llu, event_sp) => %s", __FUNCTION__,
-                    static_cast<unsigned long long>(timeout.count()),
-                    state == eStateInvalid ? "TIMEOUT" : StateAsCString(state));
+        log->Printf ("Process::%s (timeout = %p, event_sp) => %s",
+                     __FUNCTION__, static_cast<const void *>(timeout),
+                     state == eStateInvalid ? "TIMEOUT" : StateAsCString(state));
     return state;
 }
 
 bool
-Process::WaitForEventsPrivate(const std::chrono::microseconds &timeout, EventSP &event_sp, bool control_only)
+Process::WaitForEventsPrivate (const TimeValue *timeout, EventSP &event_sp, bool control_only)
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_PROCESS));
 
     if (log)
-        log->Printf("Process::%s (timeout = %llu, event_sp)...", __FUNCTION__,
-                    static_cast<unsigned long long>(timeout.count()));
+        log->Printf ("Process::%s (timeout = %p, event_sp)...", __FUNCTION__,
+                     static_cast<const void*>(timeout));
 
     if (control_only)
         return m_private_state_listener_sp->WaitForEventForBroadcaster(timeout, &m_private_state_control_broadcaster, event_sp);
@@ -1409,7 +1535,7 @@ Process::IsRunning () const
 int
 Process::GetExitStatus ()
 {
-    std::lock_guard<std::mutex> guard(m_exit_status_mutex);
+    Mutex::Locker locker (m_exit_status_mutex);
 
     if (m_public_state.GetValue() == eStateExited)
         return m_exit_status;
@@ -1419,7 +1545,7 @@ Process::GetExitStatus ()
 const char *
 Process::GetExitDescription ()
 {
-    std::lock_guard<std::mutex> guard(m_exit_status_mutex);
+    Mutex::Locker locker (m_exit_status_mutex);
 
     if (m_public_state.GetValue() == eStateExited && !m_exit_string.empty())
         return m_exit_string.c_str();
@@ -1430,7 +1556,7 @@ bool
 Process::SetExitStatus (int status, const char *cstr)
 {
     // Use a mutex to protect setting the exit status.
-    std::lock_guard<std::mutex> guard(m_exit_status_mutex);
+    Mutex::Locker locker (m_exit_status_mutex);
 
     Log *log(lldb_private::GetLogIfAnyCategoriesSet (LIBLLDB_LOG_STATE | LIBLLDB_LOG_PROCESS));
     if (log)
@@ -1454,6 +1580,14 @@ Process::SetExitStatus (int status, const char *cstr)
     else
         m_exit_string.clear();
 
+    // When we exit, we don't need the input reader anymore
+    if (m_process_input_reader)
+    {
+        m_process_input_reader->SetIsDone(true);
+        m_process_input_reader->Cancel();
+        m_process_input_reader.reset();
+    }
+
     // Clear the last natural stop ID since it has a strong
     // reference to this process
     m_mod_id.SetStopEventForLastNaturalStopID(EventSP());
@@ -1466,11 +1600,18 @@ Process::SetExitStatus (int status, const char *cstr)
     return true;
 }
 
+
 bool
 Process::IsAlive ()
 {
     switch (m_private_state.GetValue())
     {
+        case eStateInvalid:
+        case eStateUnloaded:
+        case eStateDetached:
+        case eStateExited:
+            return false;
+
         case eStateConnected:
         case eStateAttaching:
         case eStateLaunching:
@@ -1490,15 +1631,21 @@ Process::IsAlive ()
 // found in the global target list (we want to be completely sure that the
 // lldb_private::Process doesn't go away before we can deliver the signal.
 bool
-Process::SetProcessExitStatus(lldb::pid_t pid, bool exited,
-                              int signo,      // Zero for no signal
-                              int exit_status // Exit value of process if signal is zero
-                              )
+Process::SetProcessExitStatus (void *callback_baton,
+                               lldb::pid_t pid,
+                               bool exited,
+                               int signo,          // Zero for no signal
+                               int exit_status     // Exit value of process if signal is zero
+)
 {
     Log *log(lldb_private::GetLogIfAnyCategoriesSet (LIBLLDB_LOG_PROCESS));
     if (log)
-        log->Printf("Process::SetProcessExitStatus (pid=%" PRIu64 ", exited=%i, signal=%i, exit_status=%i)\n", pid,
-                    exited, signo, exit_status);
+        log->Printf ("Process::SetProcessExitStatus (baton=%p, pid=%" PRIu64 ", exited=%i, signal=%i, exit_status=%i)\n",
+                     callback_baton,
+                     pid,
+                     exited,
+                     signo,
+                     exit_status);
 
     if (exited)
     {
@@ -1529,7 +1676,7 @@ Process::UpdateThreadListIfNeeded ()
         const StateType state = GetPrivateState();
         if (StateIsStoppedState (state, true))
         {
-            std::lock_guard<std::recursive_mutex> guard(m_thread_list.GetMutex());
+            Mutex::Locker locker (m_thread_list.GetMutex ());
             // m_thread_list does have its own mutex, but we need to
             // hold onto the mutex between the call to UpdateThreadList(...)
             // and the os->UpdateThreadList(...) so it doesn't change on us
@@ -1544,7 +1691,7 @@ Process::UpdateThreadListIfNeeded ()
                 // that may call back into the SBAPI's, requiring the API lock which is already held by whoever is
                 // shutting us down, causing a deadlock.
                 OperatingSystem *os = GetOperatingSystem ();
-                if (os && !m_destroy_in_process)
+                if (os && !m_destroy_in_process && !m_destroy_complete)
                 {
                     // Clear any old backing threads where memory threads might have been
                     // backed by actual threads from the lldb_private::Process subclass
@@ -1743,7 +1890,7 @@ Process::ResumeSynchronous (Stream *stream)
     Error error = PrivateResume();
     if (error.Success())
     {
-        StateType state = WaitForProcessToStop(std::chrono::microseconds(0), NULL, true, listener_sp, stream);
+        StateType state = WaitForProcessToStop (NULL, NULL, true, listener_sp, stream);
         const bool must_be_alive = false; // eStateExited is ok, so this must be false
         if (!StateIsStoppedState(state, must_be_alive))
             error.SetErrorStringWithFormat("process not in stopped state after synchronous resume: %s", StateAsCString(state));
@@ -1773,8 +1920,8 @@ Process::SetPrivateState (StateType new_state)
     if (log)
         log->Printf("Process::SetPrivateState (%s)", StateAsCString(new_state));
 
-    std::lock_guard<std::recursive_mutex> thread_guard(m_thread_list.GetMutex());
-    std::lock_guard<std::recursive_mutex> guard(m_private_state.GetMutex());
+    Mutex::Locker thread_locker(m_thread_list.GetMutex());
+    Mutex::Locker locker(m_private_state.GetMutex());
 
     const StateType old_state = m_private_state.GetValueNoLock ();
     state_changed = old_state != new_state;
@@ -1871,6 +2018,9 @@ Process::GetLanguageRuntime(lldb::LanguageType language, bool retry_if_null)
 CPPLanguageRuntime *
 Process::GetCPPLanguageRuntime (bool retry_if_null)
 {
+    if (!IsValid())
+        return NULL;
+
     LanguageRuntime *runtime = GetLanguageRuntime(eLanguageTypeC_plus_plus, retry_if_null);
     if (runtime != nullptr && runtime->GetLanguageType() == eLanguageTypeC_plus_plus)
         return static_cast<CPPLanguageRuntime *> (runtime);
@@ -1880,10 +2030,25 @@ Process::GetCPPLanguageRuntime (bool retry_if_null)
 ObjCLanguageRuntime *
 Process::GetObjCLanguageRuntime (bool retry_if_null)
 {
+    if (!IsValid())
+        return NULL;
+
     LanguageRuntime *runtime = GetLanguageRuntime(eLanguageTypeObjC, retry_if_null);
     if (runtime != nullptr && runtime->GetLanguageType() == eLanguageTypeObjC)
         return static_cast<ObjCLanguageRuntime *> (runtime);
     return nullptr;
+}
+
+SwiftLanguageRuntime *
+Process::GetSwiftLanguageRuntime (bool retry_if_null)
+{
+    if (!IsValid())
+        return NULL;
+
+    LanguageRuntime *runtime = GetLanguageRuntime(eLanguageTypeSwift, retry_if_null);
+    if (runtime != NULL && runtime->GetLanguageType() == eLanguageTypeSwift)
+      return static_cast<SwiftLanguageRuntime *> (runtime);
+    return NULL;
 }
 
 bool
@@ -1894,6 +2059,10 @@ Process::IsPossibleDynamicValue (ValueObject& in_value)
 
     if (in_value.IsDynamic())
         return false;
+    
+    if (!in_value.GetCompilerType().IsValid())
+        return false;
+    
     LanguageType known_type = in_value.GetObjectRuntimeLanguage();
 
     if (known_type != eLanguageTypeUnknown && known_type != eLanguageTypeC)
@@ -1907,7 +2076,14 @@ Process::IsPossibleDynamicValue (ValueObject& in_value)
         return true;
     
     LanguageRuntime *objc_runtime = GetLanguageRuntime (eLanguageTypeObjC);
-    return objc_runtime ? objc_runtime->CouldHaveDynamicValue(in_value) : false;
+    if (objc_runtime && objc_runtime->CouldHaveDynamicValue(in_value))
+        return true;
+  
+    LanguageRuntime *swift_runtime = GetLanguageRuntime (eLanguageTypeSwift);
+    if (swift_runtime && swift_runtime->CouldHaveDynamicValue(in_value))
+      return true;
+  
+    return false;
 }
 
 void
@@ -2883,7 +3059,7 @@ Process::DisableWatchpoint (Watchpoint *watchpoint, bool notify)
 }
 
 StateType
-Process::WaitForProcessStopPrivate(const std::chrono::microseconds &timeout, EventSP &event_sp)
+Process::WaitForProcessStopPrivate (const TimeValue *timeout, EventSP &event_sp)
 {
     StateType state;
     // Now wait for the process to launch and return control to us, and then
@@ -2979,7 +3155,10 @@ Process::Launch (ProcessLaunchInfo &launch_info)
                 else
                 {
                     EventSP event_sp;
-                    StateType state = WaitForProcessStopPrivate(std::chrono::seconds(10), event_sp);
+                    TimeValue timeout_time;
+                    timeout_time = TimeValue::Now();
+                    timeout_time.OffsetWithSeconds(10);
+                    StateType state = WaitForProcessStopPrivate(&timeout_time, event_sp);
 
                     if (state == eStateInvalid || !event_sp)
                     {
@@ -3072,7 +3251,7 @@ Process::LoadCore ()
 
         // Wait indefinitely for a stopped event since we just posted one above...
         lldb::EventSP event_sp;
-        listener_sp->WaitForEvent(std::chrono::microseconds(0), event_sp);
+        listener_sp->WaitForEvent (nullptr, event_sp);
         StateType state = ProcessEventData::GetStateFromEvent(event_sp.get());
 
         if (!StateIsStoppedState (state, false))
@@ -3447,7 +3626,7 @@ Process::CompleteAttach ()
     m_os_ap.reset(OperatingSystem::FindPlugin(this, nullptr));
     // Figure out which one is the executable, and set that in our target:
     const ModuleList &target_modules = GetTarget().GetImages();
-    std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
+    Mutex::Locker modules_locker(target_modules.GetMutex());
     size_t num_modules = target_modules.GetSize();
     ModuleSP new_executable_module_sp;
     
@@ -3491,8 +3670,8 @@ Process::ConnectRemote (Stream *strm, const char *remote_url)
         if (GetID() != LLDB_INVALID_PROCESS_ID)
         {
             EventSP event_sp;
-            StateType state = WaitForProcessStopPrivate(std::chrono::microseconds(0), event_sp);
-
+            StateType state = WaitForProcessStopPrivate(nullptr, event_sp);
+        
             if (state == eStateStopped || state == eStateCrashed)
             {
                 // If we attached and actually have a process on the other end, then 
@@ -3601,8 +3780,11 @@ Process::Halt (bool clear_thread_plans, bool use_run_lock)
     }
 
     // Wait for 10 second for the process to stop.
-    StateType state =
-        WaitForProcessToStop(std::chrono::seconds(10), &event_sp, true, halt_listener_sp, nullptr, use_run_lock);
+    TimeValue timeout_time;
+    timeout_time = TimeValue::Now();
+    timeout_time.OffsetWithSeconds(10);
+    StateType state = WaitForProcessToStop(&timeout_time, &event_sp, true, halt_listener_sp,
+                                           nullptr, use_run_lock);
     RestoreProcessEvents();
 
     if (state == eStateInvalid || ! event_sp)
@@ -3620,10 +3802,7 @@ Error
 Process::StopForDestroyOrDetach(lldb::EventSP &exit_event_sp)
 {
     Error error;
-    
-    // Check both the public & private states here.  If we're hung evaluating an expression, for instance, then
-    // the public state will be stopped, but we still need to interrupt.
-    if (m_public_state.GetValue() == eStateRunning || m_private_state.GetValue() == eStateRunning)
+    if (m_public_state.GetValue() == eStateRunning)
     {
         Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_PROCESS));
         if (log)
@@ -3635,7 +3814,10 @@ Process::StopForDestroyOrDetach(lldb::EventSP &exit_event_sp)
         SendAsyncInterrupt();
 
         // Consume the interrupt event.
-        StateType state = WaitForProcessToStop(std::chrono::seconds(10), &exit_event_sp, true, listener_sp);
+        TimeValue timeout (TimeValue::Now());
+        timeout.OffsetWithSeconds(10);
+
+        StateType state = WaitForProcessToStop (&timeout, &exit_event_sp, true, listener_sp);
 
         RestoreProcessEvents();
 
@@ -3711,7 +3893,7 @@ Process::Detach (bool keep_stopped)
         }
     }
     m_destroy_in_process = false;
-    
+    m_destroy_complete = true;
     // If we exited when we were waiting for a process to stop, then
     // forward the event here so we don't lose the event
     if (exit_event_sp)
@@ -3801,6 +3983,7 @@ Process::Destroy (bool force_kill)
     }
     
     m_destroy_in_process = false;
+    m_destroy_complete = true;
     
     return error;
 }
@@ -4066,7 +4249,7 @@ Process::ResumePrivateStateThread ()
 void
 Process::StopPrivateStateThread ()
 {
-    if (m_private_state_thread.IsJoinable ())
+    if (PrivateStateThreadIsValid ())
         ControlPrivateStateThread (eBroadcastInternalStateControlStop);
     else
     {
@@ -4088,49 +4271,49 @@ Process::ControlPrivateStateThread (uint32_t signal)
     if (log)
         log->Printf ("Process::%s (signal = %d)", __FUNCTION__, signal);
 
-    // Signal the private state thread
-    if (m_private_state_thread.IsJoinable())
+    // Signal the private state thread. First we should copy this is case the
+    // thread starts exiting since the private state thread will NULL this out
+    // when it exits
     {
-        // Broadcast the event.
-        // It is important to do this outside of the if below, because
-        // it's possible that the thread state is invalid but that the
-        // thread is waiting on a control event instead of simply being
-        // on its way out (this should not happen, but it apparently can).
-        if (log)
-            log->Printf ("Sending control event of type: %d.", signal);
-        std::shared_ptr<EventDataReceipt> event_receipt_sp(new EventDataReceipt());
-        m_private_state_control_broadcaster.BroadcastEvent(signal, event_receipt_sp);
-
-        // Wait for the event receipt or for the private state thread to exit
-        bool receipt_received = false;
-        if (PrivateStateThreadIsValid())
+        HostThread private_state_thread(m_private_state_thread);
+        if (private_state_thread.IsJoinable())
         {
+            if (log)
+                log->Printf ("Sending control event of type: %d.", signal);
+            // Send the control event and wait for the receipt or for the private state
+            // thread to exit
+            std::shared_ptr<EventDataReceipt> event_receipt_sp(new EventDataReceipt());
+            m_private_state_control_broadcaster.BroadcastEvent(signal, event_receipt_sp);
+
+            bool receipt_received = false;
             while (!receipt_received)
             {
                 bool timed_out = false;
+                TimeValue timeout_time;
+                timeout_time = TimeValue::Now();
+                timeout_time.OffsetWithSeconds(2);
                 // Check for a receipt for 2 seconds and then check if the private state
                 // thread is still around.
-                receipt_received = event_receipt_sp->WaitForEventReceived(std::chrono::seconds(2), &timed_out);
+                receipt_received = event_receipt_sp->WaitForEventReceived (&timeout_time, &timed_out);
                 if (!receipt_received)
                 {
                     // Check if the private state thread is still around. If it isn't then we are done waiting
-                    if (!PrivateStateThreadIsValid())
-                        break; // Private state thread exited or is exiting, we are done
+                    if (!m_private_state_thread.IsJoinable())
+                        break; // Private state thread exited, we are done
                 }
             }
-        }
 
-        if (signal == eBroadcastInternalStateControlStop)
-        {
-            thread_result_t result = NULL;
-            m_private_state_thread.Join(&result);
-            m_private_state_thread.Reset();
+            if (signal == eBroadcastInternalStateControlStop)
+            {
+                thread_result_t result = NULL;
+                private_state_thread.Join(&result);
+            }
         }
-    }
-    else
-    {
-        if (log)
-            log->Printf("Private state thread already dead, no need to signal it to stop.");
+        else
+        {
+            if (log)
+                log->Printf ("Private state thread already dead, no need to signal it to stop.");
+        }
     }
 }
 
@@ -4247,7 +4430,7 @@ Process::HandlePrivateEvent (EventSP &event_sp)
                 // correctly.
                 
                 if (is_hijacked || !GetTarget().GetDebugger().IsHandlingEvents())
-                    PopProcessIOHandler ();
+                    PopProcessIOHandler (false);
             }
         }
 
@@ -4306,7 +4489,7 @@ Process::RunPrivateStateThread (bool is_secondary_thread)
     while (!exit_now)
     {
         EventSP event_sp;
-        WaitForEventsPrivate(std::chrono::microseconds(0), event_sp, control_only);
+        WaitForEventsPrivate(nullptr, event_sp, control_only);
         if (event_sp->BroadcasterIs(&m_private_state_control_broadcaster))
         {
             if (log)
@@ -4424,6 +4607,7 @@ Process::RunPrivateStateThread (bool is_secondary_thread)
     // try to change it on the way out.
     if (!is_secondary_thread)
         m_public_run_lock.SetStopped();
+    m_private_state_thread.Reset();
     return NULL;
 }
 
@@ -4765,7 +4949,7 @@ Process::CalculateExecutionContext (ExecutionContext &exe_ctx)
 void
 Process::AppendSTDOUT (const char * s, size_t len)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_stdio_communication_mutex);
+    Mutex::Locker locker (m_stdio_communication_mutex);
     m_stdout_data.append (s, len);
     BroadcastEventIfUnique (eBroadcastBitSTDOUT, new ProcessEventData (shared_from_this(), GetState()));
 }
@@ -4773,7 +4957,7 @@ Process::AppendSTDOUT (const char * s, size_t len)
 void
 Process::AppendSTDERR (const char * s, size_t len)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_stdio_communication_mutex);
+    Mutex::Locker locker (m_stdio_communication_mutex);
     m_stderr_data.append (s, len);
     BroadcastEventIfUnique (eBroadcastBitSTDERR, new ProcessEventData (shared_from_this(), GetState()));
 }
@@ -4781,7 +4965,7 @@ Process::AppendSTDERR (const char * s, size_t len)
 void
 Process::BroadcastAsyncProfileData(const std::string &one_profile_data)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_profile_data_comm_mutex);
+    Mutex::Locker locker (m_profile_data_comm_mutex);
     m_profile_data.push_back(one_profile_data);
     BroadcastEventIfUnique (eBroadcastBitProfileData, new ProcessEventData (shared_from_this(), GetState()));
 }
@@ -4789,7 +4973,7 @@ Process::BroadcastAsyncProfileData(const std::string &one_profile_data)
 size_t
 Process::GetAsyncProfileData (char *buf, size_t buf_size, Error &error)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_profile_data_comm_mutex);
+    Mutex::Locker locker(m_profile_data_comm_mutex);
     if (m_profile_data.empty())
         return 0;
     
@@ -4824,7 +5008,7 @@ Process::GetAsyncProfileData (char *buf, size_t buf_size, Error &error)
 size_t
 Process::GetSTDOUT (char *buf, size_t buf_size, Error &error)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_stdio_communication_mutex);
+    Mutex::Locker locker(m_stdio_communication_mutex);
     size_t bytes_available = m_stdout_data.size();
     if (bytes_available > 0)
     {
@@ -4851,7 +5035,7 @@ Process::GetSTDOUT (char *buf, size_t buf_size, Error &error)
 size_t
 Process::GetSTDERR (char *buf, size_t buf_size, Error &error)
 {
-    std::lock_guard<std::recursive_mutex> gaurd(m_stdio_communication_mutex);
+    Mutex::Locker locker(m_stdio_communication_mutex);
     size_t bytes_available = m_stderr_data.size();
     if (bytes_available > 0)
     {
@@ -4888,11 +5072,12 @@ class IOHandlerProcessSTDIO :
 public:
     IOHandlerProcessSTDIO (Process *process,
                            int write_fd) :
-    IOHandler(process->GetTarget().GetDebugger(), IOHandler::Type::ProcessIO),
+        IOHandler(process->GetTarget().GetDebugger(), IOHandler::Type::ProcessIO),
         m_process (process),
         m_read_file (),
         m_write_file (write_fd, false),
-        m_pipe ()
+        m_pipe (),
+        m_waiting_on_pipe (false)
     {
         m_pipe.CreateNew(false);
         m_read_file.SetDescriptor(GetInputFD(), false);
@@ -4930,7 +5115,10 @@ public:
             FD_SET (read_fd, &read_fdset);
             FD_SET (pipe_read_fd, &read_fdset);
             const int nfds = std::max<int>(read_fd, pipe_read_fd) + 1;
+
+            m_waiting_on_pipe = true;
             int num_set_fds = select(nfds, &read_fdset, nullptr, nullptr, nullptr);
+            m_waiting_on_pipe = false;
 
             if (num_set_fds < 0)
             {
@@ -5011,7 +5199,7 @@ public:
         // interrupt the IOHandlerProcessSTDIO::Run() and we can look at the byte
         // that was written to the pipe and then call m_process->SendAsyncInterrupt()
         // from a much safer location in code.
-        if (m_active)
+        if (m_waiting_on_pipe)
         {
             char ch = 'i'; // Send 'i' for interrupt
             size_t bytes_written = 0;
@@ -5047,6 +5235,7 @@ protected:
     File m_read_file;   // Read from this file (usually actual STDIN for LLDB
     File m_write_file;  // Write to this file (usually the master pty for getting io to debuggee)
     Pipe m_pipe;
+    std::atomic<bool> m_waiting_on_pipe;
     std::atomic<bool> m_is_running;
 };
 
@@ -5099,11 +5288,17 @@ Process::PushProcessIOHandler ()
 }
 
 bool
-Process::PopProcessIOHandler ()
+Process::PopProcessIOHandler (bool pop_command_interpreter)
 {
     IOHandlerSP io_handler_sp (m_process_input_reader);
     if (io_handler_sp)
-        return GetTarget().GetDebugger().PopIOHandler (io_handler_sp);
+    {
+        if (pop_command_interpreter)
+            return GetTarget().GetDebugger().PopIOHandlers (io_handler_sp,
+                                                         GetTarget().GetDebugger().GetCommandInterpreter().GetIOHandler());
+        else
+            return GetTarget().GetDebugger().PopIOHandler (io_handler_sp);
+    }
     return false;
 }
 
@@ -5174,7 +5369,17 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
 {
     ExpressionResults return_value = eExpressionSetupError;
     
-    std::lock_guard<std::mutex> run_thread_plan_locker(m_run_thread_plan_lock);
+    Log *log(lldb_private::GetLogIfAnyCategoriesSet (LIBLLDB_LOG_STEP | LIBLLDB_LOG_PROCESS));
+    
+    if (!m_run_thread_plan_lock.try_lock())
+    {
+        if (log)
+            log->Printf("RunThreadPlan could not acquire the RunThreadPlan lock.");
+        diagnostic_manager.PutCString(eDiagnosticSeverityError, "RunThreadPlan could not acquire the RunThreadPlan lock.");
+        return eExpressionSetupError;
+    }
+        
+    std::lock_guard<std::mutex> run_thread_plan_locker(m_run_thread_plan_lock, std::adopt_lock_t());
 
     if (!thread_plan_sp)
     {
@@ -5263,7 +5468,6 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
     lldb::StateType old_state = eStateInvalid;
     lldb::ThreadPlanSP stopper_base_plan_sp;
     
-    Log *log(lldb_private::GetLogIfAnyCategoriesSet (LIBLLDB_LOG_STEP | LIBLLDB_LOG_PROCESS));
     if (m_private_state_thread.EqualsThread(Host::GetCurrentThread()))
     {
         // Yikes, we are running on the private state thread!  So we can't wait for public events on this thread, since
@@ -5301,6 +5505,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
         // is only cosmetic, and this functionality is only of use to lldb developers who can
         // live with not pretty...
         thread->Flush();
+        BroadcastEvent (eBroadcastBitStateChanged, new ProcessEventData (shared_from_this(), eStateStopped));
         return eExpressionStoppedForDebug;
     }
 
@@ -5330,6 +5535,9 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
         bool got_event;
         lldb::EventSP event_sp;
         lldb::StateType stop_state = lldb::eStateInvalid;
+
+        TimeValue* timeout_ptr = nullptr;
+        TimeValue real_timeout;
 
         bool before_first_timeout = true;  // This is set to false the first time that we have to halt the target.
         bool do_resume = true;
@@ -5431,7 +5639,6 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
 #endif
         TimeValue one_thread_timeout;
         TimeValue final_timeout;
-        std::chrono::microseconds timeout = std::chrono::microseconds(0);
 
         while (true)
         {
@@ -5462,7 +5669,10 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
                     }
                 }
 
-                got_event = listener_sp->WaitForEvent(std::chrono::microseconds(500000), event_sp);
+                TimeValue resume_timeout = TimeValue::Now();
+                resume_timeout.OffsetWithMicroSeconds(500000);
+
+                got_event = listener_sp->WaitForEvent(&resume_timeout, event_sp);
                 if (!got_event)
                 {
                     if (log)
@@ -5527,16 +5737,33 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
             if (before_first_timeout)
             {
                 if (options.GetTryAllThreads())
-                    timeout = std::chrono::microseconds(one_thread_timeout_usec);
+                {
+                    one_thread_timeout = TimeValue::Now();
+                    one_thread_timeout.OffsetWithMicroSeconds(one_thread_timeout_usec);
+                    timeout_ptr = &one_thread_timeout;
+                }
                 else
-                    timeout = std::chrono::microseconds(timeout_usec);
+                {
+                    if (timeout_usec == 0)
+                        timeout_ptr = nullptr;
+                    else
+                    {
+                        final_timeout = TimeValue::Now();
+                        final_timeout.OffsetWithMicroSeconds (timeout_usec);
+                        timeout_ptr = &final_timeout;
+                    }
+                }
             }
             else
             {
                 if (timeout_usec == 0)
-                    timeout = std::chrono::microseconds(0);
+                    timeout_ptr = nullptr;
                 else
-                    timeout = std::chrono::microseconds(all_threads_timeout_usec);
+                {
+                    final_timeout = TimeValue::Now();
+                    final_timeout.OffsetWithMicroSeconds (all_threads_timeout_usec);
+                    timeout_ptr = &final_timeout;
+                }
             }
 
             do_resume = true;
@@ -5547,15 +5774,11 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
 
             if (log)
             {
-                if (timeout.count())
+                if (timeout_ptr)
                 {
-                    log->Printf(
-                        "Process::RunThreadPlan(): about to wait - now is %llu - endpoint is %llu",
-                        static_cast<unsigned long long>(std::chrono::system_clock::now().time_since_epoch().count()),
-                        static_cast<unsigned long long>(
-                            std::chrono::time_point<std::chrono::system_clock, std::chrono::microseconds>(timeout)
-                                .time_since_epoch()
-                                .count()));
+                    log->Printf ("Process::RunThreadPlan(): about to wait - now is %" PRIu64 " - endpoint is %" PRIu64,
+                                 TimeValue::Now().GetAsMicroSecondsSinceJan1_1970(),
+                                 timeout_ptr->GetAsMicroSecondsSinceJan1_1970());
                 }
                 else
                 {
@@ -5573,7 +5796,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
             }
             else
 #endif
-                got_event = listener_sp->WaitForEvent(timeout, event_sp);
+            got_event = listener_sp->WaitForEvent (timeout_ptr, event_sp);
 
             if (got_event)
             {
@@ -5772,7 +5995,10 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
                         if (log)
                             log->PutCString ("Process::RunThreadPlan(): Halt succeeded.");
 
-                        got_event = listener_sp->WaitForEvent(std::chrono::microseconds(500000), event_sp);
+                        real_timeout = TimeValue::Now();
+                        real_timeout.OffsetWithMicroSeconds(500000);
+
+                        got_event = listener_sp->WaitForEvent(&real_timeout, event_sp);
 
                         if (got_event)
                         {
@@ -6068,7 +6294,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx, lldb::ThreadPlanSP &thread_pla
             if (GetThreadList().SetSelectedThreadByIndexID (selected_tid) && selected_stack_id.IsValid())
             {
                 // We were able to restore the selected thread, now restore the frame:
-                std::lock_guard<std::recursive_mutex> guard(GetThreadList().GetMutex());
+                Mutex::Locker lock(GetThreadList().GetMutex());
                 StackFrameSP old_frame_sp = GetThreadList().GetSelectedThread()->GetFrameWithStackID(selected_stack_id);
                 if (old_frame_sp)
                     GetThreadList().GetSelectedThread()->SetSelectedFrame(old_frame_sp.get());
@@ -6173,7 +6399,7 @@ Process::GetThreadStatus (Stream &strm,
     std::vector<lldb::tid_t> thread_id_array;
     //Scope for thread list locker;
     {
-        std::lock_guard<std::recursive_mutex> guard(GetThreadList().GetMutex());
+        Mutex::Locker locker (GetThreadList().GetMutex());
         ThreadList &curr_thread_list = GetThreadList();
         num_threads = curr_thread_list.GetSize();
         uint32_t idx;
@@ -6436,6 +6662,12 @@ Process::PrintWarningOptimization (const SymbolContext &sc)
     }
 }
 
+void
+Process::PrintWarningCantLoadSwift (const Module &module)
+{
+    PrintWarning (Process::Warnings::eWarningsCantLoadSwift, (void*)&module, "%s had Swift information that isn't usable on the current system; its internals will be unavailable.\n", module.GetFileSpec().GetCString());
+}
+
 bool
 Process::GetProcessInfo(ProcessInstanceInfo &info)
 {
@@ -6562,37 +6794,4 @@ Process::AdvanceAddressToNextBranchInstruction (Address default_stop_addr, Addre
     }
 
     return retval;
-}
-
-Error
-Process::GetMemoryRegions (std::vector<lldb::MemoryRegionInfoSP>& region_list)
-{
-
-    Error error;
-
-    lldb::addr_t range_base = 0;
-    lldb::addr_t range_end = 0;
-
-    region_list.clear();
-    do
-    {
-        lldb::MemoryRegionInfoSP region_info( new lldb_private::MemoryRegionInfo() );
-        error = GetMemoryRegionInfo (range_end, *region_info);
-        // GetMemoryRegionInfo should only return an error if it is unimplemented.
-        if (error.Fail())
-        {
-            region_list.clear();
-            break;
-        }
-
-        range_base = region_info->GetRange().GetRangeBase();
-        range_end = region_info->GetRange().GetRangeEnd();
-        if( region_info->GetMapped() == MemoryRegionInfo::eYes )
-        {
-            region_list.push_back(region_info);
-        }
-    } while (range_end != LLDB_INVALID_ADDRESS);
-
-    return error;
-
 }

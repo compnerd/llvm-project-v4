@@ -13,7 +13,6 @@
 // C Includes
 // C++ Includes
 #include <memory>
-#include <mutex>
 #include <string>
 
 // Other libraries and framework includes
@@ -23,6 +22,7 @@
 #include "lldb/Core/Address.h"
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Host/Mutex.h"
 
 // Opaque references to C++ Objects in LLVM's MC.
 namespace llvm
@@ -147,7 +147,7 @@ protected:
     void Lock(InstructionLLVMC *inst,
               const lldb_private::ExecutionContext *exe_ctx)
     {
-        m_mutex.lock();
+        m_mutex.Lock();
         m_inst = inst;
         m_exe_ctx = exe_ctx;
     }
@@ -156,12 +156,12 @@ protected:
     {
         m_inst = NULL;
         m_exe_ctx = NULL;
-        m_mutex.unlock();
+        m_mutex.Unlock();
     }
 
     const lldb_private::ExecutionContext *m_exe_ctx;
     InstructionLLVMC *m_inst;
-    std::mutex m_mutex;
+    lldb_private::Mutex m_mutex;
     bool m_data_from_file;
 
     std::unique_ptr<LLVMCDisassembler> m_disasm_ap;

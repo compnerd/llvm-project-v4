@@ -112,7 +112,7 @@ public:
         m_file_manager(clang::FileSystemOptions())
     {
     }
-    
+
     clang::QualType
     CopyType (clang::ASTContext *dst_ctx,
               clang::ASTContext *src_ctx,

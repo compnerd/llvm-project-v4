@@ -15,7 +15,6 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -29,6 +28,7 @@
 #include "lldb/Core/UserSettingsController.h"
 #include "lldb/Interpreter/Options.h"
 #include "lldb/Host/FileSpec.h"
+#include "lldb/Host/Mutex.h"
 
 // TODO pull NativeDelegate class out of NativeProcessProtocol so we
 // can just forward ref the NativeDelegate rather than include it here.
@@ -1055,7 +1055,7 @@ class ModuleCache;
         ///     contain the error message.
         ///
         /// @return
-        ///     The number of processes we are successfully connected to.
+        ///     The number of processes we are succesfully connected to.
         //------------------------------------------------------------------
         virtual size_t
         ConnectToWaitingProcesses(lldb_private::Debugger& debugger, lldb_private::Error& error);
@@ -1079,8 +1079,7 @@ class ModuleCache;
         uint32_t m_update_os_version;
         ArchSpec m_system_arch; // The architecture of the kernel or the remote platform
         typedef std::map<uint32_t, ConstString> IDToNameMap;
-        // Mutex for modifying Platform data structures that should only be used for non-reentrant code
-        std::mutex m_mutex;
+        Mutex m_mutex; // Mutex for modifying Platform data structures that should only be used for non-reentrant code
         IDToNameMap m_uid_map;
         IDToNameMap m_gid_map;
         size_t m_max_uid_name_len;
@@ -1113,9 +1112,9 @@ class ModuleCache;
         CalculateTrapHandlerSymbolNames () = 0;
 
         const char *
-        GetCachedUserName(uint32_t uid)
+        GetCachedUserName (uint32_t uid)
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             // return the empty string if our string is NULL
             // so we can tell when things were in the negative
             // cached (didn't find a valid user name, don't keep
@@ -1125,35 +1124,35 @@ class ModuleCache;
         }
 
         const char *
-        SetCachedUserName(uint32_t uid, const char *name, size_t name_len)
+        SetCachedUserName (uint32_t uid, const char *name, size_t name_len)
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
-            ConstString const_name(name);
+            Mutex::Locker locker (m_mutex);
+            ConstString const_name (name);
             m_uid_map[uid] = const_name;
             if (m_max_uid_name_len < name_len)
                 m_max_uid_name_len = name_len;
             // Const strings lives forever in our const string pool, so we can return the const char *
-            return const_name.GetCString();
+            return const_name.GetCString(); 
         }
 
         void
-        SetUserNameNotFound(uint32_t uid)
+        SetUserNameNotFound (uint32_t uid)
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             m_uid_map[uid] = ConstString();
         }
 
         void
-        ClearCachedUserNames()
+        ClearCachedUserNames ()
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             m_uid_map.clear();
         }
-
+    
         const char *
-        GetCachedGroupName(uint32_t gid)
+        GetCachedGroupName (uint32_t gid)
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             // return the empty string if our string is NULL
             // so we can tell when things were in the negative
             // cached (didn't find a valid group name, don't keep
@@ -1163,28 +1162,28 @@ class ModuleCache;
         }
 
         const char *
-        SetCachedGroupName(uint32_t gid, const char *name, size_t name_len)
+        SetCachedGroupName (uint32_t gid, const char *name, size_t name_len)
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
-            ConstString const_name(name);
+            Mutex::Locker locker (m_mutex);
+            ConstString const_name (name);
             m_gid_map[gid] = const_name;
             if (m_max_gid_name_len < name_len)
                 m_max_gid_name_len = name_len;
             // Const strings lives forever in our const string pool, so we can return the const char *
-            return const_name.GetCString();
+            return const_name.GetCString(); 
         }
 
         void
-        SetGroupNameNotFound(uint32_t gid)
+        SetGroupNameNotFound (uint32_t gid)
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             m_gid_map[gid] = ConstString();
         }
 
         void
-        ClearCachedGroupNames()
+        ClearCachedGroupNames ()
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             m_gid_map.clear();
         }
 
@@ -1237,15 +1236,20 @@ class ModuleCache;
     class PlatformList
     {
     public:
-        PlatformList() : m_mutex(), m_platforms(), m_selected_platform_sp() {}
+        PlatformList() :
+            m_mutex (Mutex::eMutexTypeRecursive),
+            m_platforms (),
+            m_selected_platform_sp()
+        {
+        }
 
         ~PlatformList() = default;
 
         void
-        Append(const lldb::PlatformSP &platform_sp, bool set_selected)
+        Append (const lldb::PlatformSP &platform_sp, bool set_selected)
         {
-            std::lock_guard<std::recursive_mutex> guard(m_mutex);
-            m_platforms.push_back(platform_sp);
+            Mutex::Locker locker (m_mutex);
+            m_platforms.push_back (platform_sp);
             if (set_selected)
                 m_selected_platform_sp = m_platforms.back();
         }
@@ -1253,16 +1257,16 @@ class ModuleCache;
         size_t
         GetSize()
         {
-            std::lock_guard<std::recursive_mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             return m_platforms.size();
         }
 
         lldb::PlatformSP
-        GetAtIndex(uint32_t idx)
+        GetAtIndex (uint32_t idx)
         {
             lldb::PlatformSP platform_sp;
             {
-                std::lock_guard<std::recursive_mutex> guard(m_mutex);
+                Mutex::Locker locker (m_mutex);
                 if (idx < m_platforms.size())
                     platform_sp = m_platforms[idx];
             }
@@ -1279,23 +1283,23 @@ class ModuleCache;
         /// processes.
         //------------------------------------------------------------------
         lldb::PlatformSP
-        GetSelectedPlatform()
+        GetSelectedPlatform ()
         {
-            std::lock_guard<std::recursive_mutex> guard(m_mutex);
+            Mutex::Locker locker (m_mutex);
             if (!m_selected_platform_sp && !m_platforms.empty())
                 m_selected_platform_sp = m_platforms.front();
-
+            
             return m_selected_platform_sp;
         }
 
         void
-        SetSelectedPlatform(const lldb::PlatformSP &platform_sp)
+        SetSelectedPlatform (const lldb::PlatformSP &platform_sp)
         {
             if (platform_sp)
             {
-                std::lock_guard<std::recursive_mutex> guard(m_mutex);
+                Mutex::Locker locker (m_mutex);
                 const size_t num_platforms = m_platforms.size();
-                for (size_t idx = 0; idx < num_platforms; ++idx)
+                for (size_t idx=0; idx<num_platforms; ++idx)
                 {
                     if (m_platforms[idx].get() == platform_sp.get())
                     {
@@ -1303,21 +1307,21 @@ class ModuleCache;
                         return;
                     }
                 }
-                m_platforms.push_back(platform_sp);
+                m_platforms.push_back (platform_sp);
                 m_selected_platform_sp = m_platforms.back();
             }
         }
 
     protected:
         typedef std::vector<lldb::PlatformSP> collection;
-        mutable std::recursive_mutex m_mutex;
+        mutable Mutex m_mutex;
         collection m_platforms;
         lldb::PlatformSP m_selected_platform_sp;
 
     private:
         DISALLOW_COPY_AND_ASSIGN (PlatformList);
     };
-
+    
     class OptionGroupPlatformRSync : public lldb_private::OptionGroup
     {
     public:

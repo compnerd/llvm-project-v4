@@ -145,7 +145,7 @@ ThreadPlanStepRange::InRange ()
         SymbolContext new_context(frame->GetSymbolContext(eSymbolContextEverything));
         if (m_addr_context.line_entry.IsValid() && new_context.line_entry.IsValid())
         {
-            if (m_addr_context.line_entry.original_file == new_context.line_entry.original_file)
+            if (m_addr_context.line_entry.file == new_context.line_entry.file)
             {
                 if (m_addr_context.line_entry.line == new_context.line_entry.line)
                 {
@@ -473,25 +473,27 @@ ThreadPlanStepRange::GetPlanRunState ()
 bool
 ThreadPlanStepRange::MischiefManaged ()
 {
-    // If we have pushed some plans between ShouldStop & MischiefManaged, then we're not done...
-    // I do this check first because we might have stepped somewhere that will fool InRange into
-    // thinking it needs to step past the end of that line.  This happens, for instance, when stepping
-    // over inlined code that is in the middle of the current line.
-    
-    if (!m_no_more_plans)
-        return false;
-    
     bool done = true;
     if (!IsPlanComplete())
     {
-        if (InRange())
-        {
+        // If we have pushed some plans between ShouldStop & MischiefManaged, then we're not done...
+        // I do this check first because we might have stepped somewhere that will fool InRange into
+        // thinking it needs to step past the end of that line.  This happens, for instance, when stepping
+        // over inlined code that is in the middle of the current line.
+    
+        if (!m_no_more_plans)
             done = false;
-        }
-        else 
+        else
         {
-            FrameComparison frame_order = CompareCurrentFrameToStartFrame();
-            done = (frame_order != eFrameCompareOlder) ? m_no_more_plans : true;
+            if (InRange())
+            {
+                done = false;
+            }
+            else 
+            {
+                FrameComparison frame_order = CompareCurrentFrameToStartFrame();
+                done = (frame_order != eFrameCompareOlder) ? m_no_more_plans : true;
+            }
         }
     }
 

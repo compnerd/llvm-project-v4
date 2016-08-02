@@ -23,12 +23,6 @@ namespace lldb_private {
 class ThreadPlanStepInstruction : public ThreadPlan
 {
 public:
-    ThreadPlanStepInstruction (Thread &thread,
-                               bool step_over,
-                               bool stop_others,
-                               Vote stop_vote,
-                               Vote run_vote);
-
     ~ThreadPlanStepInstruction() override;
 
     void GetDescription(Stream *s, lldb::DescriptionLevel level) override;
@@ -43,6 +37,11 @@ public:
 protected:
     bool DoPlanExplainsStop(Event *event_ptr) override;
 
+    ThreadPlanStepInstruction (Thread &thread,
+                               bool step_over,
+                               bool stop_others,
+                               Vote stop_vote,
+                               Vote run_vote);
     void SetUpState ();
 
 private:

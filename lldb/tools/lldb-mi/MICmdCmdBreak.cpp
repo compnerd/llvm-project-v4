@@ -100,7 +100,7 @@ CMICmdCmdBreakInsert::ParseArgs()
         new CMICmdArgValOptionShort(m_constStrArgNamedInoreCnt, false, true, CMICmdArgValListBase::eArgValType_Number, 1));
     m_setCmdArgs.Add(new CMICmdArgValOptionShort(m_constStrArgNamedRestrictBrkPtToThreadId, false, true,
                                                    CMICmdArgValListBase::eArgValType_Number, 1));
-    m_setCmdArgs.Add(new CMICmdArgValString(m_constStrArgNamedLocation, false, true, false, false, true));
+    m_setCmdArgs.Add(new CMICmdArgValString(m_constStrArgNamedLocation, false, true));
     return ParseValidateCmdOptions();
 }
 
@@ -568,9 +568,19 @@ CMICmdCmdBreakDisable::Acknowledge()
 {
     if (m_bBrkPtDisabledOk)
     {
+        const CMICmnMIValueConst miValueConst(CMIUtilString::Format("%d", m_nBrkPtId));
+        const CMICmnMIValueResult miValueResult("number", miValueConst);
+        CMICmnMIValueTuple miValueTuple(miValueResult);
+        const CMICmnMIValueConst miValueConst2("n");
+        const CMICmnMIValueResult miValueResult2("enabled", miValueConst2);
+        miValueTuple.Add(miValueResult2);
+        const CMICmnMIValueResult miValueResult3("bkpt", miValueTuple);
+        const CMICmnMIOutOfBandRecord miOutOfBandRecord(CMICmnMIOutOfBandRecord::eOutOfBand_BreakPointModified, miValueResult3);
+        bool bOk = CMICmnStreamStdout::TextToStdout(miOutOfBandRecord.GetString());
+
         const CMICmnMIResultRecord miRecordResult(m_cmdData.strMiCmdToken, CMICmnMIResultRecord::eResultClass_Done);
         m_miResultRecord = miRecordResult;
-        return MIstatus::success;
+        return bOk;
     }
 
     const CMIUtilString strBrkPtId(CMIUtilString::Format("%d", m_nBrkPtId));
@@ -673,7 +683,7 @@ CMICmdCmdBreakEnable::Execute()
     if (brkPt.IsValid())
     {
         m_bBrkPtEnabledOk = true;
-        brkPt.SetEnabled(true);
+        brkPt.SetEnabled(false);
         m_nBrkPtId = nBrk;
     }
 
@@ -694,9 +704,19 @@ CMICmdCmdBreakEnable::Acknowledge()
 {
     if (m_bBrkPtEnabledOk)
     {
+        const CMICmnMIValueConst miValueConst(CMIUtilString::Format("%d", m_nBrkPtId));
+        const CMICmnMIValueResult miValueResult("number", miValueConst);
+        CMICmnMIValueTuple miValueTuple(miValueResult);
+        const CMICmnMIValueConst miValueConst2("y");
+        const CMICmnMIValueResult miValueResult2("enabled", miValueConst2);
+        miValueTuple.Add(miValueResult2);
+        const CMICmnMIValueResult miValueResult3("bkpt", miValueTuple);
+        const CMICmnMIOutOfBandRecord miOutOfBandRecord(CMICmnMIOutOfBandRecord::eOutOfBand_BreakPointModified, miValueResult3);
+        bool bOk = CMICmnStreamStdout::TextToStdout(miOutOfBandRecord.GetString());
+
         const CMICmnMIResultRecord miRecordResult(m_cmdData.strMiCmdToken, CMICmnMIResultRecord::eResultClass_Done);
         m_miResultRecord = miRecordResult;
-        return MIstatus::success;
+        return bOk;
     }
 
     const CMIUtilString strBrkPtId(CMIUtilString::Format("%d", m_nBrkPtId));

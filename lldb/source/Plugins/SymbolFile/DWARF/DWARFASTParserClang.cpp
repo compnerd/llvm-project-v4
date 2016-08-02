@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <stdlib.h>
-
 #include "DWARFASTParserClang.h"
 #include "DWARFCompileUnit.h"
 #include "DWARFDebugInfo.h"
@@ -38,6 +36,7 @@
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Utility/LLDBAssert.h"
+#include "Plugins/Language/ObjC/ObjCLanguage.h"
 
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
@@ -328,7 +327,7 @@ DWARFASTParserClang::ParseTypeFromDWARF (const SymbolContext& sc,
                         }
                     }
 
-                    if (tag == DW_TAG_typedef && encoding_uid.IsValid())
+                    if (tag == DW_TAG_typedef)
                     {
                         // Try to parse a typedef from the DWO file first as modules
                         // can contain typedef'ed structures that have no names like:
@@ -2124,7 +2123,7 @@ DWARFASTParserClang::CompleteTypeFromDWARF(const DWARFDIE &die, lldb_private::Ty
 {
     SymbolFileDWARF *dwarf = die.GetDWARF();
 
-    std::lock_guard<std::recursive_mutex> guard(dwarf->GetObjectFile()->GetModule()->GetMutex());
+    lldb_private::Mutex::Locker locker(dwarf->GetObjectFile()->GetModule()->GetMutex());
 
     // Disable external storage for this type so we don't get anymore
     // clang::ExternalASTSource queries for this type.
@@ -2132,44 +2131,6 @@ DWARFASTParserClang::CompleteTypeFromDWARF(const DWARFDIE &die, lldb_private::Ty
 
     if (!die)
         return false;
-
-#if defined LLDB_CONFIGURATION_DEBUG
-    //----------------------------------------------------------------------
-    // For debugging purposes, the LLDB_DWARF_DONT_COMPLETE_TYPENAMES
-    // environment variable can be set with one or more typenames separated
-    // by ';' characters. This will cause this function to not complete any
-    // types whose names match.
-    //
-    // Examples of setting this environment variable:
-    //
-    // LLDB_DWARF_DONT_COMPLETE_TYPENAMES=Foo
-    // LLDB_DWARF_DONT_COMPLETE_TYPENAMES=Foo;Bar;Baz
-    //----------------------------------------------------------------------
-    const char *dont_complete_typenames_cstr = getenv("LLDB_DWARF_DONT_COMPLETE_TYPENAMES");
-    if (dont_complete_typenames_cstr && dont_complete_typenames_cstr[0])
-    {
-        const char *die_name = die.GetName();
-        if (die_name && die_name[0])
-        {
-            const char *match = strstr(dont_complete_typenames_cstr, die_name);
-            if (match)
-            {
-                size_t die_name_length = strlen(die_name);
-                while (match)
-                {
-                    const char separator_char = ';';
-                    const char next_char = match[die_name_length];
-                    if (next_char == '\0' || next_char == separator_char)
-                    {
-                        if (match == dont_complete_typenames_cstr || match[-1] == separator_char)
-                            return false;
-                    }
-                    match = strstr(match+1, die_name);
-                }
-            }
-        }
-    }
-#endif
 
     const dw_tag_t tag = die.Tag();
 
@@ -2837,7 +2798,7 @@ DWARFASTParserClang::ParseChildMembers(const SymbolContext &sc, const DWARFDIE &
                                 case DW_AT_decl_column: decl.SetColumn(form_value.Unsigned()); break;
                                 case DW_AT_name:        name = form_value.AsCString(); break;
                                 case DW_AT_type:        encoding_form = form_value; break;
-                                case DW_AT_bit_offset:  bit_offset = form_value.Signed(); break;
+                                case DW_AT_bit_offset:  bit_offset = form_value.Unsigned(); break;
                                 case DW_AT_bit_size:    bit_size = form_value.Unsigned(); break;
                                 case DW_AT_byte_size:   byte_size = form_value.Unsigned(); break;
                                 case DW_AT_data_bit_offset: data_bit_offset = form_value.Unsigned(); break;
@@ -2952,7 +2913,7 @@ DWARFASTParserClang::ParseChildMembers(const SymbolContext &sc, const DWARFDIE &
                     // type in an expression when clang becomes unhappy with its
                     // recycled debug info.
 
-                    if (byte_size == 0 && bit_offset < 0)
+                    if (bit_offset > 128)
                     {
                         bit_size = 0;
                         bit_offset = 0;

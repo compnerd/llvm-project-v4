@@ -12,12 +12,12 @@
 
 // C Includes
 // C++ Includes
-#include <mutex>
 #include <unordered_map>
 
 // Other libraries and framework includes
 #include "lldb/lldb-private-forward.h"
 #include "lldb/Core/Communication.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Host/common/NativeProcessProtocol.h"
 #include "lldb/Host/MainLoop.h"
 
@@ -40,7 +40,7 @@ public:
     //------------------------------------------------------------------
     // Constructors and Destructors
     //------------------------------------------------------------------
-    GDBRemoteCommunicationServerLLGS(MainLoop &mainloop);
+    GDBRemoteCommunicationServerLLGS(const lldb::PlatformSP& platform_sp, MainLoop &mainloop);
 
     //------------------------------------------------------------------
     /// Specify the program to launch and its arguments.
@@ -114,11 +114,12 @@ public:
     InitializeConnection (std::unique_ptr<Connection> &&connection);
 
 protected:
+    lldb::PlatformSP m_platform_sp;
     MainLoop &m_mainloop;
     MainLoop::ReadHandleUP m_network_handle_up;
     lldb::tid_t m_current_tid;
     lldb::tid_t m_continue_tid;
-    std::recursive_mutex m_debugged_process_mutex;
+    Mutex m_debugged_process_mutex;
     NativeProcessProtocolSP m_debugged_process_sp;
 
     Communication m_stdio_communication;
@@ -126,7 +127,7 @@ protected:
 
     lldb::StateType m_inferior_prev_state;
     lldb::DataBufferSP m_active_auxv_buffer_sp;
-    std::mutex m_saved_registers_mutex;
+    Mutex m_saved_registers_mutex;
     std::unordered_map<uint32_t, lldb::DataBufferSP> m_saved_registers_map;
     uint32_t m_next_saved_registers_id;
     bool m_handshake_completed : 1;

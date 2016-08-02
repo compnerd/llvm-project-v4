@@ -20,9 +20,22 @@ include_directories(
   )
 endif ()
 
+# Keep track of whether this is a buildbot build.
+set(LLDB_IS_BUILDBOT_BUILD FALSE CACHE BOOL
+  "Indicate whether this is a buildbot build")
+
+# Keep track of when we did this build.  Note incremental
+# builds could get burnt by this.
+string(TIMESTAMP INTERNAL_BUILD_DATE "%Y-%m-%d")
 
 set(lldbBase_SOURCES
     lldb.cpp
+  )
+
+set(LLDB_CPP_COMPILE_DEFINITIONS
+  "LLDB_IS_BUILDBOT_BUILD=${LLDB_IS_BUILDBOT_BUILD}"
+  "LLDB_BUILD_DATE=\"${INTERNAL_BUILD_DATE}\""
+  "LLDB_USE_OSS_VERSION_SCHEME"
   )
 
 if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
@@ -66,14 +79,23 @@ add_subdirectory(Utility)
 add_subdirectory(API)
 
 # Determine LLDB revision and repository. GetSourceVersion and GetRepositoryPath are shell-scripts, and as
-# such will not work on Windows.
-if ( NOT CMAKE_SYSTEM_NAME MATCHES "Windows" )
-  execute_process(COMMAND ${CMAKE_SOURCE_DIR}/utils/GetSourceVersion ${LLDB_SOURCE_DIR}
-                  OUTPUT_VARIABLE LLDB_REVISION)
+# such will not work on Windows.  The revision piece is now Python, so
+# that works (git/svn).
+if (PYTHON_EXECUTABLE)
+  execute_process(
+    COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/get_vcs_revision.py
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE LLDB_REVISION)
   if ( LLDB_REVISION )
     string(REGEX REPLACE "(\r?\n)+$" "" LLDB_REVISION ${LLDB_REVISION})
+    set(LLDB_CPP_COMPILE_DEFINITIONS
+      "${LLDB_CPP_COMPILE_DEFINITIONS}"
+      "LLDB_REVISION=\"${LLDB_REVISION}\""
+      )
   endif()
+endif()
 
+if ( NOT CMAKE_SYSTEM_NAME MATCHES "Windows" )
   execute_process(COMMAND ${CMAKE_SOURCE_DIR}/utils/GetRepositoryPath ${LLDB_SOURCE_DIR}
                   OUTPUT_VARIABLE LLDB_REPOSITORY)
   if ( LLDB_REPOSITORY )
@@ -82,11 +104,16 @@ if ( NOT CMAKE_SYSTEM_NAME MATCHES "Windows" )
 
     # Remove trailing spaces
     string(REGEX REPLACE "(\ )+$" "" LLDB_REPOSITORY ${LLDB_REPOSITORY})
-  endif()
 
-  set_property(
-    SOURCE lldb.cpp
-    PROPERTY COMPILE_DEFINITIONS "LLDB_REVISION=\"${LLDB_REVISION}\"" "LLDB_REPOSITORY=\"${LLDB_REPOSITORY}\"")
-endif ()
+    set(LLDB_CPP_COMPILE_DEFINITIONS
+      "${LLDB_CPP_COMPILE_DEFINITIONS}"
+      "LLDB_REPOSITORY=\"${LLDB_REPOSITORY}\""
+      )
+  endif()
+endif()
+
+set_property(
+  SOURCE lldb.cpp
+  PROPERTY COMPILE_DEFINITIONS ${LLDB_CPP_COMPILE_DEFINITIONS})
 # FIXME: implement svn/git revision and repository parsing solution on Windows. There is an SVN-only
 #        revision parsing solution in tools/clang/lib/Basic/CMakelists.txt.

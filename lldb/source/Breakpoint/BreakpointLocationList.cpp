@@ -24,8 +24,13 @@
 using namespace lldb;
 using namespace lldb_private;
 
-BreakpointLocationList::BreakpointLocationList(Breakpoint &owner)
-    : m_owner(owner), m_locations(), m_address_to_location(), m_mutex(), m_next_id(0), m_new_location_recorder(nullptr)
+BreakpointLocationList::BreakpointLocationList(Breakpoint &owner) :
+    m_owner (owner),
+    m_locations(),
+    m_address_to_location (),
+    m_mutex (Mutex::eMutexTypeRecursive),
+    m_next_id (0),
+    m_new_location_recorder (nullptr)
 {
 }
 
@@ -34,7 +39,7 @@ BreakpointLocationList::~BreakpointLocationList() = default;
 BreakpointLocationSP
 BreakpointLocationList::Create (const Address &addr, bool resolve_indirect_symbols)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     // The location ID is just the size of the location list + 1
     lldb::break_id_t bp_loc_id = ++m_next_id;
     BreakpointLocationSP bp_loc_sp (new BreakpointLocation (bp_loc_id, m_owner, addr, LLDB_INVALID_THREAD_ID, m_owner.IsHardware(), resolve_indirect_symbols));
@@ -79,7 +84,7 @@ Compare (BreakpointLocationSP lhs, lldb::break_id_t val)
 BreakpointLocationSP
 BreakpointLocationList::FindByID (lldb::break_id_t break_id) const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     collection::const_iterator end = m_locations.end();
     collection::const_iterator pos = std::lower_bound(m_locations.begin(), end, break_id, Compare);
     if (pos != end && (*pos)->GetID() == break_id)
@@ -92,7 +97,7 @@ size_t
 BreakpointLocationList::FindInModule (Module *module,
                                       BreakpointLocationCollection& bp_loc_list)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     const size_t orig_size = bp_loc_list.GetSize();
     collection::iterator pos, end = m_locations.end();
 
@@ -111,7 +116,7 @@ BreakpointLocationList::FindInModule (Module *module,
 const BreakpointLocationSP
 BreakpointLocationList::FindByAddress (const Address &addr) const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     BreakpointLocationSP bp_loc_sp;
     if (!m_locations.empty())
     {
@@ -145,7 +150,7 @@ BreakpointLocationList::Dump (Stream *s) const
 {
     s->Printf("%p: ", static_cast<const void*>(this));
     //s->Indent();
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     s->Printf("BreakpointLocationList with %" PRIu64 " BreakpointLocations:\n", (uint64_t)m_locations.size());
     s->IndentMore();
     collection::const_iterator pos, end = m_locations.end();
@@ -157,7 +162,7 @@ BreakpointLocationList::Dump (Stream *s) const
 BreakpointLocationSP
 BreakpointLocationList::GetByIndex (size_t i)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     BreakpointLocationSP bp_loc_sp;
     if (i < m_locations.size())
         bp_loc_sp = m_locations[i];
@@ -168,7 +173,7 @@ BreakpointLocationList::GetByIndex (size_t i)
 const BreakpointLocationSP
 BreakpointLocationList::GetByIndex (size_t i) const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     BreakpointLocationSP bp_loc_sp;
     if (i < m_locations.size())
         bp_loc_sp = m_locations[i];
@@ -179,7 +184,7 @@ BreakpointLocationList::GetByIndex (size_t i) const
 void
 BreakpointLocationList::ClearAllBreakpointSites ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     collection::iterator pos, end = m_locations.end();
     for (pos = m_locations.begin(); pos != end; ++pos)
         (*pos)->ClearBreakpointSite();
@@ -188,7 +193,7 @@ BreakpointLocationList::ClearAllBreakpointSites ()
 void
 BreakpointLocationList::ResolveAllBreakpointSites ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     collection::iterator pos, end = m_locations.end();
 
     for (pos = m_locations.begin(); pos != end; ++pos)
@@ -202,7 +207,7 @@ uint32_t
 BreakpointLocationList::GetHitCount () const
 {
     uint32_t hit_count = 0;
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     collection::const_iterator pos, end = m_locations.end();
     for (pos = m_locations.begin(); pos != end; ++pos)
         hit_count += (*pos)->GetHitCount();
@@ -212,7 +217,7 @@ BreakpointLocationList::GetHitCount () const
 size_t
 BreakpointLocationList::GetNumResolvedLocations() const
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     size_t resolve_count = 0;
     collection::const_iterator pos, end = m_locations.end();
     for (pos = m_locations.begin(); pos != end; ++pos)
@@ -226,7 +231,7 @@ BreakpointLocationList::GetNumResolvedLocations() const
 void
 BreakpointLocationList::GetDescription (Stream *s, lldb::DescriptionLevel level)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     collection::iterator pos, end = m_locations.end();
 
     for (pos = m_locations.begin(); pos != end; ++pos)
@@ -239,7 +244,7 @@ BreakpointLocationList::GetDescription (Stream *s, lldb::DescriptionLevel level)
 BreakpointLocationSP
 BreakpointLocationList::AddLocation (const Address &addr, bool resolve_indirect_symbols, bool *new_location)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
 
     if (new_location)
         *new_location = false;
@@ -280,8 +285,8 @@ BreakpointLocationList::RemoveLocation (const lldb::BreakpointLocationSP &bp_loc
 {
     if (bp_loc_sp)
     {
-        std::lock_guard<std::recursive_mutex> guard(m_mutex);
-
+        Mutex::Locker locker (m_mutex);
+        
         m_address_to_location.erase (bp_loc_sp->GetAddress());
 
         collection::iterator pos, end = m_locations.end();
@@ -300,7 +305,7 @@ BreakpointLocationList::RemoveLocation (const lldb::BreakpointLocationSP &bp_loc
 void
 BreakpointLocationList::RemoveInvalidLocations (const ArchSpec &arch)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     size_t idx = 0;
     // Don't cache m_location.size() as it will change since we might
     // remove locations from our vector...
@@ -336,7 +341,7 @@ BreakpointLocationList::RemoveInvalidLocations (const ArchSpec &arch)
 void
 BreakpointLocationList::StartRecordingNewLocations (BreakpointLocationCollection &new_locations)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     assert(m_new_location_recorder == nullptr);
     m_new_location_recorder = &new_locations;
 }
@@ -344,7 +349,7 @@ BreakpointLocationList::StartRecordingNewLocations (BreakpointLocationCollection
 void
 BreakpointLocationList::StopRecordingNewLocations ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     m_new_location_recorder = nullptr;
 }
 

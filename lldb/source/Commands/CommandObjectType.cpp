@@ -752,7 +752,7 @@ Adding default formatting:
 (lldb) type format add -f hex AInt
 (lldb) frame variable iy
 
-)" "    Produces hexadecimal display of iy, because no formatter is available for Bint and \
+)" "    Produces hexidecimal display of iy, because no formatter is available for Bint and \
 the one for Aint is used instead." R"(
 
 To prevent this use the cascade option '-C no' to prevent evaluation of typedef chains:
@@ -1351,9 +1351,7 @@ protected:
         bool any_printed = false;
         
         auto category_closure = [&result, &formatter_regex, &any_printed] (const lldb::TypeCategoryImplSP& category) -> void {
-            result.GetOutputStream().Printf("-----------------------\nCategory: %s%s\n-----------------------\n",
-                                            category->GetName(),
-                                            category->IsEnabled() ? "" : " (disabled)");
+            result.GetOutputStream().Printf("-----------------------\nCategory: %s\n-----------------------\n", category->GetName());
 
             TypeCategoryImpl::ForEachCallbacks<FormatterType> foreach;
             foreach.SetExact([&result, &formatter_regex, &any_printed] (ConstString name, const FormatterSharedPointer& format_sp) -> bool {
@@ -3329,7 +3327,7 @@ public:
         {
             StreamString stream;
             // FIXME: hardcoding languages is not good
-            lldb::LanguageType languages[] = {eLanguageTypeObjC,eLanguageTypeC_plus_plus};
+            lldb::LanguageType languages[] = {eLanguageTypeObjC,eLanguageTypeC_plus_plus,eLanguageTypeSwift};
             
             for(const auto lang_type : languages)
             {
@@ -3417,6 +3415,7 @@ public:
             // FIXME: hardcoding languages is not good
             languages.push_back(Language::FindPlugin(eLanguageTypeObjC));
             languages.push_back(Language::FindPlugin(eLanguageTypeC_plus_plus));
+            languages.push_back(Language::FindPlugin(eLanguageTypeSwift));
         }
         else
         {

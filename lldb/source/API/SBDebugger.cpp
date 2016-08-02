@@ -191,8 +191,8 @@ SBDebugger::Create(bool source_init_files, lldb::LogOutputCallback callback, voi
     // uses global collections and having two threads parsing the .lldbinit files can cause
     // mayhem. So to get around this for now we need to use a mutex to prevent bad things
     // from happening.
-    static std::recursive_mutex g_mutex;
-    std::lock_guard<std::recursive_mutex> guard(g_mutex);
+    static Mutex g_mutex(Mutex::eMutexTypeRecursive);
+    Mutex::Locker locker(g_mutex);
 
     debugger.reset(Debugger::CreateInstance(callback, baton));
 
@@ -411,9 +411,9 @@ SBDebugger::HandleCommand (const char *command)
     if (m_opaque_sp)
     {
         TargetSP target_sp (m_opaque_sp->GetSelectedTarget());
-        std::unique_lock<std::recursive_mutex> lock;
+        Mutex::Locker api_locker;
         if (target_sp)
-            lock = std::unique_lock<std::recursive_mutex>(target_sp->GetAPIMutex());
+            api_locker.Lock(target_sp->GetAPIMutex());
 
         SBCommandInterpreter sb_interpreter(GetCommandInterpreter ());
         SBCommandReturnObject result;
@@ -474,8 +474,8 @@ SBDebugger::HandleProcessEvent (const SBProcess &process, const SBEvent &event, 
     char stdio_buffer[1024];
     size_t len;
 
-    std::lock_guard<std::recursive_mutex> guard(target_sp->GetAPIMutex());
-
+    Mutex::Locker api_locker (target_sp->GetAPIMutex());
+    
     if (event_type & (Process::eBroadcastBitSTDOUT | Process::eBroadcastBitStateChanged))
     {
         // Drain stdout when we stop just in case we have any bytes

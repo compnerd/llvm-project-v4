@@ -14,7 +14,6 @@
 // C++ Includes
 #include <functional>
 #include <map>
-#include <mutex>
 #include <string>
 
 // Other libraries and framework includes
@@ -25,6 +24,7 @@
 #include "lldb/lldb-private.h"
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Expression/Expression.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Symbol/CompilerDecl.h"
 #include "lldb/Symbol/CompilerDeclContext.h"
 
@@ -91,9 +91,8 @@ public:
     CreateInstance (lldb::LanguageType language, Module *module);
 
     static lldb::TypeSystemSP
-    CreateInstance (lldb::LanguageType language, Target *target);
-
-     
+    CreateInstance (lldb::LanguageType language, Target *target, const char *compiler_options);
+    
     // Free up any resources associated with this TypeSystem.  Done before removing
     // all the TypeSystems from the TypeSystemMap.
     virtual void
@@ -220,7 +219,8 @@ public:
     IsPossibleDynamicType (lldb::opaque_compiler_type_t type,
                            CompilerType *target_type, // Can pass NULL
                            bool check_cplusplus,
-                           bool check_objc) = 0;
+                           bool check_objc,
+                           bool check_swift) = 0;
     
     virtual bool
     IsPointerType (lldb::opaque_compiler_type_t type, CompilerType *pointee_type) = 0;
@@ -234,6 +234,18 @@ public:
     // TypeSystems can support more than one language
     virtual bool
     SupportsLanguage (lldb::LanguageType language) = 0;
+
+    //----------------------------------------------------------------------
+    // Check if the current module or target that was used to create this
+    // type system is compatible with the TypeSystem plug-in.
+    //
+    // Sometimes as languages are being developed the language can change
+    // and the version of the runtime information in a module is out of date
+    // with this type system. For such cases, languages can check and return
+    // an error.
+    //----------------------------------------------------------------------
+    virtual Error
+    IsCompatible ();
 
     //----------------------------------------------------------------------
     // Type Completion
@@ -255,6 +267,21 @@ public:
     
     virtual ConstString
     GetTypeName (lldb::opaque_compiler_type_t type) = 0;
+
+    // Defaults to GetTypeName(type).  Override if your language desires
+    // specialized behavior.
+    virtual ConstString
+    GetDisplayTypeName (lldb::opaque_compiler_type_t type);
+
+    // Defaults to GetTypeName(type).  Override if your language desires
+    // specialized behavior.
+    virtual ConstString
+    GetTypeSymbolName (lldb::opaque_compiler_type_t type);
+
+    // Defaults to GetTypeName(type).  Override if your language desires
+    // specialized behavior.
+    virtual ConstString
+    GetMangledTypeName (lldb::opaque_compiler_type_t type);
     
     virtual uint32_t
     GetTypeInfo (lldb::opaque_compiler_type_t type, CompilerType *pointee_or_element_compiler_type) = 0;
@@ -274,6 +301,9 @@ public:
     
     virtual CompilerType
     GetCanonicalType (lldb::opaque_compiler_type_t type) = 0;
+
+    virtual CompilerType
+    GetInstanceType (lldb::opaque_compiler_type_t type) = 0;
     
     // Returns -1 if this isn't a function of if the function doesn't have a prototype
     // Returns a value >= 0 if there is a prototype.
@@ -322,6 +352,9 @@ public:
     
     virtual uint64_t
     GetBitSize (lldb::opaque_compiler_type_t type, ExecutionContextScope *exe_scope) = 0;
+    
+    virtual uint64_t
+    GetByteStride (lldb::opaque_compiler_type_t type) = 0;
     
     virtual lldb::Encoding
     GetEncoding (lldb::opaque_compiler_type_t type, uint64_t &count) = 0;
@@ -441,7 +474,8 @@ public:
                    size_t data_byte_size,
                    uint32_t bitfield_bit_size,
                    uint32_t bitfield_bit_offset,
-                   ExecutionContextScope *exe_scope) = 0;
+                   ExecutionContextScope *exe_scope,
+                   bool is_base_class) = 0;
     
     virtual void
     DumpTypeDescription (lldb::opaque_compiler_type_t type) = 0; // Dump to stdout
@@ -514,6 +548,9 @@ public:
     virtual CompilerType
     GetTypedefedType (lldb::opaque_compiler_type_t type) = 0;
 
+    virtual CompilerType
+    GetUnboundType (lldb::opaque_compiler_type_t type) = 0;
+    
     virtual bool
     IsVectorType (lldb::opaque_compiler_type_t type,
                   CompilerType *element_type,
@@ -593,7 +630,13 @@ protected:
     {
     public:
         TypeSystemMap ();
+        TypeSystemMap(const TypeSystemMap &rhs);
         ~TypeSystemMap();
+
+        // Clear calls Finalize on all the TypeSystems managed by this map, and then
+        // empties the map.
+        void
+        operator =(const TypeSystemMap &rhs);
 
         // Clear calls Finalize on all the TypeSystems managed by this map, and then
         // empties the map.
@@ -609,7 +652,10 @@ protected:
         GetTypeSystemForLanguage (lldb::LanguageType language, Module *module, bool can_create);
 
         TypeSystem *
-        GetTypeSystemForLanguage (lldb::LanguageType language, Target *target, bool can_create);
+        GetTypeSystemForLanguage (lldb::LanguageType language, Target *target, bool can_create, const char *compiler_options);
+
+        void
+        RemoveTypeSystemsForLanguage (lldb::LanguageType language);
 
     protected:
         // This function does not take the map mutex, and should only be called from
@@ -618,7 +664,7 @@ protected:
         AddToMap (lldb::LanguageType language, lldb::TypeSystemSP const &type_system_sp);
 
         typedef std::map<lldb::LanguageType, lldb::TypeSystemSP> collection;
-        mutable std::mutex m_mutex; ///< A mutex to keep this object happy in multi-threaded environments.
+        mutable Mutex m_mutex; ///< A mutex to keep this object happy in multi-threaded environments.
         collection m_map;
         bool m_clear_in_progress;
     };

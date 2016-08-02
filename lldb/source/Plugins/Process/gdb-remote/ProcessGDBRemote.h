@@ -14,7 +14,6 @@
 // C++ Includes
 #include <atomic>
 #include <map>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -261,18 +260,6 @@ public:
     StructuredData::ObjectSP
     GetLoadedDynamicLibrariesInfos (lldb::addr_t image_list_address, lldb::addr_t image_count) override;
 
-    StructuredData::ObjectSP
-    GetLoadedDynamicLibrariesInfos () override;
-
-    StructuredData::ObjectSP
-    GetLoadedDynamicLibrariesInfos (const std::vector<lldb::addr_t> &load_addresses) override;
-
-    StructuredData::ObjectSP
-    GetLoadedDynamicLibrariesInfos_sender (StructuredData::ObjectSP args);
-
-    StructuredData::ObjectSP
-    GetSharedCacheInfo () override;
-
 protected:
     friend class ThreadGDBRemote;
     friend class GDBRemoteCommunicationClient;
@@ -292,12 +279,12 @@ protected:
     GDBRemoteCommunicationClient m_gdb_comm;
     std::atomic<lldb::pid_t> m_debugserver_pid;
     std::vector<StringExtractorGDBRemote> m_stop_packet_stack;  // The stop packet stack replaces the last stop packet variable
-    std::recursive_mutex m_last_stop_packet_mutex;
+    Mutex m_last_stop_packet_mutex;
     GDBRemoteDynamicRegisterInfo m_register_info;
     Broadcaster m_async_broadcaster;
     lldb::ListenerSP m_async_listener_sp;
     HostThread m_async_thread;
-    std::recursive_mutex m_async_thread_state_mutex;
+    Mutex m_async_thread_state_mutex;
     typedef std::vector<lldb::tid_t> tid_collection;
     typedef std::vector< std::pair<lldb::tid_t,int> > tid_sig_collection;
     typedef std::map<lldb::addr_t, lldb::addr_t> MMapMap;
@@ -418,8 +405,11 @@ protected:
     AsyncThread (void *arg);
 
     static bool
-    MonitorDebugserverProcess(std::weak_ptr<ProcessGDBRemote> process_wp, lldb::pid_t pid, bool exited, int signo,
-                              int exit_status);
+    MonitorDebugserverProcess (void *callback_baton,
+                               lldb::pid_t pid,
+                               bool exited,
+                               int signo,
+                               int exit_status);
 
     lldb::StateType
     SetThreadStopInfo (StringExtractor& stop_packet);

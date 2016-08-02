@@ -16,14 +16,11 @@ from lldbsuite.test.decorators import *
 def python_leaky_fd_version(test):
     import sys
     # Python random module leaks file descriptors on some versions.
-    if sys.version_info >= (2, 7, 8) and sys.version_info < (2, 7, 10):
-        return "Python random module leaks file descriptors in this python version"
-    return None
+    return (sys.version_info >= (2, 7, 8) and sys.version_info < (2, 7, 10),
+            "Python random module leaks file descriptors in this python version")
 
 
 class AvoidsFdLeakTestCase(TestBase):
-
-    NO_DEBUG_INFO_TESTCASE = True
 
     mydir = TestBase.compute_mydir(__file__)
 
@@ -59,6 +56,7 @@ class AvoidsFdLeakTestCase(TestBase):
 
     @expectedFailure(python_leaky_fd_version, "bugs.freebsd.org/197376")
     @expectedFailureAll(oslist=['freebsd'], bugnumber="llvm.org/pr25624 still failing with Python 2.7.10")
+    @expectedFlakeyLinux
     @skipIfWindows # The check for descriptor leakage needs to be implemented differently here.
     @skipIfTargetAndroid() # Android have some other file descriptors open by the shell
     def test_fd_leak_multitarget (self):

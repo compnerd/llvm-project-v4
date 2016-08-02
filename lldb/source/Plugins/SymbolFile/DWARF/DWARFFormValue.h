@@ -95,13 +95,14 @@ public:
     dw_addr_t           Address() const;
     bool                IsValid() const { return m_form != 0; }
     bool                SkipValue(const lldb_private::DWARFDataExtractor& debug_info_data, lldb::offset_t *offset_ptr) const;
+                        explicit operator bool() const { return m_cu != NULL && m_form != 0; };
+    void                Clear ();
     static bool         SkipValue(const dw_form_t form, const lldb_private::DWARFDataExtractor& debug_info_data, lldb::offset_t *offset_ptr, const DWARFCompileUnit* cu);
     static bool         IsBlockForm(const dw_form_t form);
     static bool         IsDataForm(const dw_form_t form);
     static FixedFormSizes GetFixedFormSizesForAddressSize (uint8_t addr_size, bool is_dwarf64);
     static int          Compare (const DWARFFormValue& a, 
                                  const DWARFFormValue& b);
-    void                Clear();
 protected:
     const DWARFCompileUnit* m_cu; // Compile unit for this form
     dw_form_t   m_form;     // Form for this value

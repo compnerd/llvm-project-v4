@@ -15,6 +15,7 @@
 // Other libraries and framework includes
 // Project includes
 #include "lldb/lldb-private.h"
+#include "lldb/Target/ABI.h"
 #include "lldb/Target/InstrumentationRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Core/StructuredData.h"

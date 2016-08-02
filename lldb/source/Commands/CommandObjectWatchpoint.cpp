@@ -265,9 +265,8 @@ protected:
         }
 
         const WatchpointList &watchpoints = target->GetWatchpointList();
-
-        std::unique_lock<std::recursive_mutex> lock;
-        target->GetWatchpointList().GetListMutex(lock);
+        Mutex::Locker locker;
+        target->GetWatchpointList().GetListMutex(locker);
 
         size_t num_watchpoints = watchpoints.GetSize();
 
@@ -370,8 +369,8 @@ protected:
         if (!CheckTargetForWatchpointOperations(target, result))
             return false;
 
-        std::unique_lock<std::recursive_mutex> lock;
-        target->GetWatchpointList().GetListMutex(lock);
+        Mutex::Locker locker;
+        target->GetWatchpointList().GetListMutex(locker);
 
         const WatchpointList &watchpoints = target->GetWatchpointList();
 
@@ -445,8 +444,8 @@ protected:
         if (!CheckTargetForWatchpointOperations(target, result))
             return false;
 
-        std::unique_lock<std::recursive_mutex> lock;
-        target->GetWatchpointList().GetListMutex(lock);
+        Mutex::Locker locker;
+        target->GetWatchpointList().GetListMutex(locker);
 
         const WatchpointList &watchpoints = target->GetWatchpointList();
         size_t num_watchpoints = watchpoints.GetSize();
@@ -526,9 +525,9 @@ protected:
         if (!CheckTargetForWatchpointOperations(target, result))
             return false;
 
-        std::unique_lock<std::recursive_mutex> lock;
-        target->GetWatchpointList().GetListMutex(lock);
-
+        Mutex::Locker locker;
+        target->GetWatchpointList().GetListMutex(locker);
+        
         const WatchpointList &watchpoints = target->GetWatchpointList();
 
         size_t num_watchpoints = watchpoints.GetSize();
@@ -667,9 +666,9 @@ protected:
         if (!CheckTargetForWatchpointOperations(target, result))
             return false;
 
-        std::unique_lock<std::recursive_mutex> lock;
-        target->GetWatchpointList().GetListMutex(lock);
-
+        Mutex::Locker locker;
+        target->GetWatchpointList().GetListMutex(locker);
+        
         const WatchpointList &watchpoints = target->GetWatchpointList();
 
         size_t num_watchpoints = watchpoints.GetSize();
@@ -820,9 +819,9 @@ protected:
         if (!CheckTargetForWatchpointOperations(target, result))
             return false;
 
-        std::unique_lock<std::recursive_mutex> lock;
-        target->GetWatchpointList().GetListMutex(lock);
-
+        Mutex::Locker locker;
+        target->GetWatchpointList().GetListMutex(locker);
+        
         const WatchpointList &watchpoints = target->GetWatchpointList();
 
         size_t num_watchpoints = watchpoints.GetSize();

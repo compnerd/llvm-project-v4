@@ -249,9 +249,7 @@ CompilerDeclContext
 Variable::GetDeclContext ()
 {
     Type *type = GetType();
-    if (type)
-        return type->GetSymbolFile()->GetDeclContextContainingUID(GetID());
-    return CompilerDeclContext();
+    return type->GetSymbolFile()->GetDeclContextContainingUID(GetID());
 }
 
 CompilerDecl
@@ -924,7 +922,7 @@ PrivateAutoComplete (StackFrame *frame,
                             continue;
                         
                         const char *variable_name = variable->GetName().AsCString();
-                        if (strstr(variable_name, token.c_str()) == variable_name)
+                        if (variable_name && strstr(variable_name, token.c_str()) == variable_name)
                         {
                             if (strcmp (variable_name, token.c_str()) == 0)
                             {

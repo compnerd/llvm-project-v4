@@ -9,6 +9,7 @@
 
 // C Includes
 // C++ Includes
+#include <mutex>
 // Other libraries and framework includes
 // Project includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
@@ -270,36 +271,36 @@ Thread::GetStaticBroadcasterClass ()
     return class_name;
 }
 
-Thread::Thread(Process &process, lldb::tid_t tid, bool use_invalid_index_id)
-    : ThreadProperties(false),
-      UserID(tid),
-      Broadcaster(process.GetTarget().GetDebugger().GetBroadcasterManager(),
-                  Thread::GetStaticBroadcasterClass().AsCString()),
-      m_process_wp(process.shared_from_this()),
-      m_stop_info_sp(),
-      m_stop_info_stop_id(0),
-      m_stop_info_override_stop_id(0),
-      m_index_id(use_invalid_index_id ? LLDB_INVALID_INDEX32 : process.GetNextThreadIndexID(tid)),
-      m_reg_context_sp(),
-      m_state(eStateUnloaded),
-      m_state_mutex(),
-      m_plan_stack(),
-      m_completed_plan_stack(),
-      m_frame_mutex(),
-      m_curr_frames_sp(),
-      m_prev_frames_sp(),
-      m_resume_signal(LLDB_INVALID_SIGNAL_NUMBER),
-      m_resume_state(eStateRunning),
-      m_temporary_resume_state(eStateRunning),
-      m_unwinder_ap(),
-      m_destroy_called(false),
-      m_override_should_notify(eLazyBoolCalculate),
-      m_extended_info_fetched(false),
-      m_extended_info()
+Thread::Thread (Process &process, lldb::tid_t tid, bool use_invalid_index_id) :
+    ThreadProperties (false),
+    UserID (tid),
+    Broadcaster(process.GetTarget().GetDebugger().GetBroadcasterManager(), Thread::GetStaticBroadcasterClass().AsCString()),
+    m_process_wp (process.shared_from_this()),
+    m_stop_info_sp (),
+    m_stop_info_stop_id (0),
+    m_stop_info_override_stop_id (0),
+    m_index_id (use_invalid_index_id ? LLDB_INVALID_INDEX32 : process.GetNextThreadIndexID(tid)),
+    m_reg_context_sp (),
+    m_state (eStateUnloaded),
+    m_state_mutex (Mutex::eMutexTypeRecursive),
+    m_plan_stack (),
+    m_completed_plan_stack(),
+    m_frame_mutex (Mutex::eMutexTypeRecursive),
+    m_curr_frames_sp (),
+    m_prev_frames_sp (),
+    m_resume_signal (LLDB_INVALID_SIGNAL_NUMBER),
+    m_resume_state (eStateRunning),
+    m_temporary_resume_state (eStateRunning),
+    m_unwinder_ap (),
+    m_destroy_called (false),
+    m_override_should_notify (eLazyBoolCalculate),
+    m_extended_info_fetched (false),
+    m_extended_info ()
 {
-    Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+    Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_OBJECT));
     if (log)
-        log->Printf("%p Thread::Thread(tid = 0x%4.4" PRIx64 ")", static_cast<void *>(this), GetID());
+        log->Printf ("%p Thread::Thread(tid = 0x%4.4" PRIx64 ")",
+                     static_cast<void*>(this), GetID());
 
     CheckInWithManager();
     QueueFundamentalPlan(true);
@@ -344,7 +345,7 @@ Thread::DestroyThread ()
     m_stop_info_sp.reset();
     m_reg_context_sp.reset();
     m_unwinder_ap.reset();
-    std::lock_guard<std::recursive_mutex> guard(m_frame_mutex);
+    Mutex::Locker locker(m_frame_mutex);
     m_curr_frames_sp.reset();
     m_prev_frames_sp.reset();
 }
@@ -440,7 +441,9 @@ Thread::GetStopInfo ()
     const uint32_t stop_id = process_sp ? process_sp->GetStopID() : UINT32_MAX;
     if (plan_sp && plan_sp->PlanSucceeded())
     {
-        return StopInfo::CreateStopReasonWithPlan (plan_sp, GetReturnValueObject(), GetExpressionVariable());
+        bool is_swift_error_value;
+        ValueObjectSP return_value_object = GetReturnValueObject(&is_swift_error_value);
+        return StopInfo::CreateStopReasonWithPlan (plan_sp, return_value_object, GetExpressionVariable(), is_swift_error_value);
     }
     else
     {
@@ -644,14 +647,14 @@ StateType
 Thread::GetState() const
 {
     // If any other threads access this we will need a mutex for it
-    std::lock_guard<std::recursive_mutex> guard(m_state_mutex);
+    Mutex::Locker locker(m_state_mutex);
     return m_state;
 }
 
 void
 Thread::SetState(StateType state)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_state_mutex);
+    Mutex::Locker locker(m_state_mutex);
     m_state = state;
 }
 
@@ -1211,8 +1214,11 @@ Thread::GetCompletedPlan ()
 }
 
 ValueObjectSP
-Thread::GetReturnValueObject ()
+Thread::GetReturnValueObject (bool *is_swift_error_value)
 {
+    if (is_swift_error_value)
+        *is_swift_error_value = false;
+
     if (!m_completed_plan_stack.empty())
     {
         for (int i = m_completed_plan_stack.size() - 1; i >= 0; i--)
@@ -1220,7 +1226,11 @@ Thread::GetReturnValueObject ()
             ValueObjectSP return_valobj_sp;
             return_valobj_sp = m_completed_plan_stack[i]->GetReturnValueObject();
             if (return_valobj_sp)
+            {
+                if (is_swift_error_value)
+                    *is_swift_error_value = m_completed_plan_stack[i]->IsReturnValueSwiftErrorValue();
                 return return_valobj_sp;
+            }
         }
     }
     return ValueObjectSP();
@@ -1822,7 +1832,7 @@ StackFrameListSP
 Thread::GetStackFrameList ()
 {
     StackFrameListSP frame_list_sp;
-    std::lock_guard<std::recursive_mutex> guard(m_frame_mutex);
+    Mutex::Locker locker(m_frame_mutex);
     if (m_curr_frames_sp)
     {
         frame_list_sp = m_curr_frames_sp;
@@ -1838,7 +1848,7 @@ Thread::GetStackFrameList ()
 void
 Thread::ClearStackFrames ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_frame_mutex);
+    Mutex::Locker locker(m_frame_mutex);
 
     Unwind *unwinder = GetUnwinder ();
     if (unwinder)

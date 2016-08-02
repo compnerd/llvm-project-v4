@@ -12,13 +12,13 @@
 
 // C Includes
 // C++ Includes
-#include <mutex>
 #include <string>
 
 // Other libraries and framework includes
 // Project includes
 #include "lldb/lldb-private.h"
 #include "lldb/Core/UserID.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
@@ -214,7 +214,7 @@ namespace lldb_private {
 //  The private process running thread will take care of ensuring that only one "eStateRunning" event will be
 //  delivered to the public Process broadcaster per public eStateStopped event.  However there are some cases
 //  where the public state of this process is eStateStopped, but a thread plan needs to restart the target, but
-//  doesn't want the running event to be publicly broadcast.  The obvious example of this is running functions
+//  doesn't want the running event to be publically broadcast.  The obvious example of this is running functions
 //  by hand as part of expression evaluation.  To suppress the running event return eVoteNo from ShouldReportStop,
 //  to force a running event to be reported return eVoteYes, in general though you should return eVoteNoOpinion
 //  which will allow the ThreadList to figure out the right thing to do.
@@ -514,6 +514,12 @@ public:
         return lldb::ValueObjectSP();
     }
 
+    virtual bool
+    IsReturnValueSwiftErrorValue()
+    {
+        return false;
+    }
+
     // If the thread plan managing the evaluation of a user expression lives longer than the command
     // that instigated the expression (generally because the expression evaluation hit a breakpoint, and
     // the user regained control at that point) a subsequent process control command step/continue/etc. might
@@ -632,7 +638,7 @@ private:
 
     ThreadPlanKind m_kind;
     std::string m_name;
-    std::recursive_mutex m_plan_complete_mutex;
+    Mutex m_plan_complete_mutex;
     LazyBool m_cached_plan_explains_stop;
     bool m_plan_complete;
     bool m_plan_private;

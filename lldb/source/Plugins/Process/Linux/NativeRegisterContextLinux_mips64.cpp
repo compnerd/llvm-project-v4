@@ -824,8 +824,7 @@ NativeRegisterContextLinux_mips64::ReadCP1()
         error = NativeRegisterContextLinux::ReadFPR();
     }
 
-    // TODO: Add support for FRE
-    if (IsFR0())
+    if (IsFR0() || IsFRE())
     {
          src = (uint8_t *)&m_fpr + 4 + (IsBigEndian * 4);
          dst = (uint8_t *)&m_fpr + 8 + (IsBigEndian * 4);
@@ -852,8 +851,7 @@ NativeRegisterContextLinux_mips64::WriteCP1()
 
     uint32_t IsBigEndian = (byte_order == lldb::eByteOrderBig);
 
-    // TODO: Add support for FRE
-    if (IsFR0())
+    if (IsFR0() || IsFRE())
     {
         src = (uint8_t *)&m_fpr + 8 + (IsBigEndian * 4);
         dst = (uint8_t *)&m_fpr + 4 + (IsBigEndian * 4);

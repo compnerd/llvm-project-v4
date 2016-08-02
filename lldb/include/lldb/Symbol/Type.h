@@ -62,7 +62,6 @@ class SymbolFileType :
 
         SymbolFileType (SymbolFile &symbol_file, const lldb::TypeSP &type_sp);
 
-
         ~SymbolFileType ()
         {
         }
@@ -523,6 +522,9 @@ protected:
     CompilerType compiler_type;
     lldb::TypeSP type_sp;
 };
+
+// the two classes here are used by the public API as a backend to
+// the SBType and SBTypeList classes
     
 // the two classes here are used by the public API as a backend to
 // the SBType and SBTypeList classes
@@ -767,7 +769,7 @@ protected:
     bool m_is_bitfield;
 };
 
-    
+
 ///
 /// Sometimes you can find the name of the type corresponding to an object, but we don't have debug
 /// information for it.  If that is the case, you can return one of these objects, and then if it

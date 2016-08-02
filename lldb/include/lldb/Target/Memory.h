@@ -13,7 +13,6 @@
 // C Includes
 // C++ Includes
 #include <map>
-#include <mutex>
 #include <vector>
 
 // Other libraries and framework includes
@@ -21,6 +20,7 @@
 // Project includes
 #include "lldb/lldb-private.h"
 #include "lldb/Core/RangeMap.h"
+#include "lldb/Host/Mutex.h"
 
 namespace lldb_private {
     //----------------------------------------------------------------------
@@ -75,7 +75,7 @@ namespace lldb_private {
         //------------------------------------------------------------------
         // Classes that inherit from MemoryCache can see and modify these
         //------------------------------------------------------------------
-        std::recursive_mutex m_mutex;
+        Mutex m_mutex;
         BlockMap m_L1_cache; // A first level memory cache whose chunk sizes vary that will be used only if the memory read fits entirely in a chunk
         BlockMap m_L2_cache; // A memory cache of fixed size chinks (m_L2_cache_line_byte_size bytes in size each)
         InvalidRanges m_invalid_ranges;
@@ -192,7 +192,7 @@ namespace lldb_private {
         // Classes that inherit from MemoryCache can see and modify these
         //------------------------------------------------------------------
         Process &m_process;
-        std::recursive_mutex m_mutex;
+        Mutex m_mutex;
         typedef std::multimap<uint32_t, AllocatedBlockSP> PermissionsToBlockMap;
         PermissionsToBlockMap m_memory_map;
         

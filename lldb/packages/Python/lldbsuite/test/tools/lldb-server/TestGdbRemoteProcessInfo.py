@@ -52,7 +52,7 @@ class TestGdbRemoteProcessInfo(gdbremote_testcase.GdbRemoteTestCaseBase):
         self.add_process_info_collection_packets()
 
         # Run the stream
-        context = self.expect_gdbremote_sequence(timeout_seconds = 8)
+        context = self.expect_gdbremote_sequence()
         self.assertIsNotNone(context)
 
         # Gather process info response

@@ -13,14 +13,13 @@
 // C Includes
 // C++ Includes
 #include <map>
-#include <mutex>
 #include <vector>
-
 // Other libraries and framework includes
 // Project includes
 #include "lldb/lldb-public.h"
 #include "lldb/Core/Error.h"
 #include "lldb/Expression/UtilityFunction.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Symbol/CompilerType.h"
 
 // This class will insert a UtilityFunction into the inferior process for
@@ -106,10 +105,11 @@ private:
 
     lldb_private::Process *m_process;
     std::unique_ptr<UtilityFunction> m_get_item_info_impl_code;
-    std::mutex m_get_item_info_function_mutex;
+    Mutex m_get_item_info_function_mutex;
 
     lldb::addr_t m_get_item_info_return_buffer_addr;
-    std::mutex m_get_item_info_retbuffer_mutex;
+    Mutex m_get_item_info_retbuffer_mutex;
+
 };
 
 }  // using namespace lldb_private

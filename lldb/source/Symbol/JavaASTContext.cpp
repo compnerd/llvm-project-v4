@@ -141,60 +141,7 @@ private:
     const TypeKind m_type_kind;
 };
 
-class JavaDynamicType : public JavaASTContext::JavaType
-{
-public:
-    JavaDynamicType(LLVMCastKind kind, const ConstString &linkage_name) :
-        JavaType(kind),
-        m_linkage_name(linkage_name),
-        m_dynamic_type_id(nullptr)
-    {
-    }
-
-    ConstString
-    GetLinkageName() const
-    {
-        return m_linkage_name;
-    }
-
-    void
-    SetDynamicTypeId(const DWARFExpression &type_id)
-    {
-        m_dynamic_type_id = type_id;
-    }
-
-    uint64_t
-    CalculateDynamicTypeId(ExecutionContext *exe_ctx, ValueObject &value_obj)
-    {
-        if (!m_dynamic_type_id.IsValid())
-            return UINT64_MAX;
-
-        Value obj_load_address = value_obj.GetValue();
-        obj_load_address.ResolveValue(exe_ctx);
-        obj_load_address.SetValueType(Value::eValueTypeLoadAddress);
-
-        Value result;
-        if (m_dynamic_type_id.Evaluate(exe_ctx->GetBestExecutionContextScope(), nullptr, nullptr, 0, &obj_load_address,
-                                       nullptr, result, nullptr))
-        {
-            Error error;
-
-            lldb::addr_t type_id_addr = result.GetScalar().UInt();
-            lldb::ProcessSP process_sp = exe_ctx->GetProcessSP();
-            if (process_sp)
-                return process_sp->ReadUnsignedIntegerFromMemory(type_id_addr, process_sp->GetAddressByteSize(),
-                                                                 UINT64_MAX, error);
-        }
-
-        return UINT64_MAX;
-    }
-
-public:
-    ConstString m_linkage_name;
-    DWARFExpression m_dynamic_type_id;
-};
-
-class JavaObjectType : public JavaDynamicType
+class JavaObjectType : public JavaASTContext::JavaType
 {
 public:
     struct Field
@@ -205,11 +152,13 @@ public:
     };
 
     JavaObjectType(const ConstString &name, const ConstString &linkage_name, uint32_t byte_size)
-        : JavaDynamicType(JavaType::eKindObject, linkage_name),
+        : JavaType(JavaType::eKindObject),
           m_name(name),
+          m_linkage_name(linkage_name),
           m_byte_size(byte_size),
           m_base_class_offset(0),
-          m_is_complete(false)
+          m_is_complete(false),
+          m_dynamic_type_id(nullptr)
     {
     }
 
@@ -217,6 +166,12 @@ public:
     GetName() override
     {
         return m_name;
+    }
+
+    ConstString
+    GetLinkageName() const
+    {
+        return m_linkage_name;
     }
 
     uint32_t
@@ -315,6 +270,38 @@ public:
         m_fields.push_back({name, type, offset});
     }
 
+    void
+    SetDynamicTypeId(const DWARFExpression &type_id)
+    {
+        m_dynamic_type_id = type_id;
+    }
+
+    uint64_t
+    CalculateDynamicTypeId(ExecutionContext *exe_ctx, ValueObject &value_obj)
+    {
+        if (!m_dynamic_type_id.IsValid())
+            return UINT64_MAX;
+
+        Value obj_load_address = value_obj.GetValue();
+        obj_load_address.ResolveValue(exe_ctx);
+        obj_load_address.SetValueType(Value::eValueTypeLoadAddress);
+
+        Value result;
+        if (m_dynamic_type_id.Evaluate(exe_ctx->GetBestExecutionContextScope(), nullptr, nullptr, 0, &obj_load_address,
+                                       nullptr, result, nullptr))
+        {
+            Error error;
+
+            lldb::addr_t type_id_addr = result.GetScalar().UInt();
+            lldb::ProcessSP process_sp = exe_ctx->GetProcessSP();
+            if (process_sp)
+                return process_sp->ReadUnsignedIntegerFromMemory(type_id_addr, process_sp->GetAddressByteSize(),
+                                                                 UINT64_MAX, error);
+        }
+
+        return UINT64_MAX;
+    }
+
     static bool
     classof(const JavaType *jt)
     {
@@ -323,12 +310,14 @@ public:
 
 private:
     ConstString m_name;
+    ConstString m_linkage_name;
     uint32_t m_byte_size;
     CompilerType m_base_class;
     uint32_t m_base_class_offset;
     std::vector<CompilerType> m_interfaces;
     std::vector<Field> m_fields;
     bool m_is_complete;
+    DWARFExpression m_dynamic_type_id;
 };
 
 class JavaReferenceType : public JavaASTContext::JavaType
@@ -371,15 +360,13 @@ private:
     CompilerType m_pointee_type;
 };
 
-class JavaArrayType : public JavaDynamicType
+class JavaArrayType : public JavaASTContext::JavaType
 {
 public:
-    JavaArrayType(const ConstString& linkage_name, CompilerType element_type, const DWARFExpression &length_expression,
-                  lldb::addr_t data_offset)
-        : JavaDynamicType(JavaType::eKindArray, linkage_name),
+    JavaArrayType(CompilerType element_type, const DWARFExpression &length_expression, const lldb::addr_t data_offset)
+        : JavaType(JavaType::eKindArray),
           m_element_type(element_type),
-          m_length_expression(length_expression),
-          m_data_offset(data_offset)
+          m_length_expression(length_expression)
     {
     }
 
@@ -415,37 +402,25 @@ public:
     }
 
     uint32_t
-    GetNumElements(ValueObject *value_obj)
+    GetNumElements(const ValueObject *value_obj)
     {
         if (!m_length_expression.IsValid())
-            return UINT32_MAX;
+            return false;
 
-        Error error;
-        ValueObjectSP address_obj = value_obj->AddressOf(error);
-        if (error.Fail())
-            return UINT32_MAX;
-
-        Value obj_load_address = address_obj->GetValue();
+        Value obj_load_address = value_obj->GetValue();
         obj_load_address.SetValueType(Value::eValueTypeLoadAddress);
 
         Value result;
-        ExecutionContextScope* exec_ctx_scope = value_obj->GetExecutionContextRef().Lock(true).GetBestExecutionContextScope();
-        if (m_length_expression.Evaluate(exec_ctx_scope, nullptr, nullptr, 0, nullptr, &obj_load_address, result, nullptr))
+        if (m_length_expression.Evaluate(nullptr, nullptr, nullptr, nullptr, 0, nullptr, &obj_load_address, result,
+                                         nullptr))
             return result.GetScalar().UInt();
 
-        return UINT32_MAX;
-    }
-
-    uint64_t
-    GetElementOffset(size_t idx)
-    {
-        return m_data_offset + idx * m_element_type.GetByteSize(nullptr);
+        return 0;
     }
 
 private:
     CompilerType m_element_type;
     DWARFExpression m_length_expression;
-    lldb::addr_t m_data_offset;
 };
 
 } // end of anonymous namespace
@@ -469,7 +444,7 @@ JavaASTContext::GetPluginVersion()
 }
 
 lldb::TypeSystemSP
-JavaASTContext::CreateInstance(lldb::LanguageType language, Module *module, Target *target)
+JavaASTContext::CreateInstance(lldb::LanguageType language, Module *module, Target *target, const char *extra_options)
 {
     if (language == eLanguageTypeJava)
     {
@@ -672,7 +647,7 @@ JavaASTContext::IsIntegerType(lldb::opaque_compiler_type_t type, bool &is_signed
 
 bool
 JavaASTContext::IsPossibleDynamicType(lldb::opaque_compiler_type_t type, CompilerType *target_type,
-                                      bool check_cplusplus, bool check_objc)
+                                      bool check_cplusplus, bool check_objc, bool check_swift)
 {
     return llvm::isa<JavaReferenceType>(static_cast<JavaType *>(type));
 }
@@ -917,6 +892,12 @@ JavaASTContext::GetCanonicalType(lldb::opaque_compiler_type_t type)
 }
 
 CompilerType
+JavaASTContext::GetInstanceType (lldb::opaque_compiler_type_t type)
+{
+    return CompilerType(this, type);
+}
+
+CompilerType
 JavaASTContext::GetFullyUnqualifiedType(lldb::opaque_compiler_type_t type)
 {
     return CompilerType(this, type);
@@ -933,6 +914,12 @@ JavaASTContext::GetNonReferenceType(lldb::opaque_compiler_type_t type)
 
 CompilerType
 JavaASTContext::GetTypedefedType(lldb::opaque_compiler_type_t type)
+{
+    return CompilerType();
+}
+
+CompilerType
+JavaASTContext::GetUnboundType(lldb::opaque_compiler_type_t type)
 {
     return CompilerType();
 }
@@ -1012,15 +999,17 @@ JavaASTContext::GetBitSize(lldb::opaque_compiler_type_t type, ExecutionContextSc
     {
         return 32; // References are always 4 byte long in java
     }
-    else if (llvm::isa<JavaArrayType>(static_cast<JavaType *>(type)))
-    {
-        return 64;
-    }
     else if (JavaObjectType *obj = llvm::dyn_cast<JavaObjectType>(static_cast<JavaType *>(type)))
     {
         return obj->GetByteSize() * 8;
     }
     return 0;
+}
+
+uint64_t
+JavaASTContext::GetByteStride (void* type)
+{
+    return (GetBitSize(type, nullptr) + 7)/8;
 }
 
 lldb::Encoding
@@ -1215,10 +1204,16 @@ JavaASTContext::DumpValue(lldb::opaque_compiler_type_t type, ExecutionContext *e
 }
 
 bool
-JavaASTContext::DumpTypeValue(lldb::opaque_compiler_type_t type, Stream *s, lldb::Format format,
-                              const DataExtractor &data, lldb::offset_t data_offset, size_t data_byte_size,
-                              uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
-                              ExecutionContextScope *exe_scope)
+JavaASTContext::DumpTypeValue(lldb::opaque_compiler_type_t type,
+                              Stream *s,
+                              lldb::Format format,
+                              const DataExtractor &data,
+                              lldb::offset_t data_offset,
+                              size_t data_byte_size,
+                              uint32_t bitfield_bit_size,
+                              uint32_t bitfield_bit_offset,
+                              ExecutionContextScope *exe_scope,
+                              bool is_base_class)
 {
     if (IsScalarType(type))
     {
@@ -1468,15 +1463,14 @@ JavaASTContext::CreateObjectType(const ConstString &name, const ConstString &lin
 }
 
 CompilerType
-JavaASTContext::CreateArrayType(const ConstString &linkage_name, const CompilerType &element_type,
-                                const DWARFExpression &length_expression, const lldb::addr_t data_offset)
+JavaASTContext::CreateArrayType(const CompilerType &element_type, const DWARFExpression &length_expression,
+                                const lldb::addr_t data_offset)
 {
     ConstString name = element_type.GetTypeName();
     auto it = m_array_type_map.find(name);
     if (it == m_array_type_map.end())
     {
-        std::unique_ptr<JavaType> array_type(new JavaArrayType(linkage_name, element_type, length_expression,
-                                                               data_offset));
+        std::unique_ptr<JavaType> array_type(new JavaArrayType(element_type, length_expression, data_offset));
         it = m_array_type_map.emplace(name, std::move(array_type)).first;
     }
     return CompilerType(this, it->second.get());
@@ -1531,24 +1525,6 @@ JavaASTContext::CalculateDynamicTypeId(ExecutionContext *exe_ctx, const Compiler
 {
     if (JavaObjectType *obj = llvm::dyn_cast<JavaObjectType>(static_cast<JavaType *>(type.GetOpaqueQualType())))
         return obj->CalculateDynamicTypeId(exe_ctx, in_value);
-    if (JavaArrayType *arr = llvm::dyn_cast<JavaArrayType>(static_cast<JavaType *>(type.GetOpaqueQualType())))
-        return arr->CalculateDynamicTypeId(exe_ctx, in_value);
-    return UINT64_MAX;
-}
-
-uint32_t
-JavaASTContext::CalculateArraySize(const CompilerType &type, ValueObject &in_value)
-{
-    if (JavaArrayType *arr = llvm::dyn_cast<JavaArrayType>(static_cast<JavaType *>(type.GetOpaqueQualType())))
-        return arr->GetNumElements(&in_value);
-    return UINT32_MAX;
-}
-
-uint64_t
-JavaASTContext::CalculateArrayElementOffset(const CompilerType &type, size_t index)
-{
-    if (JavaArrayType *arr = llvm::dyn_cast<JavaArrayType>(static_cast<JavaType *>(type.GetOpaqueQualType())))
-        return arr->GetElementOffset(index);
     return UINT64_MAX;
 }
 

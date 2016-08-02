@@ -9,11 +9,10 @@
 
 // C Includes
 // C++ Includes
-#include <cstdarg>
 #include <cstdio>
+#include <cstdarg>
 #include <cstdlib>
 #include <map>
-#include <mutex>
 #include <string>
 
 // Other libraries and framework includes
@@ -27,6 +26,7 @@
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/StreamString.h"
 #include "lldb/Host/Host.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Host/ThisThread.h"
 #include "lldb/Host/TimeValue.h"
 #include "lldb/Interpreter/Args.h"
@@ -147,8 +147,8 @@ Log::VAPrintf(const char *format, va_list args)
 
         if (m_options.Test(LLDB_LOG_OPTION_THREADSAFE))
         {
-            static std::recursive_mutex g_LogThreadedMutex;
-            std::lock_guard<std::recursive_mutex> guard(g_LogThreadedMutex);
+            static Mutex g_LogThreadedMutex(Mutex::eMutexTypeRecursive);
+            Mutex::Locker locker(g_LogThreadedMutex);
             stream_sp->PutCString(header.GetString().c_str());
             stream_sp->Flush();
         }

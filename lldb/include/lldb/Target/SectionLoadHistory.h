@@ -13,10 +13,10 @@
 // C Includes
 // C++ Includes
 #include <map>
-#include <mutex>
 
 // Project includes
 #include "lldb/lldb-public.h"
+#include "lldb/Host/Mutex.h"
 
 namespace lldb_private {
 
@@ -31,7 +31,11 @@ public:
     //------------------------------------------------------------------
     // Constructors and Destructors
     //------------------------------------------------------------------
-    SectionLoadHistory() : m_stop_id_to_section_load_list(), m_mutex() {}
+    SectionLoadHistory () :
+        m_stop_id_to_section_load_list(),
+        m_mutex (Mutex::eMutexTypeRecursive)
+    {
+    }
 
     ~SectionLoadHistory()
     {
@@ -94,7 +98,7 @@ protected:
 
     typedef std::map<uint32_t, lldb::SectionLoadListSP> StopIDToSectionLoadList;
     StopIDToSectionLoadList m_stop_id_to_section_load_list;
-    mutable std::recursive_mutex m_mutex;
+    mutable Mutex m_mutex;
 
 private:
     DISALLOW_COPY_AND_ASSIGN (SectionLoadHistory);

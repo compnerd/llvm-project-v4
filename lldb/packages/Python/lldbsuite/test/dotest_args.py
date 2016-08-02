@@ -11,7 +11,6 @@ import textwrap
 # Third-party modules
 
 # LLDB modules
-from . import configuration
 
 class ArgParseNamespace(object):
     pass
@@ -52,6 +51,8 @@ def create_parser():
     group = parser.add_argument_group('Toolchain options')
     group.add_argument('-A', '--arch', metavar='arch', action='append', dest='archs', help=textwrap.dedent('''Specify the architecture(s) to test. This option can be specified more than once'''))
     group.add_argument('-C', '--compiler', metavar='compiler', dest='compilers', action='append', help=textwrap.dedent('''Specify the compiler(s) used to build the inferior executables. The compiler path can be an executable basename or a full path to a compiler executable. This option can be specified multiple times.'''))
+    group.add_argument('--swift-compiler', dest='swiftcompiler', help='The path to a valid Swift compiler')
+    group.add_argument('--swift-library', dest='swiftlibrary', help='The path to a folder that contains valid Swift library files')
     if sys.platform == 'darwin':
         group.add_argument('--apple-sdk', metavar='apple_sdk', dest='apple_sdk', help=textwrap.dedent('''Specify the name of the Apple SDK (macosx, macosx.internal, iphoneos, iphoneos.internal, or path to SDK) and use the appropriate tools from that SDK's toolchain.'''))
     # FIXME? This won't work for different extra flags according to each arch.
@@ -71,7 +72,6 @@ def create_parser():
     group.add_argument('--framework', metavar='framework-path', help='The path to LLDB.framework')
     group.add_argument('--executable', metavar='executable-path', help='The path to the lldb executable')
     group.add_argument('-s', metavar='name', help='Specify the name of the dir created to store the session files of tests with errored or failed status. If not specified, the test driver uses the timestamp as the session dir name')
-    group.add_argument('-S', '--session-file-format', default=configuration.session_file_format, metavar='format', help='Specify session file name format.  See configuration.py for a description.')
     group.add_argument('-y', type=int, metavar='count', help="Specify the iteration count used to collect our benchmarks. An example is the number of times to do 'thread step-over' to measure stepping speed.")
     group.add_argument('-#', type=int, metavar='sharp', dest='sharp', help='Repeat the test suite for a specified number of times')
     group.add_argument('--channel', metavar='channel', dest='channels', action='append', help=textwrap.dedent("Specify the log channels (and optional categories) e.g. 'lldb all' or 'gdb-remote packets' if no categories are specified, 'default' is used"))

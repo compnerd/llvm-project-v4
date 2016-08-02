@@ -41,7 +41,9 @@
 #include "lldb/API/SBStringList.h"
 #include "lldb/API/SBTarget.h"
 #include "lldb/API/SBThread.h"
+#if defined(_WIN32)
 #include "llvm/Support/ConvertUTF.h"
+#endif
 #include <thread>
 
 #if !defined(__APPLE__)
@@ -72,7 +74,7 @@ typedef struct
 {
     uint32_t usage_mask;                     // Used to mark options that can be used together.  If (1 << n & usage_mask) != 0
                                              // then this option belongs to option set n.
-    bool required;                           // This option is required (in the current usage level)
+    bool required;
     const char * long_option;                // Full name for this option.
     int short_option;                        // Single character for this option.
     int option_has_arg;                      // no_argument, required_argument or optional_argument
@@ -84,6 +86,7 @@ typedef struct
 
 #define LLDB_3_TO_5 LLDB_OPT_SET_3|LLDB_OPT_SET_4|LLDB_OPT_SET_5
 #define LLDB_4_TO_5 LLDB_OPT_SET_4|LLDB_OPT_SET_5
+#define LLDB_3_AND_7 LLDB_OPT_SET_3|LLDB_OPT_SET_7
 
 static OptionDefinition g_options[] =
 {
@@ -420,7 +423,7 @@ Driver::OptionData::OptionData () :
     m_print_version (false),
     m_print_python_path (false),
     m_print_help (false),
-    m_wait_for(false),
+    m_wait_for (false),
     m_repl (false),
     m_repl_lang (eLanguageTypeUnknown),
     m_repl_options (),
@@ -471,6 +474,8 @@ Driver::OptionData::Clear ()
     m_print_python_path = false;
     m_use_external_editor = false;
     m_wait_for = false;
+    m_repl = false;
+    m_repl_options.erase();
     m_process_name.erase();
     m_batch = false;
     m_after_crash_commands.clear();
@@ -1037,12 +1042,7 @@ Driver::MainLoop ()
         atexit (reset_stdin_termios);
     }
 
-#ifndef _MSC_VER
-    // Disabling stdin buffering with MSVC's 2015 CRT exposes a bug in fgets
-    // which causes it to miss newlines depending on whether there have been an
-    // odd or even number of characters.  Bug has been reported to MS via Connect.
     ::setbuf (stdin, NULL);
-#endif
     ::setbuf (stdout, NULL);
 
     m_debugger.SetErrorFileHandle (stderr, false);
@@ -1246,7 +1246,6 @@ Driver::MainLoop ()
     SBDebugger::Destroy (m_debugger);
 }
 
-
 void
 Driver::ResizeWindow (unsigned short col)
 {
@@ -1288,9 +1287,7 @@ sigint_handler (int signo)
 void
 sigtstp_handler (int signo)
 {
-    if (g_driver)
-        g_driver->GetDebugger().SaveInputTerminalState();
-
+    g_driver->GetDebugger().SaveInputTerminalState();
     signal (signo, SIG_DFL);
     kill (getpid(), signo);
     signal (signo, sigtstp_handler);
@@ -1299,9 +1296,7 @@ sigtstp_handler (int signo)
 void
 sigcont_handler (int signo)
 {
-    if (g_driver)
-        g_driver->GetDebugger().RestoreInputTerminalState();
-
+    g_driver->GetDebugger().RestoreInputTerminalState();
     signal (signo, SIG_DFL);
     kill (getpid(), signo);
     signal (signo, sigcont_handler);
@@ -1314,6 +1309,12 @@ wmain(int argc, wchar_t const *wargv[])
 main(int argc, char const *argv[])
 #endif
 {
+#ifdef _MSC_VER
+	// disable buffering on windows
+	setvbuf(stdout, NULL, _IONBF, 0);
+	setvbuf(stdin , NULL, _IONBF, 0);
+#endif
+
 #ifdef _WIN32
         // Convert wide arguments to UTF-8
         std::vector<std::string> argvStrings(argc);

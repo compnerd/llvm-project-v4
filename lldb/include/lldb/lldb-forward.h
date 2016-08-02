@@ -199,6 +199,9 @@ class   SectionList;
 class   SectionLoadHistory;
 class   SectionLoadList;
 class   Settings;
+class   SwiftASTContext;
+class   SwiftLanguageRuntime;
+class   SwiftREPL;
 class   SourceManager;
 class   SourceManagerImpl;
 class   StackFrame;
@@ -356,8 +359,6 @@ namespace lldb {
     typedef std::weak_ptr<lldb_private::Listener> ListenerWP;
     typedef std::shared_ptr<lldb_private::LogChannel> LogChannelSP;
     typedef std::shared_ptr<lldb_private::MemoryHistory> MemoryHistorySP;
-    typedef std::shared_ptr<lldb_private::MemoryRegionInfo> MemoryRegionInfoSP;
-    typedef std::unique_ptr<lldb_private::MemoryRegionInfo> MemoryRegionInfoUP;
     typedef std::shared_ptr<lldb_private::Module> ModuleSP;
     typedef std::weak_ptr<lldb_private::Module> ModuleWP;
     typedef std::shared_ptr<lldb_private::ObjectFile> ObjectFileSP;
@@ -404,6 +405,7 @@ namespace lldb {
     typedef std::shared_ptr<lldb_private::SectionLoadList> SectionLoadListSP;
     typedef std::shared_ptr<lldb_private::SearchFilter> SearchFilterSP;
     typedef std::shared_ptr<lldb_private::Settings> SettingsSP;
+    typedef std::shared_ptr<lldb_private::SwiftASTContext> SwiftASTContextSP;
     typedef std::unique_ptr<lldb_private::SourceManager> SourceManagerUP;
     typedef std::shared_ptr<lldb_private::StackFrame> StackFrameSP;
     typedef std::unique_ptr<lldb_private::StackFrame> StackFrameUP;

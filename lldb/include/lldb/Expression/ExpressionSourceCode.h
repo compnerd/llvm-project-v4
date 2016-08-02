@@ -11,6 +11,8 @@
 #define liblldb_ExpressionSourceCode_h
 
 #include "lldb/lldb-enumerations.h"
+#include "lldb/Expression/Expression.h"
+#include "llvm/ADT/ArrayRef.h"
 
 #include <string>
 
@@ -52,11 +54,21 @@ public:
         return m_name.c_str();
     }
     
-    bool GetText (std::string &text, 
-                  lldb::LanguageType wrapping_language, 
-                  bool static_method,
-                  ExecutionContext &exe_ctx) const;
+    uint32_t
+    GetNumBodyLines ();
+
+    bool GetText (std::string &text,
+                  lldb::LanguageType wrapping_language,
+                  uint32_t language_flags,
+                  const EvaluateExpressionOptions &options,
+                  const Expression::SwiftGenericInfo &generic_info,
+                  ExecutionContext &exe_ctx,
+                  uint32_t &first_body_line) const;
     
+    static bool
+    SaveExpressionTextToTempFile (const char *text,
+                                  const EvaluateExpressionOptions &options,
+                                  std::string &expr_source_path);
     // Given a string returned by GetText, find the beginning and end of the body passed to CreateWrapped.
     // Return true if the bounds could be found.  This will also work on text with FixItHints applied.
     static bool
@@ -64,7 +76,7 @@ public:
                           lldb::LanguageType wrapping_language,
                           size_t &start_loc,
                           size_t &end_loc);
-    
+
 private:
     ExpressionSourceCode (const char *name,
                           const char *prefix,
@@ -73,6 +85,7 @@ private:
         m_name(name),
         m_prefix(prefix),
         m_body(body),
+        m_num_body_lines (0),
         m_wrap(wrap)
     {
     }
@@ -80,6 +93,7 @@ private:
     std::string m_name;
     std::string m_prefix;
     std::string m_body;
+    uint32_t m_num_body_lines;
     bool m_wrap;
 };
 

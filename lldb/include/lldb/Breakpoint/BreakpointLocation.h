@@ -13,7 +13,6 @@
 // C Includes
 // C++ Includes
 #include <memory>
-#include <mutex>
 
 // Other libraries and framework includes
 // Project includes
@@ -21,6 +20,7 @@
 #include "lldb/Breakpoint/StoppointLocation.h"
 #include "lldb/Core/Address.h"
 #include "lldb/Core/UserID.h"
+#include "lldb/Host/Mutex.h"
 
 namespace lldb_private {
 
@@ -460,8 +460,7 @@ private:
     std::unique_ptr<BreakpointOptions> m_options_ap; ///< Breakpoint options pointer, nullptr if we're using our breakpoint's options.
     lldb::BreakpointSiteSP m_bp_site_sp; ///< Our breakpoint site (it may be shared by more than one location.)
     lldb::UserExpressionSP m_user_expression_sp; ///< The compiled expression to use in testing our condition.
-    std::mutex m_condition_mutex; ///< Guards parsing and evaluation of the condition, which could be evaluated by
-                                  /// multiple processes.
+    Mutex m_condition_mutex; ///< Guards parsing and evaluation of the condition, which could be evaluated by multiple processes.
     size_t m_condition_hash; ///< For testing whether the condition source code changed.
 
     void

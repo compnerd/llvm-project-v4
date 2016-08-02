@@ -267,39 +267,39 @@ ProcessGDBRemote::CanDebug (lldb::TargetSP target_sp, bool plugin_specified_by_n
 //----------------------------------------------------------------------
 // ProcessGDBRemote constructor
 //----------------------------------------------------------------------
-ProcessGDBRemote::ProcessGDBRemote(lldb::TargetSP target_sp, ListenerSP listener_sp)
-    : Process(target_sp, listener_sp),
-      m_flags(0),
-      m_gdb_comm(),
-      m_debugserver_pid(LLDB_INVALID_PROCESS_ID),
-      m_last_stop_packet_mutex(),
-      m_register_info(),
-      m_async_broadcaster(NULL, "lldb.process.gdb-remote.async-broadcaster"),
-      m_async_listener_sp(Listener::MakeListener("lldb.process.gdb-remote.async-listener")),
-      m_async_thread_state_mutex(),
-      m_thread_ids(),
-      m_thread_pcs(),
-      m_jstopinfo_sp(),
-      m_jthreadsinfo_sp(),
-      m_continue_c_tids(),
-      m_continue_C_tids(),
-      m_continue_s_tids(),
-      m_continue_S_tids(),
-      m_max_memory_size(0),
-      m_remote_stub_max_memory_size(0),
-      m_addr_to_mmap_size(),
-      m_thread_create_bp_sp(),
-      m_waiting_for_attach(false),
-      m_destroy_tried_resuming(false),
-      m_command_sp(),
-      m_breakpoint_pc_offset(0),
-      m_initial_tid(LLDB_INVALID_THREAD_ID)
+ProcessGDBRemote::ProcessGDBRemote(lldb::TargetSP target_sp, ListenerSP listener_sp) :
+    Process (target_sp, listener_sp),
+    m_flags (0),
+    m_gdb_comm (),
+    m_debugserver_pid (LLDB_INVALID_PROCESS_ID),
+    m_last_stop_packet_mutex (Mutex::eMutexTypeRecursive),
+    m_register_info (),
+    m_async_broadcaster (NULL, "lldb.process.gdb-remote.async-broadcaster"),
+    m_async_listener_sp(Listener::MakeListener("lldb.process.gdb-remote.async-listener")),
+    m_async_thread_state_mutex(Mutex::eMutexTypeRecursive),
+    m_thread_ids (),
+    m_thread_pcs (),
+    m_jstopinfo_sp (),
+    m_jthreadsinfo_sp (),
+    m_continue_c_tids (),
+    m_continue_C_tids (),
+    m_continue_s_tids (),
+    m_continue_S_tids (),
+    m_max_memory_size (0),
+    m_remote_stub_max_memory_size (0),
+    m_addr_to_mmap_size (),
+    m_thread_create_bp_sp (),
+    m_waiting_for_attach (false),
+    m_destroy_tried_resuming (false),
+    m_command_sp (),
+    m_breakpoint_pc_offset (0),
+    m_initial_tid (LLDB_INVALID_THREAD_ID)
 {
-    m_async_broadcaster.SetEventName(eBroadcastBitAsyncThreadShouldExit, "async thread should exit");
-    m_async_broadcaster.SetEventName(eBroadcastBitAsyncContinue, "async thread continue");
-    m_async_broadcaster.SetEventName(eBroadcastBitAsyncThreadDidExit, "async thread did exit");
+    m_async_broadcaster.SetEventName (eBroadcastBitAsyncThreadShouldExit,   "async thread should exit");
+    m_async_broadcaster.SetEventName (eBroadcastBitAsyncContinue,           "async thread continue");
+    m_async_broadcaster.SetEventName (eBroadcastBitAsyncThreadDidExit,      "async thread did exit");
 
-    Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_ASYNC));
+    Log *log (ProcessGDBRemoteLog::GetLogIfAllCategoriesSet (GDBR_LOG_ASYNC));
 
     const uint32_t async_event_mask = eBroadcastBitAsyncContinue | eBroadcastBitAsyncThreadShouldExit;
 
@@ -309,8 +309,8 @@ ProcessGDBRemote::ProcessGDBRemote(lldb::TargetSP target_sp, ListenerSP listener
             log->Printf("ProcessGDBRemote::%s failed to listen for m_async_broadcaster events", __FUNCTION__);
     }
 
-    const uint32_t gdb_event_mask =
-        Communication::eBroadcastBitReadThreadDidExit | GDBRemoteCommunication::eBroadcastBitGdbReadThreadGotNotify;
+    const uint32_t gdb_event_mask = Communication::eBroadcastBitReadThreadDidExit |
+                                    GDBRemoteCommunication::eBroadcastBitGdbReadThreadGotNotify;
     if (m_async_listener_sp->StartListeningForEvents(&m_gdb_comm, gdb_event_mask) != gdb_event_mask)
     {
         if (log)
@@ -539,7 +539,6 @@ ProcessGDBRemote::BuildDynamicRegisterInfo (bool force)
                 ConstString set_name;
                 std::vector<uint32_t> value_regs;
                 std::vector<uint32_t> invalidate_regs;
-                std::vector<uint8_t> dwarf_opcode_bytes;
                 RegisterInfo reg_info = { NULL,                 // Name
                     NULL,                 // Alt name
                     0,                    // byte size
@@ -554,9 +553,7 @@ ProcessGDBRemote::BuildDynamicRegisterInfo (bool force)
                         reg_num           // native register number
                     },
                     NULL,
-                    NULL,
-                    NULL, // Dwarf expression opcode bytes pointer
-                    0     // Dwarf expression opcode bytes length
+                    NULL
                 };
 
                 while (response.GetNameColonValue(name, value))
@@ -640,23 +637,6 @@ ProcessGDBRemote::BuildDynamicRegisterInfo (bool force)
                     else if (name.compare("invalidate-regs") == 0)
                     {
                         SplitCommaSeparatedRegisterNumberString(value, invalidate_regs, 16);
-                    }
-                    else if (name.compare("dynamic_size_dwarf_expr_bytes") == 0)
-                    {
-                       size_t dwarf_opcode_len = value.length () / 2;
-                       assert (dwarf_opcode_len > 0);
-
-                       dwarf_opcode_bytes.resize (dwarf_opcode_len);
-                       StringExtractor opcode_extractor;
-                       reg_info.dynamic_size_dwarf_len = dwarf_opcode_len; 
-
-                       // Swap "value" over into "opcode_extractor"
-                       opcode_extractor.GetStringRef ().swap (value);
-                       uint32_t ret_val = opcode_extractor.GetHexBytesAvail (dwarf_opcode_bytes.data (),
-                                                                           dwarf_opcode_len);
-                       assert (dwarf_opcode_len == ret_val);
-
-                       reg_info.dynamic_size_dwarf_expr_bytes = dwarf_opcode_bytes.data ();
                     }
                 }
 
@@ -1610,6 +1590,9 @@ ProcessGDBRemote::DoResume ()
         else
         {
             EventSP event_sp;
+            TimeValue timeout;
+            timeout = TimeValue::Now();
+            timeout.OffsetWithSeconds (5);
             if (!m_async_thread.IsJoinable())
             {
                 error.SetErrorString ("Trying to resume but the async thread is dead.");
@@ -1620,7 +1603,7 @@ ProcessGDBRemote::DoResume ()
 
             m_async_broadcaster.BroadcastEvent (eBroadcastBitAsyncContinue, new EventDataBytes (continue_packet.GetData(), continue_packet.GetSize()));
 
-            if (listener_sp->WaitForEvent(std::chrono::seconds(5), event_sp) == false)
+            if (listener_sp->WaitForEvent (&timeout, event_sp) == false)
             {
                 error.SetErrorString("Resume timed out.");
                 if (log)
@@ -1663,7 +1646,7 @@ ProcessGDBRemote::HandleStopReplySequence ()
 void
 ProcessGDBRemote::ClearThreadIDList ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_thread_list_real.GetMutex());
+    Mutex::Locker locker(m_thread_list_real.GetMutex());
     m_thread_ids.clear();
     m_thread_pcs.clear();
 }
@@ -1713,7 +1696,7 @@ ProcessGDBRemote::UpdateThreadPCsFromStopReplyThreadsValue (std::string &value)
 bool
 ProcessGDBRemote::UpdateThreadIDList ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_thread_list_real.GetMutex());
+    Mutex::Locker locker(m_thread_list_real.GetMutex());
 
     if (m_jthreadsinfo_sp)
     {
@@ -1746,8 +1729,8 @@ ProcessGDBRemote::UpdateThreadIDList ()
 
         // Lock the thread stack while we access it
         //Mutex::Locker stop_stack_lock(m_last_stop_packet_mutex);
-        std::unique_lock<std::recursive_mutex> stop_stack_lock(m_last_stop_packet_mutex, std::defer_lock);
-        if (stop_stack_lock.try_lock())
+        Mutex::Locker stop_stack_lock;
+        if (stop_stack_lock.TryLock(m_last_stop_packet_mutex))
         {
             // Get the number of stop packets on the stack
             int nItems = m_stop_packet_stack.size();
@@ -1961,7 +1944,7 @@ ProcessGDBRemote::SetThreadStopInfo (lldb::tid_t tid,
             // m_thread_list_real does have its own mutex, but we need to
             // hold onto the mutex between the call to m_thread_list_real.FindThreadByID(...)
             // and the m_thread_list_real.AddThread(...) so it doesn't change on us
-            std::lock_guard<std::recursive_mutex> guard(m_thread_list_real.GetMutex());
+            Mutex::Locker locker (m_thread_list_real.GetMutex ());
             thread_sp = m_thread_list_real.FindThreadByProtocolID(tid, false);
 
             if (!thread_sp)
@@ -2076,8 +2059,7 @@ ProcessGDBRemote::SetThreadStopInfo (lldb::tid_t tid,
                             {
                                 WatchpointSP wp_sp;
                                 ArchSpec::Core core = GetTarget().GetArchitecture().GetCore();
-                                if ((core >= ArchSpec::kCore_mips_first && core <= ArchSpec::kCore_mips_last) ||
-                                    (core >= ArchSpec::eCore_arm_generic && core <= ArchSpec::eCore_arm_aarch64))
+                                if (core >= ArchSpec::kCore_mips_first && core <= ArchSpec::kCore_mips_last)
                                     wp_sp = GetTarget().GetWatchpointList().FindByAddress(wp_hit_addr);
                                 if (!wp_sp)
                                     wp_sp = GetTarget().GetWatchpointList().FindByAddress(wp_addr);
@@ -2104,23 +2086,6 @@ ProcessGDBRemote::SetThreadStopInfo (lldb::tid_t tid,
                         {
                             did_exec = true;
                             thread_sp->SetStopInfo (StopInfo::CreateStopReasonWithExec(*thread_sp));
-                            handled = true;
-                        }
-                    }
-                    else if (!signo)
-                    {
-                        addr_t pc = thread_sp->GetRegisterContext()->GetPC();
-                        lldb::BreakpointSiteSP bp_site_sp =
-                            thread_sp->GetProcess()->GetBreakpointSiteList().FindByAddress(pc);
-
-                        // If the current pc is a breakpoint site then the StopInfo should be set to Breakpoint
-                        // even though the remote stub did not set it as such. This can happen when
-                        // the thread is involuntarily interrupted (e.g. due to stops on other
-                        // threads) just as it is about to execute the breakpoint instruction.
-                        if (bp_site_sp && bp_site_sp->ValidForThisThread(thread_sp.get()))
-                        {
-                            thread_sp->SetStopInfo(
-                                StopInfo::CreateStopReasonWithBreakpointSiteID(*thread_sp, bp_site_sp->GetID()));
                             handled = true;
                         }
                     }
@@ -2458,8 +2423,7 @@ ProcessGDBRemote::SetThreadStopInfo (StringExtractor& stop_packet)
                 }
                 else if (key.compare("threads") == 0)
                 {
-                    std::lock_guard<std::recursive_mutex> guard(m_thread_list_real.GetMutex());
-
+                    Mutex::Locker locker(m_thread_list_real.GetMutex());
                     m_thread_ids.clear();
                     // A comma separated list of all threads in the current
                     // process that includes the thread for this stop reply
@@ -2682,8 +2646,7 @@ ProcessGDBRemote::SetThreadStopInfo (StringExtractor& stop_packet)
 void
 ProcessGDBRemote::RefreshStateAfterStop ()
 {
-    std::lock_guard<std::recursive_mutex> guard(m_thread_list_real.GetMutex());
-
+    Mutex::Locker locker(m_thread_list_real.GetMutex());
     m_thread_ids.clear();
     m_thread_pcs.clear();
     // Set the thread stop info. It might have a "threads" key whose value is
@@ -2693,7 +2656,7 @@ ProcessGDBRemote::RefreshStateAfterStop ()
     // Scope for the lock
     {
         // Lock the thread stack while we access it
-        std::lock_guard<std::recursive_mutex> guard(m_last_stop_packet_mutex);
+        Mutex::Locker stop_stack_lock(m_last_stop_packet_mutex);
         // Get the number of stop packets on the stack
         int nItems = m_stop_packet_stack.size();
         // Iterate over them
@@ -2734,7 +2697,7 @@ ProcessGDBRemote::DoHalt (bool &caused_stop)
     Error error;
 
     bool timed_out = false;
-    std::unique_lock<std::recursive_mutex> lock;
+    Mutex::Locker locker;
 
     if (m_public_state.GetValue() == eStateAttaching)
     {
@@ -2744,7 +2707,7 @@ ProcessGDBRemote::DoHalt (bool &caused_stop)
     }
     else
     {
-        if (!m_gdb_comm.SendInterrupt(lock, 2, timed_out))
+        if (!m_gdb_comm.SendInterrupt (locker, 2, timed_out))
         {
             if (timed_out)
                 error.SetErrorString("timed out sending interrupt packet");
@@ -2838,7 +2801,7 @@ ProcessGDBRemote::DoDestroy ()
                 ThreadList &threads = GetThreadList();
 
                 {
-                    std::lock_guard<std::recursive_mutex> guard(threads.GetMutex());
+                    Mutex::Locker locker(threads.GetMutex());
 
                     size_t num_threads = threads.GetSize();
                     for (size_t i = 0; i < num_threads; i++)
@@ -2873,7 +2836,7 @@ ProcessGDBRemote::DoDestroy ()
                     // have to run the risk of letting those threads proceed a bit.
 
                     {
-                        std::lock_guard<std::recursive_mutex> guard(threads.GetMutex());
+                        Mutex::Locker locker(threads.GetMutex());
 
                         size_t num_threads = threads.GetSize();
                         for (size_t i = 0; i < num_threads; i++)
@@ -2995,7 +2958,7 @@ ProcessGDBRemote::SetLastStopPacket (const StringExtractorGDBRemote &response)
     // Scope the lock
     {
         // Lock the thread stack while we access it
-        std::lock_guard<std::recursive_mutex> guard(m_last_stop_packet_mutex);
+        Mutex::Locker stop_stack_lock(m_last_stop_packet_mutex);
 
         // We are are not using non-stop mode, there can only be one last stop
         // reply packet, so clear the list.
@@ -3618,8 +3581,6 @@ ProcessGDBRemote::EstablishConnectionIfNeeded (const ProcessInfo &process_info)
 Error
 ProcessGDBRemote::LaunchAndConnectToDebugserver (const ProcessInfo &process_info)
 {
-    using namespace std::placeholders; // For _1, _2, etc.
-
     Error error;
     if (m_debugserver_pid == LLDB_INVALID_PROCESS_ID)
     {
@@ -3631,9 +3592,7 @@ ProcessGDBRemote::LaunchAndConnectToDebugserver (const ProcessInfo &process_info
         // special terminal key sequences (^C) don't affect debugserver.
         debugserver_launch_info.SetLaunchInSeparateProcessGroup(true);
 
-        const std::weak_ptr<ProcessGDBRemote> this_wp = std::static_pointer_cast<ProcessGDBRemote>(shared_from_this());
-        debugserver_launch_info.SetMonitorProcessCallback(std::bind(MonitorDebugserverProcess, this_wp, _1, _2, _3, _4),
-                                                          false);
+        debugserver_launch_info.SetMonitorProcessCallback (MonitorDebugserverProcess, this, false);
         debugserver_launch_info.SetUserID(process_info.GetUserID());
 
 #if defined (__APPLE__) && (defined (__arm__) || defined (__arm64__) || defined (__aarch64__))
@@ -3695,58 +3654,91 @@ ProcessGDBRemote::LaunchAndConnectToDebugserver (const ProcessInfo &process_info
 }
 
 bool
-ProcessGDBRemote::MonitorDebugserverProcess(std::weak_ptr<ProcessGDBRemote> process_wp, lldb::pid_t debugserver_pid,
-                                            bool exited,    // True if the process did exit
-                                            int signo,      // Zero for no signal
-                                            int exit_status // Exit value of process if signal is zero
-                                            )
+ProcessGDBRemote::MonitorDebugserverProcess
+(
+    void *callback_baton,
+    lldb::pid_t debugserver_pid,
+    bool exited,        // True if the process did exit
+    int signo,          // Zero for no signal
+    int exit_status     // Exit value of process if signal is zero
+)
 {
+    // The baton is a "ProcessGDBRemote *". Now this class might be gone
+    // and might not exist anymore, so we need to carefully try to get the
+    // target for this process first since we have a race condition when
+    // we are done running between getting the notice that the inferior
+    // process has died and the debugserver that was debugging this process.
+    // In our test suite, we are also continually running process after
+    // process, so we must be very careful to make sure:
+    // 1 - process object hasn't been deleted already
+    // 2 - that a new process object hasn't been recreated in its place
+
     // "debugserver_pid" argument passed in is the process ID for
     // debugserver that we are tracking...
     Log *log (ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PROCESS));
-    const bool handled = true;
+
+    ProcessGDBRemote *process = (ProcessGDBRemote *)callback_baton;
+
+    // Get a shared pointer to the target that has a matching process pointer.
+    // This target could be gone, or the target could already have a new process
+    // object inside of it
+    TargetSP target_sp (Debugger::FindTargetWithProcess(process));
 
     if (log)
-        log->Printf("ProcessGDBRemote::%s(process_wp, pid=%" PRIu64 ", signo=%i (0x%x), exit_status=%i)", __FUNCTION__,
-                    debugserver_pid, signo, signo, exit_status);
+        log->Printf ("ProcessGDBRemote::MonitorDebugserverProcess (baton=%p, pid=%" PRIu64 ", signo=%i (0x%x), exit_status=%i)", callback_baton, debugserver_pid, signo, signo, exit_status);
 
-    std::shared_ptr<ProcessGDBRemote> process_sp = process_wp.lock();
-    if (log)
-        log->Printf("ProcessGDBRemote::%s(process = %p)", __FUNCTION__, static_cast<void *>(process_sp.get()));
-    if (!process_sp || process_sp->m_debugserver_pid != debugserver_pid)
-        return handled;
-
-    // Sleep for a half a second to make sure our inferior process has
-    // time to set its exit status before we set it incorrectly when
-    // both the debugserver and the inferior process shut down.
-    usleep(500000);
-    // If our process hasn't yet exited, debugserver might have died.
-    // If the process did exit, then we are reaping it.
-    const StateType state = process_sp->GetState();
-
-    if (state != eStateInvalid && state != eStateUnloaded && state != eStateExited && state != eStateDetached)
+    if (target_sp)
     {
-        char error_str[1024];
-        if (signo)
+        // We found a process in a target that matches, but another thread
+        // might be in the process of launching a new process that will
+        // soon replace it, so get a shared pointer to the process so we
+        // can keep it alive.
+        ProcessSP process_sp (target_sp->GetProcessSP());
+        // Now we have a shared pointer to the process that can't go away on us
+        // so we now make sure it was the same as the one passed in, and also make
+        // sure that our previous "process *" didn't get deleted and have a new
+        // "process *" created in its place with the same pointer. To verify this
+        // we make sure the process has our debugserver process ID. If we pass all
+        // of these tests, then we are sure that this process is the one we were
+        // looking for.
+        if (process_sp && process == process_sp.get() && process->m_debugserver_pid == debugserver_pid)
         {
-            const char *signal_cstr = process_sp->GetUnixSignals()->GetSignalAsCString(signo);
-            if (signal_cstr)
-                ::snprintf(error_str, sizeof(error_str), DEBUGSERVER_BASENAME " died with signal %s", signal_cstr);
-            else
-                ::snprintf(error_str, sizeof(error_str), DEBUGSERVER_BASENAME " died with signal %i", signo);
-        }
-        else
-        {
-            ::snprintf(error_str, sizeof(error_str), DEBUGSERVER_BASENAME " died with an exit status of 0x%8.8x",
-                       exit_status);
-        }
+            // Sleep for a half a second to make sure our inferior process has
+            // time to set its exit status before we set it incorrectly when
+            // both the debugserver and the inferior process shut down.
+            usleep (500000);
+            // If our process hasn't yet exited, debugserver might have died.
+            // If the process did exit, the we are reaping it.
+            const StateType state = process->GetState();
 
-        process_sp->SetExitStatus(-1, error_str);
+            if (process->m_debugserver_pid != LLDB_INVALID_PROCESS_ID &&
+                state != eStateInvalid &&
+                state != eStateUnloaded &&
+                state != eStateExited &&
+                state != eStateDetached)
+            {
+                char error_str[1024];
+                if (signo)
+                {
+                    const char *signal_cstr = process->GetUnixSignals()->GetSignalAsCString(signo);
+                    if (signal_cstr)
+                        ::snprintf (error_str, sizeof (error_str), DEBUGSERVER_BASENAME " died with signal %s", signal_cstr);
+                    else
+                        ::snprintf (error_str, sizeof (error_str), DEBUGSERVER_BASENAME " died with signal %i", signo);
+                }
+                else
+                {
+                    ::snprintf (error_str, sizeof (error_str), DEBUGSERVER_BASENAME " died with an exit status of 0x%8.8x", exit_status);
+                }
+
+                process->SetExitStatus (-1, error_str);
+            }
+            // Debugserver has exited we need to let our ProcessGDBRemote
+            // know that it no longer has a debugserver instance
+            process->m_debugserver_pid = LLDB_INVALID_PROCESS_ID;
+        }
     }
-    // Debugserver has exited we need to let our ProcessGDBRemote
-    // know that it no longer has a debugserver instance
-    process_sp->m_debugserver_pid = LLDB_INVALID_PROCESS_ID;
-    return handled;
+    return true;
 }
 
 void
@@ -3795,7 +3787,7 @@ ProcessGDBRemote::StartAsyncThread ()
     if (log)
         log->Printf ("ProcessGDBRemote::%s ()", __FUNCTION__);
 
-    std::lock_guard<std::recursive_mutex> guard(m_async_thread_state_mutex);
+    Mutex::Locker start_locker(m_async_thread_state_mutex);
     if (!m_async_thread.IsJoinable())
     {
         // Create a thread that watches our internal state and controls which
@@ -3817,7 +3809,7 @@ ProcessGDBRemote::StopAsyncThread ()
     if (log)
         log->Printf ("ProcessGDBRemote::%s ()", __FUNCTION__);
 
-    std::lock_guard<std::recursive_mutex> guard(m_async_thread_state_mutex);
+    Mutex::Locker start_locker(m_async_thread_state_mutex);
     if (m_async_thread.IsJoinable())
     {
         m_async_broadcaster.BroadcastEvent (eBroadcastBitAsyncThreadShouldExit);
@@ -3877,7 +3869,7 @@ ProcessGDBRemote::AsyncThread (void *arg)
     {
         if (log)
             log->Printf ("ProcessGDBRemote::%s (arg = %p, pid = %" PRIu64 ") listener.WaitForEvent (NULL, event_sp)...", __FUNCTION__, arg, process->GetID());
-        if (process->m_async_listener_sp->WaitForEvent(std::chrono::microseconds(0), event_sp))
+        if (process->m_async_listener_sp->WaitForEvent (NULL, event_sp))
         {
             const uint32_t event_type = event_sp->GetType();
             if (event_sp->BroadcasterIs (&process->m_async_broadcaster))
@@ -4182,7 +4174,7 @@ ProcessGDBRemote::GetExtendedInfoForThread (lldb::tid_t tid)
 
         StreamString packet;
         packet << "jThreadExtendedInfo:";
-        args_dict->Dump (packet, false);
+        args_dict->Dump (packet);
 
         // FIXME the final character of a JSON dictionary, '}', is the escape
         // character in gdb-remote binary mode.  lldb currently doesn't escape
@@ -4211,44 +4203,6 @@ ProcessGDBRemote::GetExtendedInfoForThread (lldb::tid_t tid)
 StructuredData::ObjectSP
 ProcessGDBRemote::GetLoadedDynamicLibrariesInfos (lldb::addr_t image_list_address, lldb::addr_t image_count)
 {
-
-    StructuredData::ObjectSP args_dict(new StructuredData::Dictionary());
-    args_dict->GetAsDictionary()->AddIntegerItem ("image_list_address", image_list_address);
-    args_dict->GetAsDictionary()->AddIntegerItem ("image_count", image_count);
-
-    return GetLoadedDynamicLibrariesInfos_sender (args_dict);
-}
-
-StructuredData::ObjectSP
-ProcessGDBRemote::GetLoadedDynamicLibrariesInfos ()
-{
-    StructuredData::ObjectSP args_dict(new StructuredData::Dictionary());
-
-    args_dict->GetAsDictionary()->AddBooleanItem ("fetch_all_solibs", true);
-
-    return GetLoadedDynamicLibrariesInfos_sender (args_dict);
-}
-
-StructuredData::ObjectSP
-ProcessGDBRemote::GetLoadedDynamicLibrariesInfos (const std::vector<lldb::addr_t> &load_addresses)
-{
-    StructuredData::ObjectSP args_dict(new StructuredData::Dictionary());
-    StructuredData::ArraySP addresses(new StructuredData::Array);
-
-    for (auto addr : load_addresses)
-    {
-        StructuredData::ObjectSP addr_sp (new StructuredData::Integer (addr));
-        addresses->AddItem (addr_sp);
-    }
-
-    args_dict->GetAsDictionary()->AddItem ("solib_addresses", addresses);
-
-    return GetLoadedDynamicLibrariesInfos_sender (args_dict);
-}
-
-StructuredData::ObjectSP
-ProcessGDBRemote::GetLoadedDynamicLibrariesInfos_sender (StructuredData::ObjectSP args_dict)
-{
     StructuredData::ObjectSP object_sp;
 
     if (m_gdb_comm.GetLoadedDynamicLibrariesInfosSupported())
@@ -4256,9 +4210,13 @@ ProcessGDBRemote::GetLoadedDynamicLibrariesInfos_sender (StructuredData::ObjectS
         // Scope for the scoped timeout object
         GDBRemoteCommunication::ScopedTimeout timeout (m_gdb_comm, 10);
 
+        StructuredData::ObjectSP args_dict(new StructuredData::Dictionary());
+        args_dict->GetAsDictionary()->AddIntegerItem ("image_list_address", image_list_address);
+        args_dict->GetAsDictionary()->AddIntegerItem ("image_count", image_count);
+
         StreamString packet;
         packet << "jGetLoadedDynamicLibrariesInfos:";
-        args_dict->Dump (packet, false);
+        args_dict->Dump (packet);
 
         // FIXME the final character of a JSON dictionary, '}', is the escape
         // character in gdb-remote binary mode.  lldb currently doesn't escape
@@ -4283,46 +4241,6 @@ ProcessGDBRemote::GetLoadedDynamicLibrariesInfos_sender (StructuredData::ObjectS
     }
     return object_sp;
 }
-
-
-
-
-StructuredData::ObjectSP
-ProcessGDBRemote::GetSharedCacheInfo ()
-{
-    StructuredData::ObjectSP object_sp;
-    StructuredData::ObjectSP args_dict(new StructuredData::Dictionary());
-
-    if (m_gdb_comm.GetSharedCacheInfoSupported())
-    {
-        StreamString packet;
-        packet << "jGetSharedCacheInfo:";
-        args_dict->Dump (packet, false);
-
-        // FIXME the final character of a JSON dictionary, '}', is the escape
-        // character in gdb-remote binary mode.  lldb currently doesn't escape
-        // these characters in its packet output -- so we add the quoted version
-        // of the } character here manually in case we talk to a debugserver which
-        // un-escapes the characters at packet read time.
-        packet << (char) (0x7d ^ 0x20);
-
-        StringExtractorGDBRemote response;
-        response.SetResponseValidatorToJSON();
-        if (m_gdb_comm.SendPacketAndWaitForResponse(packet.GetData(), packet.GetSize(), response, false) == GDBRemoteCommunication::PacketResult::Success)
-        {
-            StringExtractorGDBRemote::ResponseType response_type = response.GetResponseType();
-            if (response_type == StringExtractorGDBRemote::eResponse)
-            {
-                if (!response.Empty())
-                {
-                    object_sp = StructuredData::ParseJSON (response.GetStringRef());
-                }
-            }
-        }
-    }
-    return object_sp;
-}
-
 
 // Establish the largest memory read/write payloads we should use.
 // If the remote stub has a max packet size, stay under that size.
@@ -4451,10 +4369,13 @@ struct GdbServerTargetInfo
 };
 
 bool
-ParseRegisters (XMLNode feature_node, GdbServerTargetInfo &target_info, GDBRemoteDynamicRegisterInfo &dyn_reg_info, ABISP abi_sp, uint32_t &cur_reg_num, uint32_t &reg_offset)
+ParseRegisters (XMLNode feature_node, GdbServerTargetInfo &target_info, GDBRemoteDynamicRegisterInfo &dyn_reg_info, ABISP abi_sp)
 {
     if (!feature_node)
         return false;
+
+    uint32_t cur_reg_num = 0;
+    uint32_t reg_offset = 0;
 
     feature_node.ForEachChildElementWithName("reg", [&target_info, &dyn_reg_info, &cur_reg_num, &reg_offset, &abi_sp](const XMLNode &reg_node) -> bool {
         std::string gdb_group;
@@ -4464,7 +4385,6 @@ ParseRegisters (XMLNode feature_node, GdbServerTargetInfo &target_info, GDBRemot
         ConstString set_name;
         std::vector<uint32_t> value_regs;
         std::vector<uint32_t> invalidate_regs;
-        std::vector<uint8_t> dwarf_opcode_bytes;
         bool encoding_set = false;
         bool format_set = false;
         RegisterInfo reg_info = { NULL,                 // Name
@@ -4481,12 +4401,10 @@ ParseRegisters (XMLNode feature_node, GdbServerTargetInfo &target_info, GDBRemot
                 cur_reg_num         // native register number
             },
             NULL,
-            NULL,
-            NULL,  // Dwarf Expression opcode bytes pointer
-            0      // Dwarf Expression opcode bytes length 
+            NULL
         };
 
-        reg_node.ForEachAttribute([&target_info, &gdb_group, &gdb_type, &reg_name, &alt_name, &set_name, &value_regs, &invalidate_regs, &encoding_set, &format_set, &reg_info, &cur_reg_num, &reg_offset, &dwarf_opcode_bytes](const llvm::StringRef &name, const llvm::StringRef &value) -> bool {
+        reg_node.ForEachAttribute([&target_info, &gdb_group, &gdb_type, &reg_name, &alt_name, &set_name, &value_regs, &invalidate_regs, &encoding_set, &format_set, &reg_info, &cur_reg_num, &reg_offset](const llvm::StringRef &name, const llvm::StringRef &value) -> bool {
             if (name == "name")
             {
                 reg_name.SetString(value);
@@ -4573,22 +4491,6 @@ ParseRegisters (XMLNode feature_node, GdbServerTargetInfo &target_info, GDBRemot
             else if (name == "invalidate_regnums")
             {
                 SplitCommaSeparatedRegisterNumberString(value, invalidate_regs, 0);
-            }
-            else if (name == "dynamic_size_dwarf_expr_bytes")
-            {
-                StringExtractor opcode_extractor;
-                std::string opcode_string = value.str ();
-                size_t dwarf_opcode_len = opcode_string.length () / 2;
-                assert (dwarf_opcode_len > 0);
-
-                dwarf_opcode_bytes.resize (dwarf_opcode_len);
-                reg_info.dynamic_size_dwarf_len = dwarf_opcode_len;
-                opcode_extractor.GetStringRef ().swap (opcode_string);
-                uint32_t ret_val = opcode_extractor.GetHexBytesAvail (dwarf_opcode_bytes.data (),
-                                                                    dwarf_opcode_len);
-                assert (dwarf_opcode_len == ret_val);
-
-                reg_info.dynamic_size_dwarf_expr_bytes = dwarf_opcode_bytes.data ();
             }
             else
             {
@@ -4730,16 +4632,12 @@ ProcessGDBRemote::GetGDBServerRegisterInfo (ArchSpec &arch_to_use)
                 return true; // Keep iterating through all children of the target_node
             });
 
-            // Initialize these outside of ParseRegisters, since they should not be reset inside each include feature
-            uint32_t cur_reg_num = 0;
-            uint32_t reg_offset = 0;
-
             // Don't use Process::GetABI, this code gets called from DidAttach, and in that context we haven't
             // set the Target's architecture yet, so the ABI is also potentially incorrect.
             ABISP abi_to_use_sp = ABI::FindPlugin(arch_to_use);
             if (feature_node)
             {
-                ParseRegisters(feature_node, target_info, this->m_register_info, abi_to_use_sp, cur_reg_num, reg_offset);
+                ParseRegisters(feature_node, target_info, this->m_register_info, abi_to_use_sp);
             }
 
             for (const auto &include : target_info.includes)
@@ -4757,7 +4655,7 @@ ProcessGDBRemote::GetGDBServerRegisterInfo (ArchSpec &arch_to_use)
                 XMLNode include_feature_node = include_xml_document.GetRootElement("feature");
                 if (include_feature_node)
                 {
-                    ParseRegisters(include_feature_node, target_info, this->m_register_info, abi_to_use_sp, cur_reg_num, reg_offset);
+                    ParseRegisters(include_feature_node, target_info, this->m_register_info, abi_to_use_sp);
                 }
             }
             this->m_register_info.Finalize(arch_to_use);
@@ -4961,7 +4859,14 @@ ProcessGDBRemote::LoadModules (LoadedModuleInfoList &module_list)
         if (!modInfo.get_link_map (link_map))
             link_map = LLDB_INVALID_ADDRESS;
 
-        FileSpec file (mod_name.c_str(), true);
+        // hack (cleaner way to get file name only?) (win/unix compat?)
+        size_t marker = mod_name.rfind ('/');
+        if (marker == std::string::npos)
+            marker = 0;
+        else
+            marker += 1;
+
+        FileSpec file (mod_name.c_str()+marker, true);
         lldb::ModuleSP module_sp = LoadModuleAtAddress (file, link_map, mod_base,
                                                         mod_base_is_offset);
 
@@ -4971,30 +4876,7 @@ ProcessGDBRemote::LoadModules (LoadedModuleInfoList &module_list)
 
     if (new_modules.GetSize() > 0)
     {
-        ModuleList removed_modules;
         Target &target = GetTarget();
-        ModuleList &loaded_modules = m_process->GetTarget().GetImages();
-
-        for (size_t i = 0; i < loaded_modules.GetSize(); ++i)
-        {
-            const lldb::ModuleSP loaded_module = loaded_modules.GetModuleAtIndex(i);
-
-            bool found = false;
-            for (size_t j = 0; j < new_modules.GetSize(); ++j)
-            {
-                if (new_modules.GetModuleAtIndex(j).get() == loaded_module.get())
-                    found = true;
-            }
-
-            // The main executable will never be included in libraries-svr4, don't remove it
-            if (!found && loaded_module.get() != target.GetExecutableModulePointer())
-            {
-                removed_modules.Append (loaded_module);
-            }
-        }
-
-        loaded_modules.Remove (removed_modules);
-        m_process->GetTarget().ModulesDidUnload (removed_modules, false);
 
         new_modules.ForEach ([&target](const lldb::ModuleSP module_sp) -> bool
         {
@@ -5010,11 +4892,13 @@ ProcessGDBRemote::LoadModules (LoadedModuleInfoList &module_list)
             return false;
         });
 
+        ModuleList &loaded_modules = m_process->GetTarget().GetImages();
         loaded_modules.AppendIfNeeded (new_modules);
         m_process->GetTarget().ModulesDidLoad (new_modules);
     }
 
     return new_modules.GetSize();
+
 }
 
 size_t

@@ -45,7 +45,7 @@ public:
         eOpenOptionNonBlocking          = (1u << 4),    // File reads
         eOpenOptionCanCreate            = (1u << 5),    // Create file if doesn't already exist
         eOpenOptionCanCreateNewOnly     = (1u << 6),    // Can create file only if it doesn't already exist
-        eOpenOptionDontFollowSymlinks   = (1u << 7),
+        eOpenoptionDontFollowSymlinks   = (1u << 7),
         eOpenOptionCloseOnExec          = (1u << 8)     // Close the file when executing a new process
     };
     
@@ -59,7 +59,8 @@ public:
         m_options (0),
         m_own_stream (false),
         m_is_interactive (eLazyBoolCalculate),
-        m_is_real_terminal (eLazyBoolCalculate)
+        m_is_real_terminal (eLazyBoolCalculate),
+        m_supports_colors (eLazyBoolCalculate)
     {
     }
     
@@ -70,7 +71,8 @@ public:
         m_options (0),
         m_own_stream (transfer_ownership),
         m_is_interactive (eLazyBoolCalculate),
-        m_is_real_terminal (eLazyBoolCalculate)
+        m_is_real_terminal (eLazyBoolCalculate),
+        m_supports_colors (eLazyBoolCalculate)
     {
     }
 
@@ -125,7 +127,8 @@ public:
         m_options (0),
         m_own_stream (false),
         m_is_interactive (eLazyBoolCalculate),
-        m_is_real_terminal (eLazyBoolCalculate)
+        m_is_real_terminal (eLazyBoolCalculate),
+        m_supports_colors (eLazyBoolCalculate)
     {
     }
 
@@ -546,6 +549,7 @@ protected:
     FILE *m_stream;
     uint32_t m_options;
     bool m_own_stream;
+    bool m_own_descriptor;
     LazyBool m_is_interactive;
     LazyBool m_is_real_terminal;
     LazyBool m_supports_colors;

@@ -18,20 +18,21 @@
 using namespace lldb;
 using namespace lldb_private;
 
-TypeCategoryImpl::TypeCategoryImpl(IFormatChangeListener *clist, ConstString name,
-                                   std::initializer_list<lldb::LanguageType> langs)
-    : m_format_cont("format", "regex-format", clist),
-      m_summary_cont("summary", "regex-summary", clist),
-      m_filter_cont("filter", "regex-filter", clist),
+TypeCategoryImpl::TypeCategoryImpl(IFormatChangeListener* clist,
+                                   ConstString name,
+                                   std::initializer_list<lldb::LanguageType> langs) :
+m_format_cont("format","regex-format",clist),
+m_summary_cont("summary","regex-summary",clist),
+m_filter_cont("filter","regex-filter",clist),
 #ifndef LLDB_DISABLE_PYTHON
-      m_synth_cont("synth", "regex-synth", clist),
+m_synth_cont("synth","regex-synth",clist),
 #endif
-      m_validator_cont("validator", "regex-validator", clist),
-      m_enabled(false),
-      m_change_listener(clist),
-      m_mutex(),
-      m_name(name),
-      m_languages()
+m_validator_cont("validator","regex-validator",clist),
+m_enabled(false),
+m_change_listener(clist),
+m_mutex(Mutex::eMutexTypeRecursive),
+m_name(name),
+m_languages()
 {
     for (const lldb::LanguageType lang : langs)
         AddLanguage(lang);
@@ -61,6 +62,12 @@ IsApplicable(lldb::LanguageType category_lang,
         case eLanguageTypeD:
         case eLanguageTypePython:
             return category_lang == valobj_lang;
+            
+            // Swift knows about itself, and about ObjC++ bridgings
+        case eLanguageTypeSwift:
+            return valobj_lang == eLanguageTypeSwift ||
+            valobj_lang == eLanguageTypeObjC ||
+            valobj_lang == eLanguageTypeObjC_plus_plus;
             
             // the C family, we consider it as one
         case eLanguageTypeC89:
@@ -672,7 +679,7 @@ TypeCategoryImpl::GetTypeNameSpecifierForValidatorAtIndex (size_t index)
 void
 TypeCategoryImpl::Enable (bool value, uint32_t position)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     if ( (m_enabled = value) )
         m_enabled_position = position;
     if (m_change_listener)

@@ -5,8 +5,6 @@ add_lldb_unittest(SymbolFilePDBTests
 set(test_inputs
    test-pdb.exe
    test-pdb.pdb
-   test-dwarf.exe
-   test-pdb-types.exe
-   test-pdb-types.pdb)
+   test-dwarf.exe)
 
 add_unittest_inputs(SymbolFilePDBTests "${test_inputs}")  

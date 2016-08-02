@@ -91,6 +91,12 @@ public:
     SBValue
     GetStopReturnValue ();
 
+    SBValue
+    GetStopErrorValue ();
+
+    SBValue
+    GetStopReturnOrErrorValue (bool &is_swift_error_value);
+
     lldb::tid_t
     GetThreadID () const;
 
@@ -149,9 +155,6 @@ public:
     
     SBError
     ReturnFromFrame (SBFrame &frame, SBValue &return_value);
-
-    SBError
-    UnwindInnermostExpression();
 
     //--------------------------------------------------------------------------
     /// LLDB currently supports process centric debugging which means when any

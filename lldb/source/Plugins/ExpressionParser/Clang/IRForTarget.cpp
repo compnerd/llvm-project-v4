@@ -1934,7 +1934,7 @@ IRForTarget::BuildRelocation(llvm::Type *type, uint64_t offset)
     llvm::Type *char_pointer_type = char_type->getPointerTo();
 
     llvm::Constant *reloc_placeholder_bitcast = ConstantExpr::getBitCast(m_reloc_placeholder, char_pointer_type);
-    llvm::Constant *reloc_getelementptr = ConstantExpr::getGetElementPtr(char_type, reloc_placeholder_bitcast, offsets);
+    llvm::Constant *reloc_getelementptr = ConstantExpr::getGetElementPtr(nullptr, reloc_placeholder_bitcast, offsets);
     llvm::Constant *reloc_bitcast = ConstantExpr::getBitCast(reloc_getelementptr, type);
 
     return reloc_bitcast;

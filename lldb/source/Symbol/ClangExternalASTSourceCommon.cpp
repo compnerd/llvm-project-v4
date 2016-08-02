@@ -9,6 +9,7 @@
 
 #include "lldb/Symbol/ClangExternalASTSourceCommon.h"
 #include "lldb/Core/Stream.h"
+#include "lldb/Host/Mutex.h"
 
 using namespace lldb_private;
 

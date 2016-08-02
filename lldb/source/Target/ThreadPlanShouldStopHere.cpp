@@ -13,6 +13,8 @@
 // Project includes
 #include "lldb/Core/Log.h"
 #include "lldb/Symbol/Symbol.h"
+#include "lldb/Target/LanguageRuntime.h"
+#include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadPlanShouldStopHere.h"
@@ -86,6 +88,31 @@ ThreadPlanShouldStopHere::DefaultShouldStopHereCallback (ThreadPlan *current_pla
                 log->Printf ("Stepping out of frame with no debug info");
 
             should_stop_here = false;
+        }
+    }
+    
+    // Check whether the frame we are in is a language runtime thunk, only for step out:
+    if (operation == eFrameCompareOlder)
+    {
+        Symbol *symbol = frame->GetSymbolContext(eSymbolContextSymbol).symbol;
+        if (symbol)
+        {
+            LanguageRuntime *language_runtime;
+            bool is_thunk = false;
+            ProcessSP process_sp(current_plan->GetThread().GetProcess());
+            enum LanguageType languages_to_try[] = {eLanguageTypeSwift, eLanguageTypeObjC, eLanguageTypeC_plus_plus};
+            
+            for (enum LanguageType language : languages_to_try)
+            {
+                language_runtime = process_sp->GetLanguageRuntime(language);
+                if (language_runtime)
+                    is_thunk = language_runtime->IsSymbolARuntimeThunk(*symbol);
+                if (is_thunk)
+                {
+                    should_stop_here = false;
+                    break;
+                }
+            }
         }
     }
     

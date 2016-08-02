@@ -65,8 +65,11 @@ public:
     ///     success.
     //------------------------------------------------------------------
     virtual unsigned
-    Parse(DiagnosticManager &diagnostic_manager) = 0;
-    
+    Parse (DiagnosticManager &diagnostic_manager,
+           uint32_t first_line = 0,
+           uint32_t last_line = UINT32_MAX,
+           uint32_t line_offset = 0) = 0;
+
     //------------------------------------------------------------------
     /// Try to use the FixIts in the diagnostic_manager to rewrite the
     /// expression.  If successful, the rewritten expression is stored

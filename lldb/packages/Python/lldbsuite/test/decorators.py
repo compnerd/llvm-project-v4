@@ -441,6 +441,27 @@ def skipUnlessDarwin(func):
     """Decorate the item to skip tests that should be skipped on any non Darwin platform."""
     return skipUnlessPlatform(lldbplatformutil.getDarwinOSTriples())(func)
 
+def swiftTest(func):
+    """Decorate the item as a Swift test (Darwin/Linux only, no i386)."""
+    def is_not_swift_compatible(self):
+        if "i386" == self.getArchitecture():
+            return "skipping Swift test because i386 is not a supported architecture"
+        elif not(any(x in sys.platform for x in ['darwin', 'linux'])):
+            return "skipping Swift test because only Darwin and Linux are supported OSes"
+        else:
+            # This configuration is Swift-compatible
+            return None
+    return skipTestIfFn(is_not_swift_compatible)(func)
+
+def skipIfSmooshbase(func):
+    """Decorate the item to skip tests that should be skipped on the smooshbase buildbot."""
+    def is_smooshbase(self):
+        if os.environ.get('IS_SMOOSHBASE', 'FAIL') != 'FAIL':
+            return 'skip on the smooshbase buildbot'
+        else:
+            return None
+    return skipTestIfFn(is_smooshbase)(func)
+
 def skipUnlessGoInstalled(func):
     """Decorate the item to skip tests when no Go compiler is available."""
     def is_go_missing(self):
@@ -486,7 +507,7 @@ def skipUnlessPlatform(oslist):
     # This decorator cannot be ported to `skipIf` yet because it is used on entire
     # classes, which `skipIf` explicitly forbids.
     return unittest2.skipUnless(lldbplatformutil.getPlatform() in oslist,
-                                "requires one of %s" % (", ".join(oslist)))
+                                "requires on of %s" % (", ".join(oslist)))
 
 def skipIfTargetAndroid(api_levels=None, archs=None):
     """Decorator to skip tests when the target is Android.
@@ -502,8 +523,15 @@ def skipIfTargetAndroid(api_levels=None, archs=None):
 def skipUnlessCompilerRt(func):
     """Decorate the item to skip tests if testing remotely."""
     def is_compiler_rt_missing():
-        compilerRtPath = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "llvm","projects","compiler-rt")
-        return "compiler-rt not found" if not os.path.exists(compilerRtPath) else None
+        # This path is where compiler-rt sources would be on LLVM.org LLDB
+        # builds and Swift LLDB builds driven by Xcode.
+        compilerRtPathXcode = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "llvm","projects","compiler-rt")
+
+        # This path is where compiler-rt sources would be on Swift
+        # build-script-driven builds as found on our CI.
+        compilerRtPathBuildScript = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "llvm","projects","compiler-rt")
+        compiler_rt_exists = os.path.exists(compilerRtPathXcode) or os.path.exists(compilerRtPathBuildScript)
+        return "compiler-rt not found" if not compiler_rt_exists else None
     return skipTestIfFn(is_compiler_rt_missing)(func)
 
 def skipUnlessThreadSanitizer(func):

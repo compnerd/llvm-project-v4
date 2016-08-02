@@ -308,9 +308,9 @@ DWARFCallFrameInfo::GetFDEIndex ()
     
     if (m_fde_index_initialized)
         return;
-
-    std::lock_guard<std::mutex> guard(m_fde_index_mutex);
-
+    
+    Mutex::Locker locker(m_fde_index_mutex);
+    
     if (m_fde_index_initialized) // if two threads hit the locker
         return;
 
@@ -408,7 +408,6 @@ DWARFCallFrameInfo::GetFDEIndex ()
 bool
 DWARFCallFrameInfo::FDEToUnwindPlan (dw_offset_t dwarf_offset, Address startaddr, UnwindPlan& unwind_plan)
 {
-    Log *log = GetLogIfAllCategoriesSet(LIBLLDB_LOG_UNWIND);
     lldb::offset_t offset = dwarf_offset;
     lldb::offset_t current_entry = offset;
 
@@ -649,30 +648,10 @@ DWARFCallFrameInfo::FDEToUnwindPlan (dw_offset_t dwarf_offset, Address startaddr
                         // the stack and place them in the current row. (This operation is
                         // useful for compilers that move epilogue code into the body of a
                         // function.)
-                        if (stack.empty())
-                        {
-                            if (log)
-                                log->Printf(
-                                    "DWARFCallFrameInfo::%s(dwarf_offset: %" PRIx32 ", startaddr: %" PRIx64
-                                    " encountered DW_CFA_restore_state but state stack is empty. Corrupt unwind info?",
-                                    __FUNCTION__, dwarf_offset, startaddr.GetFileAddress());
-                            break;
-                        }
                         lldb::addr_t offset = row->GetOffset ();
                         row = stack.back ();
                         stack.pop_back ();
                         row->SetOffset (offset);
-                        break;
-                    }
-
-                    case DW_CFA_GNU_args_size: // 0x2e
-                    {
-                        // The DW_CFA_GNU_args_size instruction takes an unsigned LEB128 operand
-                        // representing an argument size. This instruction specifies the total of
-                        // the size of the arguments which have been pushed onto the stack.
-
-                        // TODO: Figure out how we should handle this.
-                        m_cfi_data.GetULEB128(&offset);
                         break;
                     }
 

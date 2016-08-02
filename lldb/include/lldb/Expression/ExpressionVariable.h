@@ -305,7 +305,7 @@ public:
                               uint32_t addr_byte_size) = 0;
 
     virtual ConstString
-    GetNextPersistentVariableName () = 0;
+    GetNextPersistentVariableName (bool is_error = false) = 0;
     
     virtual void
     RemovePersistentVariable (lldb::ExpressionVariableSP variable) = 0;
@@ -315,6 +315,9 @@ public:
     
     void
     RegisterExecutionUnit (lldb::IRExecutionUnitSP &execution_unit_sp);
+
+    void
+    RegisterSymbol (const ConstString &name, lldb::addr_t address);
     
 private:
     LLVMCastKind m_kind;

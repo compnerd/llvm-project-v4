@@ -594,7 +594,7 @@ ValueObjectPrinter::ShouldPrintChildren (bool is_failed_description,
         return true;
     
     TypeSummaryImpl* entry = GetSummaryFormatter();
-    
+   
     if (m_options.m_use_objc)
         return false;
     
@@ -746,7 +746,7 @@ ValueObjectPrinter::ShouldPrintEmptyBrackets (bool value_printed,
         if (value_printed || summary_printed)
             return false;
     }
-    
+   
     if (synth_m_valobj->MightHaveChildren())
         return true;
     

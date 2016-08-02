@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 from lldbsuite.test import configuration
+from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbgdbserverutils import *
 import logging
@@ -78,6 +79,7 @@ class GdbRemoteTestCaseBase(TestBase):
         TestBase.setUp(self)
 
         self.setUpBaseLogging()
+        self._remote_server_log_file = None
         self.debug_monitor_extra_args = []
         self._pump_queues = socket_packet_pump.PumpQueues()
 
@@ -113,6 +115,12 @@ class GdbRemoteTestCaseBase(TestBase):
     def tearDown(self):
         self._pump_queues.verify_queues_empty()
 
+        if self._remote_server_log_file is not None:
+            lldb.remote_platform.Get(lldb.SBFileSpec(self._remote_server_log_file),
+                    lldb.SBFileSpec(self.getLocalServerLogFile()))
+            lldb.remote_platform.Run(lldb.SBPlatformShellCommand("rm " + self._remote_server_log_file))
+            self._remote_server_log_file = None
+
         self.logger.removeHandler(self._verbose_log_handler)
         self._verbose_log_handler = None
         TestBase.tearDown(self)
@@ -126,6 +134,7 @@ class GdbRemoteTestCaseBase(TestBase):
 
         if lldb.remote_platform:
             log_file = lldbutil.join_remote_paths(lldb.remote_platform.GetWorkingDirectory(), "server.log")
+            self._remote_server_log_file = log_file
         else:
             log_file = self.getLocalServerLogFile()
 
@@ -622,7 +631,6 @@ class GdbRemoteTestCaseBase(TestBase):
         "encoding",
         "format",
         "set",
-        "gcc",
         "ehframe",
         "dwarf",
         "generic",
@@ -698,7 +706,7 @@ class GdbRemoteTestCaseBase(TestBase):
 
         # Validate keys are known.
         for (key, val) in list(mem_region_dict.items()):
-            self.assertTrue(key in ["start", "size", "permissions", "name", "error"])
+            self.assertTrue(key in ["start", "size", "permissions", "error"])
             self.assertIsNotNone(val)
 
         # Return the dictionary of key-value pairs for the memory region.
@@ -1366,7 +1374,4 @@ class GdbRemoteTestCaseBase(TestBase):
         (state_reached, step_count) = self.count_single_steps_until_true(main_thread_id, self.g_c1_c2_contents_are, args, max_step_count=5, use_Hc_packet=use_Hc_packet, step_instruction=step_instruction)
         self.assertTrue(state_reached)
         self.assertEqual(step_count, expected_step_count)
-
-    def maybe_strict_output_regex(self, regex):
-        return '.*'+regex+'.*' if lldbplatformutil.hasChattyStderr(self) else '^'+regex+'$'
 

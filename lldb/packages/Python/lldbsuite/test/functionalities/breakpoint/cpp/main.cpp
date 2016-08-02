@@ -12,8 +12,8 @@
 namespace a {
     class c {
     public:
-        c();
-        ~c();
+        c () {}
+        ~c() {}
         void func1() 
         {
             puts (__PRETTY_FUNCTION__);
@@ -27,16 +27,13 @@ namespace a {
             puts (__PRETTY_FUNCTION__);
         }
     };
-
-    c::c() {}
-    c::~c() {}
 }
 
 namespace b {
     class c {
     public:
-        c();
-        ~c();
+        c () {}
+        ~c() {}
         void func1() 
         {
             puts (__PRETTY_FUNCTION__);
@@ -46,9 +43,6 @@ namespace b {
             puts (__PRETTY_FUNCTION__);
         }
     };
-
-    c::c() {}
-    c::~c() {}
 }
 
 namespace c {

@@ -145,10 +145,10 @@ CommandInterpreter::GetPromptOnQuit () const
 }
 
 void
-CommandInterpreter::SetPromptOnQuit (bool b)
+CommandInterpreter::SetPromptOnQuit (bool enable)
 {
     const uint32_t idx = ePropertyPromptOnQuit;
-    m_collection_sp->SetPropertyAtIndexAsBoolean (nullptr, idx, b);
+    m_collection_sp->SetPropertyAtIndexAsBoolean (nullptr, idx, enable);
 }
 
 void
@@ -343,12 +343,16 @@ CommandInterpreter::Initialize ()
         AddAlias ("p", cmd_obj_sp, "--")->SetHelpLong("");
         AddAlias ("print", cmd_obj_sp, "--")->SetHelpLong("");
         AddAlias ("call", cmd_obj_sp, "--")->SetHelpLong("");
+
         if (auto po = AddAlias ("po", cmd_obj_sp, "-O --"))
         {
             po->SetHelp("Evaluate an expression on the current thread.  Displays any returned value with formatting "
                         "controlled by the type's author.");
             po->SetHelpLong("");
         }
+
+        AddAlias ("repl", cmd_obj_sp, "--repl -- ");
+
         AddAlias("parray", cmd_obj_sp, "--element-count %1 --")->SetHelpLong("");
         AddAlias("poarray", cmd_obj_sp, "--object-description --element-count %1 --")->SetHelpLong("");
     }
@@ -678,6 +682,7 @@ CommandInterpreter::LoadCommandDictionary ()
             list_regex_cmd_ap->AddRegexCommand("^\\*?(0x[[:xdigit:]]+)[[:space:]]*$", "source list --address %1") &&
             list_regex_cmd_ap->AddRegexCommand("^-[[:space:]]*$", "source list --reverse") &&
             list_regex_cmd_ap->AddRegexCommand("^-([[:digit:]]+)[[:space:]]*$", "source list --reverse --count %1") &&
+            list_regex_cmd_ap->AddRegexCommand("^([^.]+)\\.([^.]+)$", "source list --file \"%1.%2\"") &&
             list_regex_cmd_ap->AddRegexCommand("^(.+)$", "source list --name \"%1\"") &&
             list_regex_cmd_ap->AddRegexCommand("^$", "source list"))
         {
@@ -3149,12 +3154,8 @@ CommandInterpreter::ResolveCommandImpl(std::string &command_line, CommandReturnO
         if (cmd_obj == nullptr)
         {
             std::string full_name;
-            bool is_alias = GetAliasFullName(next_word.c_str(), full_name);
-            cmd_obj = GetCommandObject(next_word.c_str(), &matches);
-            bool is_real_command = (is_alias == false) || (cmd_obj != nullptr && cmd_obj->IsAlias() == false);
-            if (!is_real_command)
+            if (GetAliasFullName(next_word.c_str(), full_name))
             {
-                matches.Clear();
                 std::string alias_result;
                 cmd_obj = BuildAliasResult(full_name.c_str(), scratch_command, alias_result, result);
                 revised_command_line.Printf("%s", alias_result.c_str());
@@ -3166,8 +3167,7 @@ CommandInterpreter::ResolveCommandImpl(std::string &command_line, CommandReturnO
             }
             else
             {
-                if (!cmd_obj)
-                    cmd_obj = GetCommandObject(next_word.c_str(), &matches);
+                cmd_obj = GetCommandObject(next_word.c_str(), &matches);
                 if (cmd_obj)
                 {
                     actual_cmd_name_len += strlen(cmd_obj->GetCommandName());

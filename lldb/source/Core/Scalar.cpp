@@ -78,6 +78,74 @@ PromoteToMaxType
     return Scalar::e_void;
 }
 
+llvm::APInt
+Scalar::APIntWithTypeAndValue(Scalar::Type type, uint64_t raw_value)
+{
+    //  APInt(unsigned numBits, uint64_t val, bool isSigned = false)
+    unsigned num_bits = 1;
+    bool is_signed = false;
+
+    switch (type)
+    {
+        case Scalar::e_void:
+            break;
+        case Scalar::e_sint:
+            is_signed = true;
+            num_bits = sizeof(sint_t) * 8;
+            break;
+        case Scalar::e_uint:
+            is_signed = false;
+            num_bits = sizeof(uint_t) * 8;
+            break;
+        case Scalar::e_slong:
+            is_signed = true;
+            num_bits = sizeof(slong_t) * 8;
+            break;
+        case Scalar::e_ulong:
+            is_signed = false;
+            num_bits = sizeof(ulong_t) * 8;
+            break;
+        case Scalar::e_slonglong:
+            is_signed = true;
+            num_bits = sizeof(slonglong_t) * 8;
+            break;
+        case Scalar::e_ulonglong:
+            is_signed = false;
+            num_bits = sizeof(ulonglong_t) * 8;
+            break;
+        case Scalar::e_sint128:
+            is_signed = true;
+            num_bits = 128;
+            break;
+        case Scalar::e_uint128:
+            is_signed = false;
+            num_bits = 128;
+            break;
+        case Scalar::e_sint256:
+            is_signed = true;
+            num_bits = 256;
+            break;
+        case Scalar::e_uint256:
+            is_signed = false;
+            num_bits = 256;
+            break;
+        case Scalar::e_float:
+            is_signed = false;
+            num_bits = sizeof(float_t) * 8;
+            break;
+        case Scalar::e_double:
+            is_signed = false;
+            num_bits = sizeof(double_t) * 8;
+            break;
+        case Scalar::e_long_double:
+            is_signed = false;
+            num_bits = sizeof(long_double_t) * 8;
+            break;
+    }
+
+    return llvm::APInt(num_bits, raw_value, is_signed);
+}
+
 Scalar::Scalar() :
     m_type(e_void),
     m_float((float)0)
@@ -731,6 +799,7 @@ Scalar::Promote(Scalar::Type type)
                  m_integer = m_integer.sextOrTrunc(BITWIDTH_INT128);
                  success = true;
                  break;
+
 
              case e_sint256:
              case e_uint256:
@@ -2365,29 +2434,28 @@ lldb_private::operator% (const Scalar& lhs, const Scalar& rhs)
         switch (result.m_type)
         {
         default:                    break;
-            case Scalar::e_void:            break;
-            case Scalar::e_sint:
-            case Scalar::e_slong:
-            case Scalar::e_slonglong:
-            case Scalar::e_sint128:
-            case Scalar::e_sint256:
-                if (b->m_integer != 0)
-                {
-                    result.m_integer = a->m_integer.srem(b->m_integer);
-                    return result;
-                }
-                break;
-            case Scalar::e_uint:
-            case Scalar::e_ulong:
-            case Scalar::e_ulonglong:
-            case Scalar::e_uint128:
-            case Scalar::e_uint256:
-                if (b->m_integer != 0)
-                {
-                    result.m_integer = a->m_integer.urem(b->m_integer);
-                    return result;
-                }
-                break;
+             case Scalar::e_void:            break;
+             case Scalar::e_sint:
+             case Scalar::e_slong:
+             case Scalar::e_slonglong:
+             case Scalar::e_sint128:
+             case Scalar::e_sint256:
+                 if (b->m_integer != 0)
+                 {
+                     result.m_integer = a->m_integer.srem(b->m_integer);
+                     return result;
+                 }
+             case Scalar::e_uint:
+             case Scalar::e_ulong:
+             case Scalar::e_ulonglong:
+             case Scalar::e_uint128:
+             case Scalar::e_uint256:
+                 if (b->m_integer != 0)
+                 {
+                     result.m_integer = a->m_integer.urem(b->m_integer);
+                     return result;
+                 }
+                 break;
         }
     }
     result.m_type = Scalar::e_void;

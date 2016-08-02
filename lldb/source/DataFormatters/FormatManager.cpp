@@ -20,6 +20,7 @@
 #include "lldb/Core/Log.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/LanguageCategory.h"
+#include "Plugins/ScriptInterpreter/Python/lldb-python.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Language.h"
 
@@ -128,7 +129,7 @@ FormatManager::Changed ()
 {
     ++m_last_revision;
     m_format_cache.Clear ();
-    std::lock_guard<std::recursive_mutex> guard(m_language_categories_mutex);
+    Mutex::Locker lang_locker(m_language_categories_mutex);
     for (auto& iter : m_language_categories_map)
     {
         if (iter.second)
@@ -181,7 +182,7 @@ void
 FormatManager::EnableAllCategories ()
 {
     m_categories_map.EnableAllCategories ();
-    std::lock_guard<std::recursive_mutex> guard(m_language_categories_mutex);
+    Mutex::Locker lang_locker(m_language_categories_mutex);
     for (auto& iter : m_language_categories_map)
     {
         if (iter.second)
@@ -193,7 +194,7 @@ void
 FormatManager::DisableAllCategories ()
 {
     m_categories_map.DisableAllCategories ();
-    std::lock_guard<std::recursive_mutex> guard(m_language_categories_mutex);
+    Mutex::Locker lang_locker(m_language_categories_mutex);
     for (auto& iter : m_language_categories_map)
     {
         if (iter.second)
@@ -297,7 +298,7 @@ FormatManager::GetPossibleMatches (ValueObject& valobj,
             }
         }
     }
-        
+
     // try to strip typedef chains
     if (compiler_type.IsTypedefType())
     {
@@ -502,7 +503,7 @@ void
 FormatManager::ForEachCategory(TypeCategoryMap::ForEachCallback callback)
 {
     m_categories_map.ForEach(callback);
-    std::lock_guard<std::recursive_mutex> guard(m_language_categories_mutex);
+    Mutex::Locker locker(m_language_categories_mutex);
     for (const auto& entry : m_language_categories_map)
     {
         if (auto category_sp = entry.second->GetCategory())
@@ -695,6 +696,10 @@ FormatManager::GetCandidateLanguages (lldb::LanguageType lang_type)
 {
     switch (lang_type)
     {
+        case lldb::eLanguageTypeSwift:
+            return {lldb::eLanguageTypeSwift, lldb::eLanguageTypeObjC};
+        case lldb::eLanguageTypeObjC:
+            return {lldb::eLanguageTypeObjC, lldb::eLanguageTypeSwift};
         case lldb::eLanguageTypeC:
         case lldb::eLanguageTypeC89:
         case lldb::eLanguageTypeC99:
@@ -712,7 +717,7 @@ FormatManager::GetCandidateLanguages (lldb::LanguageType lang_type)
 LanguageCategory*
 FormatManager::GetCategoryForLanguage (lldb::LanguageType lang_type)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_language_categories_mutex);
+    Mutex::Locker locker(m_language_categories_mutex);
     auto iter = m_language_categories_map.find(lang_type), end = m_language_categories_map.end();
     if (iter != end)
         return iter->second.get();
@@ -1055,22 +1060,26 @@ FormatManager::GetHardcodedValidator (FormattersMatchData& match_data)
     return retval_sp;
 }
 
-FormatManager::FormatManager()
-    : m_last_revision(0),
-      m_format_cache(),
-      m_language_categories_mutex(),
-      m_language_categories_map(),
-      m_named_summaries_map(this),
-      m_categories_map(this),
-      m_default_category_name(ConstString("default")),
-      m_system_category_name(ConstString("system")),
-      m_vectortypes_category_name(ConstString("VectorTypes"))
+FormatManager::FormatManager() :
+    m_last_revision(0),
+    m_format_cache(),
+    m_language_categories_mutex(Mutex::eMutexTypeRecursive),
+    m_language_categories_map(),
+    m_named_summaries_map(this),
+    m_categories_map(this),
+    m_default_category_name(ConstString("default")),
+    m_system_category_name(ConstString("system")), 
+    m_vectortypes_category_name(ConstString("VectorTypes")),
+    m_runtime_synths_category_name(ConstString("runtime-synthetics"))
 {
     LoadSystemFormatters();
     LoadVectorFormatters();
-
-    EnableCategory(m_vectortypes_category_name, TypeCategoryMap::Last, lldb::eLanguageTypeObjC_plus_plus);
-    EnableCategory(m_system_category_name, TypeCategoryMap::Last, lldb::eLanguageTypeObjC_plus_plus);
+    
+    GetCategory(m_runtime_synths_category_name); // EnableCategory() won't enable a non-existant category, so create this one first even if empty
+    
+    EnableCategory(m_vectortypes_category_name,TypeCategoryMap::Last, lldb::eLanguageTypeObjC_plus_plus);
+    EnableCategory(m_runtime_synths_category_name,TypeCategoryMap::Last, {lldb::eLanguageTypeObjC_plus_plus,lldb::eLanguageTypeSwift});
+    EnableCategory(m_system_category_name,TypeCategoryMap::Last, lldb::eLanguageTypeObjC_plus_plus);
 }
 
 void

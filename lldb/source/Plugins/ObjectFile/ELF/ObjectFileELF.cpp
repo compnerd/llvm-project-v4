@@ -31,9 +31,7 @@
 
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/MipsABIFlags.h"
 
 #define CASE_AND_STREAM(s, def, width)                  \
     case def: s->Printf("%-*s", width, #def); break;
@@ -1479,7 +1477,7 @@ ObjectFileELF::RefineModuleDetailsFromNote (lldb_private::DataExtractor &data, l
         else if (note.n_name == LLDB_NT_OWNER_CORE)
         {
             // Parse the NT_FILE to look for stuff in paths to shared libraries
-            // As the contents look like this in a 64 bit ELF core file:
+            // As the contents look like:
             // count     = 0x000000000000000a (10)
             // page_size = 0x0000000000001000 (4096)
             // Index start              end                file_ofs           path
@@ -1494,24 +1492,14 @@ ObjectFileELF::RefineModuleDetailsFromNote (lldb_private::DataExtractor &data, l
             // [  7] 0x00007fa79cdb2000 0x00007fa79cdd5000 0x0000000000000000 /lib/x86_64-linux-gnu/ld-2.19.so
             // [  8] 0x00007fa79cfd4000 0x00007fa79cfd5000 0x0000000000000022 /lib/x86_64-linux-gnu/ld-2.19.so
             // [  9] 0x00007fa79cfd5000 0x00007fa79cfd6000 0x0000000000000023 /lib/x86_64-linux-gnu/ld-2.19.so
-            // In the 32 bit ELFs the count, page_size, start, end, file_ofs are uint32_t
-            // For reference: see readelf source code (in binutils).
             if (note.n_type == NT_FILE)
             {
-                uint64_t count = data.GetAddress(&offset);
-                const char *cstr;
-                data.GetAddress(&offset);                        // Skip page size
-                offset += count * 3 * data.GetAddressByteSize(); // Skip all start/end/file_ofs
+                uint64_t count = data.GetU64(&offset);
+                offset += 8 + 3*8*count; // Skip page size and all start/end/file_ofs
                 for (size_t i=0; i<count; ++i)
                 {
-                    cstr = data.GetCStr(&offset);
-                    if(cstr == nullptr)
-                    {
-                        error.SetErrorStringWithFormat("ObjectFileELF::%s trying to read at an offset after the end (GetCStr returned nullptr)", __FUNCTION__);
-                        return error;
-                    }
-                    llvm::StringRef path(cstr);
-                    if (path.startswith("/lib/x86_64-linux-gnu") || path.startswith("/lib/i386-linux-gnu"))
+                    llvm::StringRef path(data.GetCStr(&offset));
+                    if (path.startswith("/lib/x86_64-linux-gnu"))
                     {
                         arch_spec.GetTriple().setOS(llvm::Triple::OSType::Linux);
                         break;
@@ -1528,80 +1516,6 @@ ObjectFileELF::RefineModuleDetailsFromNote (lldb_private::DataExtractor &data, l
     return error;
 }
 
-void
-ObjectFileELF::ParseARMAttributes(DataExtractor &data, uint64_t length, ArchSpec &arch_spec)
-{
-    lldb::offset_t Offset = 0;
-
-    uint8_t FormatVersion = data.GetU8(&Offset);
-    if (FormatVersion != llvm::ARMBuildAttrs::Format_Version)
-      return;
-
-    Offset = Offset + sizeof(uint32_t); // Section Length
-    llvm::StringRef VendorName = data.GetCStr(&Offset);
-
-    if (VendorName != "aeabi")
-      return;
-
-    if (arch_spec.GetTriple().getEnvironment() == llvm::Triple::UnknownEnvironment)
-        arch_spec.GetTriple().setEnvironment(llvm::Triple::EABI);
-
-    while (Offset < length)
-    {
-        uint8_t Tag = data.GetU8(&Offset);
-        uint32_t Size = data.GetU32(&Offset);
-
-        if (Tag != llvm::ARMBuildAttrs::File || Size == 0)
-            continue;
-
-        while (Offset < length)
-        {
-            uint64_t Tag = data.GetULEB128(&Offset);
-            switch (Tag)
-            {
-                default:
-                    if (Tag < 32)
-                        data.GetULEB128(&Offset);
-                    else if (Tag % 2 == 0)
-                        data.GetULEB128(&Offset);
-                    else
-                        data.GetCStr(&Offset);
-
-                    break;
-
-                case llvm::ARMBuildAttrs::CPU_raw_name:
-                case llvm::ARMBuildAttrs::CPU_name:
-                    data.GetCStr(&Offset);
-
-                    break;
-
-                case llvm::ARMBuildAttrs::ABI_VFP_args:
-                {
-                    uint64_t VFPArgs = data.GetULEB128(&Offset);
-
-                    if (VFPArgs == llvm::ARMBuildAttrs::BaseAAPCS)
-                    {
-                        if (arch_spec.GetTriple().getEnvironment() == llvm::Triple::UnknownEnvironment ||
-                            arch_spec.GetTriple().getEnvironment() == llvm::Triple::EABIHF)
-                            arch_spec.GetTriple().setEnvironment(llvm::Triple::EABI);
-
-                        arch_spec.SetFlags(ArchSpec::eARM_abi_soft_float);
-                    }
-                    else if (VFPArgs == llvm::ARMBuildAttrs::HardFPAAPCS)
-                    {
-                        if (arch_spec.GetTriple().getEnvironment() == llvm::Triple::UnknownEnvironment ||
-                            arch_spec.GetTriple().getEnvironment() == llvm::Triple::EABI)
-                            arch_spec.GetTriple().setEnvironment(llvm::Triple::EABIHF);
-
-                        arch_spec.SetFlags(ArchSpec::eARM_abi_hard_float);
-                    }
-
-                    break;
-                }
-            }
-        }
-    }
-}
 
 //----------------------------------------------------------------------
 // GetSectionHeaderInfo
@@ -1708,7 +1622,8 @@ ObjectFileELF::GetSectionHeaderInfo(SectionHeaderColl &section_headers,
 
                 I->section_name = name;
 
-                if (arch_spec.IsMIPS())
+                if (arch_spec.GetMachine() == llvm::Triple::mips || arch_spec.GetMachine() == llvm::Triple::mipsel
+                    || arch_spec.GetMachine() == llvm::Triple::mips64 || arch_spec.GetMachine() == llvm::Triple::mips64el)
                 {
                     uint32_t arch_flags = arch_spec.GetFlags ();
                     DataExtractor data;
@@ -1717,74 +1632,20 @@ ObjectFileELF::GetSectionHeaderInfo(SectionHeaderColl &section_headers,
 
                         if (section_size && (set_data (data, sheader.sh_offset, section_size) == section_size))
                         {
-                            // MIPS ASE Mask is at offset 12 in MIPS.abiflags section
-                            lldb::offset_t offset = 12; // MIPS ABI Flags Version: 0
-                            arch_flags |= data.GetU32 (&offset);
-
-                            // The floating point ABI is at offset 7
-                            offset = 7;
-                            switch (data.GetU8 (&offset))
-                            {
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_ANY :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_ANY;
-                                    break;
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_DOUBLE :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_DOUBLE;
-                                    break;
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_SINGLE :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_SINGLE;
-                                    break;
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_SOFT :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_SOFT;
-                                    break;
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_OLD_64 :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_OLD_64;
-                                    break;
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_XX :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_XX;
-                                    break;
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_64 :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_64;
-                                    break;
-                                case llvm::Mips::Val_GNU_MIPS_ABI_FP_64A :
-                                    arch_flags |= lldb_private::ArchSpec::eMIPS_ABI_FP_64A;
-                                    break;
-                            }
+                            lldb::offset_t ase_offset = 12; // MIPS ABI Flags Version: 0
+                            arch_flags |= data.GetU32 (&ase_offset);
                         }
                     }
                     // Settings appropriate ArchSpec ABI Flags
-                    switch(header.e_flags & llvm::ELF::EF_MIPS_ABI)
+                    if (header.e_flags & llvm::ELF::EF_MIPS_ABI2)
                     {
-                        case llvm::ELF::EF_MIPS_ABI_O32:
-                            arch_flags |= lldb_private::ArchSpec::eMIPSABI_O32;
-                            break;
-                        case EF_MIPS_ABI_O64:
-                            arch_flags |= lldb_private::ArchSpec::eMIPSABI_O64;
-                            break;
-                        case EF_MIPS_ABI_EABI32:
-                            arch_flags |= lldb_private::ArchSpec::eMIPSABI_EABI32;
-                            break;
-                        case EF_MIPS_ABI_EABI64:
-                            arch_flags |= lldb_private::ArchSpec::eMIPSABI_EABI64;
-                            break;
-                        default:
-                            // ABI Mask doesn't cover N32 and N64 ABI.
-                            if (header.e_ident[EI_CLASS] == llvm::ELF::ELFCLASS64)
-                                arch_flags |= lldb_private::ArchSpec::eMIPSABI_N64;
-                            else if (header.e_flags && llvm::ELF::EF_MIPS_ABI2)
-                                arch_flags |= lldb_private::ArchSpec::eMIPSABI_N32;
-                                break;                    
+                        arch_flags |= lldb_private::ArchSpec::eMIPSABI_N32;
+                    }
+                    else if (header.e_flags & llvm::ELF::EF_MIPS_ABI_O32)
+                    {
+                         arch_flags |= lldb_private::ArchSpec::eMIPSABI_O32;
                     }
                     arch_spec.SetFlags (arch_flags);
-                }
-
-                if (arch_spec.GetMachine() == llvm::Triple::arm || arch_spec.GetMachine() == llvm::Triple::thumb)
-                {
-                    DataExtractor data;
-
-                    if (sheader.sh_type == SHT_ARM_ATTRIBUTES && section_size != 0 && 
-                        set_data(data, sheader.sh_offset, section_size) == section_size)
-                        ParseARMAttributes(data, section_size, arch_spec);
                 }
 
                 if (name == g_sect_name_gnu_debuglink)
@@ -1981,6 +1842,7 @@ ObjectFileELF::CreateSections(SectionList &unified_section_list)
             static ConstString g_sect_name_dwarf_debug_str_dwo (".debug_str.dwo");
             static ConstString g_sect_name_dwarf_debug_str_offsets_dwo (".debug_str_offsets.dwo");
             static ConstString g_sect_name_eh_frame (".eh_frame");
+            static ConstString g_sect_name_swift_ast (".swift_ast");
             static ConstString g_sect_name_arm_exidx (".ARM.exidx");
             static ConstString g_sect_name_arm_extab (".ARM.extab");
             static ConstString g_sect_name_go_symtab (".gosymtab");
@@ -2038,6 +1900,7 @@ ObjectFileELF::CreateSections(SectionList &unified_section_list)
             else if (name == g_sect_name_dwarf_debug_str_dwo)         sect_type = eSectionTypeDWARFDebugStr;
             else if (name == g_sect_name_dwarf_debug_str_offsets_dwo) sect_type = eSectionTypeDWARFDebugStrOffsets;
             else if (name == g_sect_name_eh_frame)                    sect_type = eSectionTypeEHFrame;
+            else if (name == g_sect_name_swift_ast)                   sect_type = eSectionTypeSwiftModules;
             else if (name == g_sect_name_arm_exidx)                   sect_type = eSectionTypeARMexidx;
             else if (name == g_sect_name_arm_extab)                   sect_type = eSectionTypeARMextab;
             else if (name == g_sect_name_go_symtab)                   sect_type = eSectionTypeGoSymtab;
@@ -2194,7 +2057,7 @@ ObjectFileELF::ParseSymbols (Symtab *symtab,
     static ConstString bss_section_name(".bss");
     static ConstString opd_section_name(".opd");    // For ppc64
 
-    // On Android the oatdata and the oatexec symbols in the oat and odex files covers the full
+    // On Android the oatdata and the oatexec symbols in system@framework@boot.oat covers the full
     // .text section what causes issues with displaying unusable symbol name to the user and very
     // slow unwinding speed because the instruction emulation based unwind plans try to emulate all
     // instructions in these symbols. Don't add these symbols to the symbol list as they have no
@@ -2202,8 +2065,7 @@ ObjectFileELF::ParseSymbols (Symtab *symtab,
     // Filtering can't be restricted to Android because this special object file don't contain the
     // note section specifying the environment to Android but the custom extension and file name
     // makes it highly unlikely that this will collide with anything else.
-    ConstString file_extension = m_file.GetFileNameExtension();
-    bool skip_oatdata_oatexec = file_extension == ConstString("oat") || file_extension == ConstString("odex");
+    bool skip_oatdata_oatexec = m_file.GetFilename() == ConstString("system@framework@boot.oat");
 
     ArchSpec arch;
     GetArchitecture(arch);
@@ -2221,12 +2083,10 @@ ObjectFileELF::ParseSymbols (Symtab *symtab,
             break;
 
         const char *symbol_name = strtab_data.PeekCStr(symbol.st_name);
-        if (!symbol_name)
-            symbol_name = "";
 
         // No need to add non-section symbols that have no names
         if (symbol.getType() != STT_SECTION &&
-            (symbol_name == nullptr || symbol_name[0] == '\0'))
+            (symbol_name == NULL || symbol_name[0] == '\0'))
             continue;
 
         // Skipping oatdata and oatexec sections if it is requested. See details above the
@@ -2402,7 +2262,7 @@ ObjectFileELF::ParseSymbols (Symtab *symtab,
             /*
              * MIPS:
              * The bit #0 of an address is used for ISA mode (1 for microMIPS, 0 for MIPS).
-             * This allows processor to switch between microMIPS and MIPS without any need
+             * This allows processer to switch between microMIPS and MIPS without any need
              * for special mode-control register. However, apart from .debug_line, none of
              * the ELF/DWARF sections set the ISA bit (for symbol or section). Use st_other
              * flag to check whether the symbol is microMIPS and then set the address class
@@ -2473,7 +2333,12 @@ ObjectFileELF::ParseSymbols (Symtab *symtab,
 
         bool is_global = symbol.getBinding() == STB_GLOBAL;
         uint32_t flags = symbol.st_other << 8 | symbol.st_info | additional_flags;
-        bool is_mangled = (symbol_name[0] == '_' && symbol_name[1] == 'Z');
+
+        bool is_mangled = false;
+        if (symbol_name && symbol_name[0] && (symbol_name[0] == '_' && symbol_name[1] == 'Z'))
+        {
+            is_mangled = true;
+        }
 
         llvm::StringRef symbol_ref(symbol_name);
 
@@ -2481,6 +2346,13 @@ ObjectFileELF::ParseSymbols (Symtab *symtab,
         size_t version_pos = symbol_ref.find('@');
         bool has_suffix = version_pos != llvm::StringRef::npos;
         llvm::StringRef symbol_bare = symbol_ref.substr(0, version_pos);
+
+        Mangled guess_the_language(ConstString(symbol_bare), true);
+        if (guess_the_language.GuessLanguage() != lldb::eLanguageTypeUnknown)
+        {
+            is_mangled = true;
+        }
+
         Mangled mangled(ConstString(symbol_bare), is_mangled);
 
         // Now append the suffix back to mangled and unmangled names. Only do it if the
@@ -2498,6 +2370,13 @@ ObjectFileELF::ParseSymbols (Symtab *symtab,
             if (!demangled_name.empty())
                 mangled.SetDemangledName( ConstString((demangled_name + suffix).str()) );
         }
+        
+        if (symbol_name &&
+            symbol_name[0] == '_' &&
+            symbol_name[1] == 'T' &&
+            symbol_name[2] == 'M' &&
+            symbol_name[3] != 0 )
+                symbol_type = eSymbolTypeMetadata;
 
         // In ELF all symbol should have a valid size but it is not true for some function symbols
         // coming from hand written assembly. As none of the function symbol should have 0 size we
@@ -2656,10 +2535,7 @@ GetPltEntrySizeAndOffset(const ELFSectionHeader* rel_hdr, const ELFSectionHeader
     elf_xword plt_entsize = plt_hdr->sh_addralign ?
         llvm::alignTo (plt_hdr->sh_entsize, plt_hdr->sh_addralign) : plt_hdr->sh_entsize;
 
-    // Some linkers e.g ld for arm, fill plt_hdr->sh_entsize field incorrectly.
-    // PLT entries relocation code in general requires multiple instruction and
-    // should be greater than 4 bytes in most cases. Try to guess correct size just in case.
-    if (plt_entsize <= 4)
+    if (plt_entsize == 0)
     {
         // The linker haven't set the plt_hdr->sh_entsize field. Try to guess the size of the plt
         // entries based on the number of entries and the size of the plt section with the
@@ -2987,7 +2863,7 @@ ObjectFileELF::GetSymtab()
             return NULL;
 
         uint64_t symbol_id = 0;
-        std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+        lldb_private::Mutex::Locker locker(module_sp->GetMutex());
 
         // Sharable objects and dynamic executables usually have 2 distinct symbol
         // tables, one named ".symtab", and the other ".dynsym". The dynsym is a smaller
@@ -3151,7 +3027,7 @@ ObjectFileELF::Dump(Stream *s)
         return;
     }
 
-    std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
+    lldb_private::Mutex::Locker locker(module_sp->GetMutex());
     s->Printf("%p: ", static_cast<void *>(this));
     s->Indent();
     s->PutCString("ObjectFileELF");

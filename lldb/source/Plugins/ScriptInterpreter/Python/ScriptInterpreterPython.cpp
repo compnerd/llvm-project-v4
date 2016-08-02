@@ -1551,12 +1551,10 @@ ScriptInterpreterPython::OSPlugin_RegisterInfo(StructuredData::ObjectSP os_plugi
         PyErr_Print();
         PyErr_Clear();
     }
-    if (py_return.get())
-    {
-        PythonDictionary result_dict(PyRefType::Borrowed, py_return.get());
-        return result_dict.CreateStructuredDictionary();
-    }
-    return StructuredData::DictionarySP();
+    assert(PythonDictionary::Check(py_return.get()) && "get_register_info returned unknown object type!");
+
+    PythonDictionary result_dict(PyRefType::Borrowed, py_return.get());
+    return result_dict.CreateStructuredDictionary();
 }
 
 StructuredData::ArraySP
@@ -1609,12 +1607,10 @@ ScriptInterpreterPython::OSPlugin_ThreadsInfo(StructuredData::ObjectSP os_plugin
         PyErr_Clear();
     }
 
-    if (py_return.get())
-    {
-        PythonList result_list(PyRefType::Borrowed, py_return.get());
-        return result_list.CreateStructuredArray();
-    }
-    return StructuredData::ArraySP();
+    assert(PythonList::Check(py_return.get()) && "get_thread_info returned unknown object type!");
+
+    PythonList result_list(PyRefType::Borrowed, py_return.get());
+    return result_list.CreateStructuredArray();
 }
 
 // GetPythonValueFormatString provides a system independent type safe way to
@@ -1692,12 +1688,10 @@ ScriptInterpreterPython::OSPlugin_RegisterContextData(StructuredData::ObjectSP o
         PyErr_Clear();
     }
 
-    if (py_return.get())
-    {
-        PythonBytes result(PyRefType::Borrowed, py_return.get());
-        return result.CreateStructuredString();
-    }
-    return StructuredData::StringSP();
+    assert(PythonBytes::Check(py_return.get()) && "get_register_data returned unknown object type!");
+
+    PythonBytes result(PyRefType::Borrowed, py_return.get());
+    return result.CreateStructuredString();
 }
 
 StructuredData::DictionarySP
@@ -1752,12 +1746,10 @@ ScriptInterpreterPython::OSPlugin_CreateThread(StructuredData::ObjectSP os_plugi
         PyErr_Clear();
     }
 
-    if (py_return.get())
-    {
-        PythonDictionary result_dict(PyRefType::Borrowed, py_return.get());
-        return result_dict.CreateStructuredDictionary();
-    }
-    return StructuredData::DictionarySP();
+    assert(PythonDictionary::Check(py_return.get()) && "create_thread returned unknown object type!");
+
+    PythonDictionary result_dict(PyRefType::Borrowed, py_return.get());
+    return result_dict.CreateStructuredDictionary();
 }
 
 StructuredData::ObjectSP
@@ -2620,7 +2612,7 @@ ScriptInterpreterPython::LoadScriptingModule(const char *pathname, bool can_relo
         
         StreamString command_stream;
 
-        // Before executing Python code, lock the GIL.
+        // Before executing Pyton code, lock the GIL.
         Locker py_lock (this,
                         Locker::AcquireLock      | (init_session ? Locker::InitSession     : 0) | Locker::NoSTDIN,
                         Locker::FreeAcquiredLock | (init_session ? Locker::TearDownSession : 0));
@@ -2641,10 +2633,9 @@ ScriptInterpreterPython::LoadScriptingModule(const char *pathname, bool can_relo
                  target_file.GetFileType() == FileSpec::eFileTypeRegular ||
                  target_file.GetFileType() == FileSpec::eFileTypeSymbolicLink)
         {
-            std::string directory = target_file.GetDirectory().GetCString();
-            replace_all(directory, "\\", "\\\\");
-            replace_all(directory, "'", "\\'");
-
+            std::string directory(target_file.GetDirectory().GetCString());
+            replace_all(directory,"'","\\'");
+            
             // now make sure that Python has "directory" in the search path
             StreamString command_stream;
             command_stream.Printf("if not (sys.path.__contains__('%s')):\n    sys.path.insert(1,'%s');\n\n",
@@ -2656,7 +2647,7 @@ ScriptInterpreterPython::LoadScriptingModule(const char *pathname, bool can_relo
                 error.SetErrorString("Python sys.path handling failed");
                 return false;
             }
-
+            
             // strip .py or .pyc extension
             ConstString extension = target_file.GetFileNameExtension();
             if (extension)
@@ -2707,8 +2698,8 @@ ScriptInterpreterPython::LoadScriptingModule(const char *pathname, bool can_relo
                 command_stream.Printf("reload_module(%s)",basename.c_str());
         }
         else
-            command_stream.Printf("import %s", basename.c_str());
-
+            command_stream.Printf("import %s",basename.c_str());
+        
         error = ExecuteMultipleLines(command_stream.GetData(), ScriptInterpreter::ExecuteScriptOptions().SetEnableIO(false).SetSetLLDBGlobals(false));
         if (error.Fail())
             return false;

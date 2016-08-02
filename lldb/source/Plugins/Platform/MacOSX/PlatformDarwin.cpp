@@ -1015,7 +1015,7 @@ PlatformDarwin::ARMGetSupportedArchitectureAtIndex (uint32_t idx, ArchSpec &arch
 const char *
 PlatformDarwin::GetDeveloperDirectory()
 {
-    std::lock_guard<std::mutex> guard(m_mutex);
+    Mutex::Locker locker (m_mutex);
     if (m_developer_directory.empty())
     {
         bool developer_dir_path_valid = false;
@@ -1572,10 +1572,10 @@ PlatformDarwin::AddClangModuleCompilationOptionsForSDKType (Target *target, std:
     FileSpec sysroot_spec;
     // Scope for mutex locker below
     {
-        std::lock_guard<std::mutex> guard(m_mutex);
+        Mutex::Locker locker (m_mutex);
         sysroot_spec = GetSDKDirectoryForModules(sdk_type);
     }
-
+    
     if (sysroot_spec.IsDirectory())
     {
         options.push_back("-isysroot");
@@ -1694,6 +1694,64 @@ PlatformDarwin::LocateExecutable (const char *basename)
     }
 
     return FileSpec();
+}
+
+lldb::ModuleSP
+PlatformDarwin::GetUnitTestModule (lldb_private::ModuleList &modules)
+{
+    ConstString test_bundle_executable;
+    
+    for (size_t mi = 0, num_images = modules.GetSize(); mi != num_images; ++mi)
+    {
+        ModuleSP module_sp = modules.GetModuleAtIndex(mi);
+        
+        std::string module_path = module_sp->GetFileSpec().GetPath();
+        
+        const char deep_substr[] = ".xctest/Contents/";
+        size_t pos = module_path.rfind(deep_substr);
+        if (pos == std::string::npos)
+        {
+            const char flat_substr[] = ".xctest/";
+            pos = module_path.rfind(flat_substr);
+            
+            if (pos == std::string::npos)
+            {
+                continue;
+            }
+            else
+            {
+                module_path.erase(pos + strlen(flat_substr));
+            }
+        }
+        else
+        {
+            module_path.erase(pos + strlen(deep_substr));
+        }
+        
+        if (!test_bundle_executable)
+        {
+            module_path.append("Info.plist");
+            
+            ApplePropertyList info_plist(module_path.c_str());
+            
+            std::string cf_bundle_executable;
+            if (info_plist.GetValueAsString("CFBundleExecutable", cf_bundle_executable))
+            {
+                test_bundle_executable = ConstString(cf_bundle_executable);
+            }
+            else
+            {
+                return ModuleSP();
+            }
+        }
+        
+        if (test_bundle_executable && module_sp->GetFileSpec().GetFilename() == test_bundle_executable)
+        {
+            return module_sp;
+        }
+    }
+    
+    return ModuleSP();
 }
 
 lldb_private::Error

@@ -15,6 +15,7 @@
 #include "lldb/lldb-private.h"
 #include "lldb/Core/SearchFilter.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Host/FileSpec.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Target/Target.h"
 
@@ -130,7 +131,7 @@ SearchFilter::SearchInModuleList (Searcher &searcher, ModuleList &modules)
         searcher.SearchCallback(*this, empty_sc, nullptr, false);
     else
     {
-        std::lock_guard<std::recursive_mutex> guard(modules.GetMutex());
+        Mutex::Locker modules_locker(modules.GetMutex());
         const size_t numModules = modules.GetSize();
 
         for (size_t i = 0; i < numModules; i++)
@@ -172,8 +173,8 @@ SearchFilter::DoModuleIteration (const SymbolContext &context, Searcher &searche
         else
         {
             const ModuleList &target_images = m_target_sp->GetImages();
-            std::lock_guard<std::recursive_mutex> guard(target_images.GetMutex());
-
+            Mutex::Locker modules_locker(target_images.GetMutex());
+            
             size_t n_modules = target_images.GetSize();
             for (size_t i = 0; i < n_modules; i++)
             {
@@ -363,8 +364,8 @@ SearchFilterByModule::Search (Searcher &searcher)
     // find the ones that match the file name.
 
     const ModuleList &target_modules = m_target_sp->GetImages();
-    std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
-
+    Mutex::Locker modules_locker (target_modules.GetMutex());
+    
     const size_t num_modules = target_modules.GetSize ();
     for (size_t i = 0; i < num_modules; i++)
     {
@@ -502,8 +503,8 @@ SearchFilterByModuleList::Search (Searcher &searcher)
     // find the ones that match the file name.
 
     const ModuleList &target_modules = m_target_sp->GetImages();
-    std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
-
+    Mutex::Locker modules_locker (target_modules.GetMutex());
+    
     const size_t num_modules = target_modules.GetSize ();
     for (size_t i = 0; i < num_modules; i++)
     {
@@ -621,20 +622,21 @@ SearchFilterByModuleListAndCU::CompUnitPasses (FileSpec &fileSpec)
 bool
 SearchFilterByModuleListAndCU::CompUnitPasses (CompileUnit &compUnit)
 {
-    bool in_cu_list = m_cu_spec_list.FindFileIndex(0, compUnit, false) != UINT32_MAX;
+    // If it comes from "<stdin>" then we should check it
+    static ConstString g_stdin_filename("<stdin>");
+    bool in_cu_list = (m_cu_spec_list.FindFileIndex(0, compUnit, false) != UINT32_MAX) || (compUnit.GetFilename() == g_stdin_filename);
     if (in_cu_list)
     {
         ModuleSP module_sp(compUnit.GetModule());
         if (module_sp)
         {
-            bool module_passes = SearchFilterByModuleList::ModulePasses(module_sp);
+            bool module_passes = ModulePasses(module_sp);
             return module_passes;
         }
         else
             return true;
     }
-    else
-        return false;
+    return false;
 }
 
 void
@@ -654,16 +656,16 @@ SearchFilterByModuleListAndCU::Search (Searcher &searcher)
     // filespec that passes.  Otherwise, we need to go through all modules and
     // find the ones that match the file name.
 
-    ModuleList matching_modules;
     const ModuleList &target_images = m_target_sp->GetImages();
-    std::lock_guard<std::recursive_mutex> guard(target_images.GetMutex());
-
+    Mutex::Locker modules_locker(target_images.GetMutex());
+    
     const size_t num_modules = target_images.GetSize ();
     bool no_modules_in_filter = m_module_spec_list.GetSize() == 0;
     for (size_t i = 0; i < num_modules; i++)
     {
         lldb::ModuleSP module_sp = target_images.GetModuleAtIndexUnlocked(i);
         if (no_modules_in_filter ||
+            ModulePasses (module_sp) ||
             m_module_spec_list.FindFileIndex(0, module_sp->GetFileSpec(), false) != UINT32_MAX)
         {
             SymbolContext matchingContext(m_target_sp, module_sp);

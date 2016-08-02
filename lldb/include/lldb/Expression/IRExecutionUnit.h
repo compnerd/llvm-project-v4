@@ -26,6 +26,7 @@
 #include "lldb/lldb-private.h"
 #include "lldb/Core/DataBufferHeap.h"
 #include "lldb/Expression/IRMemoryMap.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
 
@@ -137,7 +138,19 @@ public:
     
     lldb::ModuleSP
     GetJITModule ();
-        
+    
+    lldb::ModuleSP
+    CreateJITModule (const char *name,
+                     const FileSpec *limit_file_ptr = NULL,
+                     uint32_t limit_start_line = 0,
+                     uint32_t limit_end_line = 0);
+    
+    //------------------------------------------------------------------
+    /// Accessor for the mutex that guards LLVM::getGlobalContext()
+    //------------------------------------------------------------------
+    static Mutex &
+    GetLLVMGlobalContextMutex ();
+
     lldb::addr_t
     FindSymbol(const ConstString &name);
     
@@ -383,6 +396,10 @@ private:
         
         void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr, size_t Size) override {
         }
+
+        virtual void deregisterEHFrames(uint8_t *Addr, uint64_t LoadAddr, size_t Size) override {
+            return;
+        }
         
         uint64_t getSymbolAddress(const std::string &Name) override;
 
@@ -453,6 +470,7 @@ private:
     std::unique_ptr<llvm::LLVMContext>       m_context_ap;
     std::unique_ptr<llvm::ExecutionEngine>   m_execution_engine_ap;
     std::unique_ptr<llvm::Module>            m_module_ap;            ///< Holder for the module until it's been handed off
+    lldb::ModuleWP                          m_jit_module_wp;
     llvm::Module                           *m_module;               ///< Owned by the execution engine
     std::vector<std::string>                m_cpu_features;
     std::vector<JittedFunction>             m_jitted_functions;     ///< A vector of all functions that have been JITted into machine code

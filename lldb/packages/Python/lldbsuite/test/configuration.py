@@ -76,6 +76,8 @@ count = 1
 # => archs=['x86_64', 'i386'] and "-C gcc -C clang" => compilers=['gcc', 'clang'].
 archs = None        # Must be initialized after option parsing
 compilers = None    # Must be initialized after option parsing
+swiftCompiler = None
+swiftLibrary = None
 
 # The arch might dictate some specific CFLAGS to be passed to the toolchain to build
 # the inferior programs.  The global variable cflags_extras provides a hook to do
@@ -99,15 +101,6 @@ regexp = None
 # own file under a session directory named after the timestamp of the test suite
 # run.  Use '-s session-dir-name' to specify a specific dir name.
 sdir_name = None
-
-# Valid options:
-# f - test file name (without extension)
-# n - test class name
-# m - test method name
-# a - architecture
-# c - compiler path
-# The default is to write all fields.
-session_file_format = 'fnmac'
 
 # Set this flag if there is any session info dumped during the test run.
 sdir_has_content = False

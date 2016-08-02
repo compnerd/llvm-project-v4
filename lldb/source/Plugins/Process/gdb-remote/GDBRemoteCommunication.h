@@ -12,8 +12,6 @@
 
 // C Includes
 // C++ Includes
-#include <condition_variable>
-#include <mutex>
 #include <string>
 #include <queue>
 #include <vector>
@@ -24,6 +22,7 @@
 #include "lldb/Core/Communication.h"
 #include "lldb/Core/Listener.h"
 #include "lldb/Host/HostThread.h"
+#include "lldb/Host/Mutex.h"
 #include "lldb/Host/Predicate.h"
 #include "lldb/Host/TimeValue.h"
 #include "lldb/Interpreter/Args.h"
@@ -115,7 +114,7 @@ public:
                         size_t payload_length);
 
     bool
-    GetSequenceMutex(std::unique_lock<std::recursive_mutex> &lock, const char *failure_message = nullptr);
+    GetSequenceMutex(Mutex::Locker& locker, const char *failure_message = nullptr);
 
     PacketType
     CheckForPacket (const uint8_t *src, 
@@ -286,9 +285,9 @@ protected:
     uint32_t m_echo_number;
     LazyBool m_supports_qEcho;
 #ifdef ENABLE_MUTEX_ERROR_CHECKING
-#error TrackingMutex is no longer supported
+    TrackingMutex m_sequence_mutex;
 #else
-    std::recursive_mutex m_sequence_mutex; // Restrict access to sending/receiving packets to a single thread at a time
+    Mutex m_sequence_mutex;    // Restrict access to sending/receiving packets to a single thread at a time
 #endif
     Predicate<bool> m_public_is_running;
     Predicate<bool> m_private_is_running;
@@ -321,7 +320,7 @@ protected:
                                                 bool sync_on_timeout);
 
     bool
-    WaitForNotRunningPrivate(const std::chrono::microseconds &timeout);
+    WaitForNotRunningPrivate (const TimeValue *timeout_ptr);
 
     bool
     CompressionIsEnabled ()
@@ -365,8 +364,8 @@ protected:
 
 private:
     std::queue<StringExtractorGDBRemote> m_packet_queue; // The packet queue
-    std::mutex m_packet_queue_mutex;                     // Mutex for accessing queue
-    std::condition_variable m_condition_queue_not_empty; // Condition variable to wait for packets
+    lldb_private::Mutex m_packet_queue_mutex;            // Mutex for accessing queue
+    Condition m_condition_queue_not_empty;               // Condition variable to wait for packets
 
     HostThread m_listen_thread;
     std::string m_listen_url;

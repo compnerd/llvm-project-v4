@@ -10,7 +10,6 @@
 // C Includes
 // C++ Includes
 #include <algorithm>
-#include <set>
 #include <string>
 
 // Other libraries and framework includes
@@ -105,20 +104,7 @@ SBFrame::SetFrameSP (const StackFrameSP &lldb_object_sp)
 bool
 SBFrame::IsValid() const
 {
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
-
-    Target *target = exe_ctx.GetTargetPtr();
-    Process *process = exe_ctx.GetProcessPtr();
-    if (target && process)
-    {
-        Process::StopLocker stop_locker;
-        if (stop_locker.TryLock(&process->GetRunLock()))
-        return GetFrameSP().get() != nullptr;
-    }
-    
-    // Without a target & process we can't have a valid stack frame.
-    return false;
+    return GetFrameSP().get() != nullptr;
 }
 
 SBSymbolContext
@@ -126,8 +112,8 @@ SBFrame::GetSymbolContext (uint32_t resolve_scope) const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBSymbolContext sb_sym_ctx;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -169,8 +155,8 @@ SBFrame::GetModule () const
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBModule sb_module;
     ModuleSP module_sp;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -212,8 +198,8 @@ SBFrame::GetCompileUnit () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBCompileUnit sb_comp_unit;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -253,8 +239,8 @@ SBFrame::GetFunction () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBFunction sb_function;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -294,8 +280,8 @@ SBFrame::GetSymbol () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBSymbol sb_symbol;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -334,8 +320,8 @@ SBFrame::GetBlock () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBBlock sb_block;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -374,8 +360,8 @@ SBBlock
 SBFrame::GetFrameBlock () const
 {
     SBBlock sb_block;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -415,8 +401,8 @@ SBFrame::GetLineEntry () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBLineEntry sb_line_entry;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -455,8 +441,8 @@ SBFrame::GetFrameID () const
 {
     uint32_t frame_idx = UINT32_MAX;
 
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     if (frame)
@@ -472,8 +458,8 @@ SBFrame::GetFrameID () const
 lldb::addr_t
 SBFrame::GetCFA () const
 {
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     if (frame)
@@ -486,8 +472,8 @@ SBFrame::GetPC () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     addr_t addr = LLDB_INVALID_ADDRESS;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -527,8 +513,8 @@ SBFrame::SetPC (addr_t new_pc)
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     bool ret_val = false;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -568,8 +554,8 @@ SBFrame::GetSP () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     addr_t addr = LLDB_INVALID_ADDRESS;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -608,8 +594,8 @@ SBFrame::GetFP () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     addr_t addr = LLDB_INVALID_ADDRESS;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -648,8 +634,8 @@ SBFrame::GetPCAddress () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     SBAddress sb_addr;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
@@ -693,8 +679,8 @@ lldb::SBValue
 SBFrame::GetValueForVariablePath (const char *var_path)
 {
     SBValue sb_value;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
@@ -710,6 +696,7 @@ lldb::SBValue
 SBFrame::GetValueForVariablePath (const char *var_path, DynamicValueType use_dynamic)
 {
     SBValue sb_value;
+    Mutex::Locker api_locker;
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     if (var_path == nullptr || var_path[0] == '\0')
     {
@@ -717,9 +704,8 @@ SBFrame::GetValueForVariablePath (const char *var_path, DynamicValueType use_dyn
             log->Printf ("SBFrame::GetValueForVariablePath called with empty variable path.");
         return sb_value;
     }
-
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -760,8 +746,8 @@ SBValue
 SBFrame::FindVariable (const char *name)
 {
     SBValue value;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
@@ -788,8 +774,8 @@ SBFrame::FindVariable (const char *name, lldb::DynamicValueType use_dynamic)
     }
 
     ValueObjectSP value_sp;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -852,8 +838,8 @@ SBValue
 SBFrame::FindValue (const char *name, ValueType value_type)
 {
     SBValue value;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
@@ -879,8 +865,8 @@ SBFrame::FindValue (const char *name, ValueType value_type, lldb::DynamicValueTy
     }
 
     ValueObjectSP value_sp;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1035,8 +1021,8 @@ SBFrame::GetThread () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
 
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     ThreadSP thread_sp (exe_ctx.GetThreadSP());
     SBThread sb_thread (thread_sp);
@@ -1058,8 +1044,8 @@ SBFrame::Disassemble () const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     const char *disassembly = nullptr;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1101,8 +1087,8 @@ SBFrame::GetVariables (bool arguments,
                        bool in_scope_only)
 {
     SBValueList value_list;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
@@ -1131,8 +1117,8 @@ SBFrame::GetVariables (bool arguments,
                        bool in_scope_only,
                        lldb::DynamicValueType  use_dynamic)
 {
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     Target *target = exe_ctx.GetTargetPtr();
     const bool include_runtime_support_values = target ? target->GetDisplayRuntimeSupportValues() : false;
@@ -1152,8 +1138,8 @@ SBFrame::GetVariables (const lldb::SBVariablesOptions& options)
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
 
     SBValueList value_list;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1170,8 +1156,7 @@ SBFrame::GetVariables (const lldb::SBVariablesOptions& options)
                      arguments, locals,
                      statics, in_scope_only,
                      include_runtime_support_values, use_dynamic);
-
-    std::set<VariableSP> variable_set;
+    
     Process *process = exe_ctx.GetProcessPtr();
     if (target && process)
     {
@@ -1216,12 +1201,6 @@ SBFrame::GetVariables (const lldb::SBVariablesOptions& options)
                                 }
                                 if (add_variable)
                                 {
-                                    // Only add variables once so we don't end up with duplicates
-                                    if (variable_set.find(variable_sp) == variable_set.end())
-                                        variable_set.insert(variable_sp);
-                                    else
-                                        continue;
-
                                     if (in_scope_only && !variable_sp->IsInScope(frame))
                                         continue;
 
@@ -1268,8 +1247,8 @@ SBFrame::GetRegisters ()
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
 
     SBValueList value_list;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1320,8 +1299,8 @@ SBFrame::FindRegister (const char *name)
 
     SBValue result;
     ValueObjectSP value_sp;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1379,8 +1358,8 @@ SBFrame::GetDescription (SBStream &description)
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     Stream &strm = description.ref();
 
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1418,8 +1397,8 @@ SBValue
 SBFrame::EvaluateExpression (const char *expr)
 {
     SBValue result;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
@@ -1446,8 +1425,8 @@ SBFrame::EvaluateExpression (const char *expr, lldb::DynamicValueType fetch_dyna
     options.SetFetchDynamicValue (fetch_dynamic_value);
     options.SetUnwindOnError (true);
     options.SetIgnoreBreakpoints (true);
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
@@ -1462,8 +1441,8 @@ SBValue
 SBFrame::EvaluateExpression (const char *expr, lldb::DynamicValueType fetch_dynamic_value, bool unwind_on_error)
 {
     SBExpressionOptions options;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     options.SetFetchDynamicValue (fetch_dynamic_value);
     options.SetUnwindOnError (unwind_on_error);
@@ -1482,9 +1461,7 @@ SBFrame::EvaluateExpression (const char *expr, const SBExpressionOptions &option
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
 
-#ifndef LLDB_DISABLE_PYTHON
     Log *expr_log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_EXPRESSIONS));
-#endif
 
     ExpressionResults exe_results = eExpressionSetupError;
     SBValue expr_result;
@@ -1498,8 +1475,8 @@ SBFrame::EvaluateExpression (const char *expr, const SBExpressionOptions &option
 
     ValueObjectSP expr_value_sp;
 
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     if (log)
         log->Printf ("SBFrame()::EvaluateExpression (expr=\"%s\")...", expr);
@@ -1570,8 +1547,8 @@ bool
 SBFrame::IsInlined() const
 {
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1616,8 +1593,8 @@ SBFrame::GetFunctionName() const
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     const char *name = nullptr;
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();
@@ -1674,9 +1651,8 @@ SBFrame::GetDisplayFunctionName()
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     const char *name = nullptr;
-
-    std::unique_lock<std::recursive_mutex> lock;
-    ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+    Mutex::Locker api_locker;
+    ExecutionContext exe_ctx (m_opaque_sp.get(), api_locker);
 
     StackFrame *frame = nullptr;
     Target *target = exe_ctx.GetTargetPtr();

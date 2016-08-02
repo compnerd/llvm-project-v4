@@ -33,30 +33,31 @@ Communication::GetStaticBroadcasterClass ()
     return class_name;
 }
 
-Communication::Communication(const char *name)
-    : Broadcaster(nullptr, name),
-      m_connection_sp(),
-      m_read_thread_enabled(false),
-      m_read_thread_did_exit(false),
-      m_bytes(),
-      m_bytes_mutex(),
-      m_write_mutex(),
-      m_synchronize_mutex(),
-      m_callback(nullptr),
-      m_callback_baton(nullptr),
-      m_close_on_eof(true)
+Communication::Communication(const char *name) :
+    Broadcaster(nullptr, name),
+    m_connection_sp(),
+    m_read_thread_enabled(false),
+    m_read_thread_did_exit(false),
+    m_bytes(),
+    m_bytes_mutex(Mutex::eMutexTypeRecursive),
+    m_write_mutex(Mutex::eMutexTypeNormal),
+    m_synchronize_mutex(Mutex::eMutexTypeNormal),
+    m_callback(nullptr),
+    m_callback_baton(nullptr),
+    m_close_on_eof(true)
 
 {
-    lldb_private::LogIfAnyCategoriesSet(LIBLLDB_LOG_OBJECT | LIBLLDB_LOG_COMMUNICATION,
-                                        "%p Communication::Communication (name = %s)", this, name);
+    lldb_private::LogIfAnyCategoriesSet (LIBLLDB_LOG_OBJECT | LIBLLDB_LOG_COMMUNICATION,
+                                 "%p Communication::Communication (name = %s)",
+                                 this, name);
 
-    SetEventName(eBroadcastBitDisconnected, "disconnected");
-    SetEventName(eBroadcastBitReadThreadGotBytes, "got bytes");
-    SetEventName(eBroadcastBitReadThreadDidExit, "read thread did exit");
-    SetEventName(eBroadcastBitReadThreadShouldExit, "read thread should exit");
-    SetEventName(eBroadcastBitPacketAvailable, "packet available");
-    SetEventName(eBroadcastBitNoMorePendingInput, "no more pending input");
-
+    SetEventName (eBroadcastBitDisconnected, "disconnected");
+    SetEventName (eBroadcastBitReadThreadGotBytes, "got bytes");
+    SetEventName (eBroadcastBitReadThreadDidExit, "read thread did exit");
+    SetEventName (eBroadcastBitReadThreadShouldExit, "read thread should exit");
+    SetEventName (eBroadcastBitPacketAvailable, "packet available");
+    SetEventName (eBroadcastBitNoMorePendingInput, "no more pending input");
+    
     CheckInWithManager();
 }
 
@@ -156,14 +157,18 @@ Communication::Read (void *dst, size_t dst_len, uint32_t timeout_usec, Connectio
             status = eConnectionStatusNoConnection;
             return 0;
         }
+        // Set the timeout appropriately
+        TimeValue timeout_time;
+        if (timeout_usec != UINT32_MAX)
+        {
+            timeout_time = TimeValue::Now();
+            timeout_time.OffsetWithMicroSeconds (timeout_usec);
+        }
 
         ListenerSP listener_sp(Listener::MakeListener("Communication::Read"));
         listener_sp->StartListeningForEvents (this, eBroadcastBitReadThreadGotBytes | eBroadcastBitReadThreadDidExit);
         EventSP event_sp;
-        std::chrono::microseconds timeout = std::chrono::microseconds(0);
-        if (timeout_usec != UINT32_MAX)
-            timeout = std::chrono::microseconds(timeout_usec);
-        while (listener_sp->WaitForEvent(timeout, event_sp))
+        while (listener_sp->WaitForEvent (timeout_time.IsValid() ? &timeout_time : nullptr, event_sp))
         {
             const uint32_t event_type = event_sp->GetType();
             if (event_type & eBroadcastBitReadThreadGotBytes)
@@ -200,7 +205,7 @@ Communication::Write (const void *src, size_t src_len, ConnectionStatus &status,
 {
     lldb::ConnectionSP connection_sp (m_connection_sp);
 
-    std::lock_guard<std::mutex> guard(m_write_mutex);
+    Mutex::Locker locker(m_write_mutex);
     lldb_private::LogIfAnyCategoriesSet (LIBLLDB_LOG_COMMUNICATION,
                                          "%p Communication::Write (src = %p, src_len = %" PRIu64 ") connection = %p",
                                          this, 
@@ -272,7 +277,7 @@ Communication::JoinReadThread (Error *error_ptr)
 size_t
 Communication::GetCachedBytes (void *dst, size_t dst_len)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_bytes_mutex);
+    Mutex::Locker locker(m_bytes_mutex);
     if (!m_bytes.empty())
     {
         // If DST is nullptr and we have a thread, then return the number
@@ -306,7 +311,7 @@ Communication::AppendBytesToCache (const uint8_t * bytes, size_t len, bool broad
     }
     else if (bytes != nullptr && len > 0)
     {
-        std::lock_guard<std::recursive_mutex> guard(m_bytes_mutex);
+        Mutex::Locker locker(m_bytes_mutex);
         m_bytes.append ((const char *)bytes, len);
         if (broadcast)
             BroadcastEventIfUnique (eBroadcastBitReadThreadGotBytes);
@@ -420,7 +425,7 @@ void
 Communication::SynchronizeWithReadThread ()
 {
     // Only one thread can do the synchronization dance at a time.
-    std::lock_guard<std::mutex> guard(m_synchronize_mutex);
+    Mutex::Locker locker(m_synchronize_mutex);
 
     // First start listening for the synchronization event.
     ListenerSP listener_sp(Listener::MakeListener("Communication::SyncronizeWithReadThread"));
@@ -435,7 +440,7 @@ Communication::SynchronizeWithReadThread ()
 
     // Wait for the synchronization event.
     EventSP event_sp;
-    listener_sp->WaitForEvent(std::chrono::microseconds(0), event_sp);
+    listener_sp->WaitForEvent(nullptr, event_sp);
 }
 
 void

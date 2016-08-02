@@ -50,6 +50,7 @@ import sys
 import time
 import traceback
 import types
+import lldb
 
 # Third-party modules
 import unittest2
@@ -65,6 +66,7 @@ from . import decorators
 from . import lldbplatformutil
 from . import lldbtest_config
 from . import lldbutil
+from . import lock
 from . import test_categories
 from lldbsuite.support import encoded_file
 from lldbsuite.support import funcutils
@@ -502,7 +504,6 @@ class Base(unittest2.TestCase):
             os.chdir(os.path.join(os.environ["LLDB_TEST"], cls.mydir))
 
         if debug_confirm_directory_exclusivity:
-            import lock
             cls.dir_lock = lock.Lock(os.path.join(full_dir, ".dirlock"))
             try:
                 cls.dir_lock.try_acquire()
@@ -583,7 +584,7 @@ class Base(unittest2.TestCase):
             else:
                 categories = "default"
 
-            if channel == "gdb-remote" and lldb.remote_platform is None:
+            if channel == "gdb-remote":
                 # communicate gdb-remote categories to debugserver
                 os.environ["LLDB_DEBUGSERVER_LOG_FLAGS"] = categories
 
@@ -592,17 +593,15 @@ class Base(unittest2.TestCase):
                 raise Exception('log enable failed (check LLDB_LOG_OPTION env variable)')
 
         # Communicate log path name to debugserver & lldb-server
-        # For remote debugging, these variables need to be set when starting the platform
-        # instance.
-        if lldb.remote_platform is None:
-            server_log_path = "{}-server.log".format(log_basename)
-            open(server_log_path, 'w').close()
-            os.environ["LLDB_DEBUGSERVER_LOG_FILE"] = server_log_path
+        server_log_path = "{}-server.log".format(log_basename)
+        open(server_log_path, 'w').close()
+        os.environ["LLDB_DEBUGSERVER_LOG_FILE"] = server_log_path
 
-            # Communicate channels to lldb-server
-            os.environ["LLDB_SERVER_LOG_CHANNELS"] = ":".join(lldbtest_config.channels)
+        # Communicate channels to lldb-server
+        os.environ["LLDB_SERVER_LOG_CHANNELS"] = ":".join(lldbtest_config.channels)
 
-        self.addTearDownHook(self.disableLogChannelsForCurrentTest)
+        if len(lldbtest_config.channels) == 0:
+            return
 
     def disableLogChannelsForCurrentTest(self):
         # close all log files that we opened
@@ -612,42 +611,6 @@ class Base(unittest2.TestCase):
             self.ci.HandleCommand("log disable " + channel, self.res)
             if not self.res.Succeeded():
                 raise Exception('log disable failed (check LLDB_LOG_OPTION env variable)')
-
-        # Retrieve the server log (if any) from the remote system. It is assumed the server log
-        # is writing to the "server.log" file in the current test directory. This can be
-        # achieved by setting LLDB_DEBUGSERVER_LOG_FILE="server.log" when starting remote
-        # platform. If the remote logging is not enabled, then just let the Get() command silently
-        # fail.
-        if lldb.remote_platform:
-            lldb.remote_platform.Get(lldb.SBFileSpec("server.log"),
-                    lldb.SBFileSpec(self.getLogBasenameForCurrentTest()+"-server.log"))
-
-    def setPlatformWorkingDir(self):
-        if not lldb.remote_platform or not configuration.lldb_platform_working_dir:
-            return
-
-        remote_test_dir = lldbutil.join_remote_paths(
-                configuration.lldb_platform_working_dir,
-                self.getArchitecture(),
-                str(self.test_number),
-                self.mydir)
-        error = lldb.remote_platform.MakeDirectory(remote_test_dir, 448) # 448 = 0o700
-        if error.Success():
-            lldb.remote_platform.SetWorkingDirectory(remote_test_dir)
-
-            # This function removes all files from the current working directory while leaving
-            # the directories in place. The cleaup is required to reduce the disk space required
-            # by the test suit while leaving the directories untached is neccessary because
-            # sub-directories might belong to an other test
-            def clean_working_directory():
-                # TODO: Make it working on Windows when we need it for remote debugging support
-                # TODO: Replace the heuristic to remove the files with a logic what collects the
-                # list of files we have to remove during test runs.
-                shell_cmd = lldb.SBPlatformShellCommand("rm %s/*" % remote_test_dir)
-                lldb.remote_platform.Run(shell_cmd)
-            self.addTearDownHook(clean_working_directory)
-        else:
-            print("error: making remote directory '%s': %s" % (remote_test_dir, error))
 
     def setUp(self):
         """Fixture for unittest test case setup.
@@ -754,7 +717,6 @@ class Base(unittest2.TestCase):
         # And the result object.
         self.res = lldb.SBCommandReturnObject()
 
-        self.setPlatformWorkingDir()
         self.enableLogChannelsForCurrentTest()
 
         #Initialize debug_info
@@ -923,6 +885,8 @@ class Base(unittest2.TestCase):
                 for dict in reversed(self.dicts):
                     self.cleanup(dictionary=dict)
 
+        self.disableLogChannelsForCurrentTest()
+
     # =========================================================
     # Various callbacks to allow introspection of test progress
     # =========================================================
@@ -999,27 +963,19 @@ class Base(unittest2.TestCase):
         if not os.path.isdir(dname):
             os.mkdir(dname)
 
-        components = []
-        if prefix is not None:
-            components.append(prefix)
-        for c in configuration.session_file_format:
-            if c == 'f':
-                components.append(self.__class__.__module__)
-            elif c == 'n':
-                components.append(self.__class__.__name__)
-            elif c == 'c':
-                compiler = self.getCompiler()
+        compiler = self.getCompiler()
 
-                if compiler[1] == ':':
-                    compiler = compiler[2:]
-                if os.path.altsep is not None:
-                    compiler = compiler.replace(os.path.altsep, os.path.sep)
-                components.extend([x for x in compiler.split(os.path.sep) if x != ""])
-            elif c == 'a':
-                components.append(self.getArchitecture())
-            elif c == 'm':
-                components.append(self.testMethodName)
-        fname = "-".join(components)
+        if compiler[1] == ':':
+            compiler = compiler[2:]
+        if os.path.altsep is not None:
+            compiler = compiler.replace(os.path.altsep, os.path.sep)
+
+        fname = "{}-{}-{}".format(self.id(), self.getArchitecture(), "_".join(compiler.split(os.path.sep)))
+        if len(fname) > 200:
+            fname = "{}-{}-{}".format(self.id(), self.getArchitecture(), compiler.split(os.path.sep)[-1])
+
+        if prefix is not None:
+            fname = "{}-{}".format(prefix, fname)
 
         return os.path.join(dname, fname)
 
@@ -1100,13 +1056,23 @@ class Base(unittest2.TestCase):
                         # it silently replaces the destination.  Ultimately this means that atomic renames are not
                         # guaranteed to be possible on Windows, but we need this to work anyway, so just remove the
                         # destination first if it already exists.
-                        remove_file(dst)
+                        os.remove(dst)
 
                     os.rename(src, dst)
         else:
             # success!  (and we don't want log files) delete log files
             for log_file in log_files_for_this_test:
-                remove_file(log_file)
+                try:
+                    os.unlink(log_file)
+                except:
+                    # We've seen consistent unlink failures on Windows, perhaps because the
+                    # just-created log file is being scanned by anti-virus.  Empirically, this
+                    # sleep-and-retry approach allows tests to succeed much more reliably.
+                    # Attempts to figure out exactly what process was still holding a file handle
+                    # have failed because running instrumentation like Process Monitor seems to
+                    # slow things down enough that the problem becomes much less consistent.
+                    time.sleep(0.5)
+                    os.unlink(log_file)
 
     # ====================================================
     # Config. methods supported through a plugin interface
@@ -1250,6 +1216,8 @@ class Base(unittest2.TestCase):
             option_str = ""
         if comp:
             option_str += " -C " + comp
+        if lldb.remote_platform:
+            option_str += ' --platform-name=%s' % (lldb.remote_platform_name)
         return option_str
 
     # ==================================================
@@ -1389,6 +1357,10 @@ class Base(unittest2.TestCase):
           "llvm-build/Debug+Asserts/x86_64/Debug+Asserts/bin/clang",
           "llvm-build/Release/x86_64/Release/bin/clang",
           "llvm-build/Debug/x86_64/Debug/bin/clang",
+          "llvm-build/ReleaseAsserts/llvm-macosx-x86_64/bin/clang",
+          "llvm-build/DebugAsserts/llvm-macosx-x86_64/bin/clang",
+          "llvm-build/Release/llvm-macosx-x86_64/bin/clang",
+          "llvm-build/Debug/llvm-macosx-x86_64/bin/clang",
         ]
         lldb_root_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
         for p in paths_to_try:
@@ -1651,6 +1623,30 @@ class TestBase(Base):
         # And the result object.
         self.res = lldb.SBCommandReturnObject()
 
+        if lldb.remote_platform and configuration.lldb_platform_working_dir:
+            remote_test_dir = lldbutil.join_remote_paths(
+                    configuration.lldb_platform_working_dir,
+                    self.getArchitecture(),
+                    str(self.test_number),
+                    self.mydir)
+            error = lldb.remote_platform.MakeDirectory(remote_test_dir, 448) # 448 = 0o700
+            if error.Success():
+                lldb.remote_platform.SetWorkingDirectory(remote_test_dir)
+
+                # This function removes all files from the current working directory while leaving
+                # the directories in place. The cleaup is required to reduce the disk space required
+                # by the test suit while leaving the directories untached is neccessary because
+                # sub-directories might belong to an other test
+                def clean_working_directory():
+                    # TODO: Make it working on Windows when we need it for remote debugging support
+                    # TODO: Replace the heuristic to remove the files with a logic what collects the
+                    # list of files we have to remove during test runs.
+                    shell_cmd = lldb.SBPlatformShellCommand("rm %s/*" % remote_test_dir)
+                    lldb.remote_platform.Run(shell_cmd)
+                self.addTearDownHook(clean_working_directory)
+            else:
+                print("error: making remote directory '%s': %s" % (remote_test_dir, error))
+    
     def registerSharedLibrariesWithTarget(self, target, shlibs):
         '''If we are remotely running the test suite, register the shared libraries with the target so they get uploaded, otherwise do nothing
         
@@ -2033,17 +2029,4 @@ class TestBase(Base):
     @classmethod
     def RemoveTempFile(cls, file):
         if os.path.exists(file):
-            remove_file(file)
-
-# On Windows, the first attempt to delete a recently-touched file can fail
-# because of a race with antimalware scanners.  This function will detect a
-# failure and retry.
-def remove_file(file, num_retries = 1, sleep_duration = 0.5):
-    for i in range(num_retries+1):
-        try:
             os.remove(file)
-            return True
-        except:
-            time.sleep(sleep_duration)
-            continue
-    return False

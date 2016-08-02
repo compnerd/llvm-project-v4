@@ -148,12 +148,20 @@ namespace lldb_private
                                              int32_t num_resumes);
 
         void
-        SetMonitorProcessCallback(const Host::MonitorChildProcessCallback &callback, bool monitor_signals);
+        SetMonitorProcessCallback (Host::MonitorChildProcessCallback callback,
+                                   void *baton,
+                                   bool monitor_signals);
 
         Host::MonitorChildProcessCallback
         GetMonitorProcessCallback() const
         {
             return m_monitor_callback;
+        }
+
+        void *
+        GetMonitorProcessBaton() const
+        {
+            return m_monitor_callback_baton;
         }
 
         bool

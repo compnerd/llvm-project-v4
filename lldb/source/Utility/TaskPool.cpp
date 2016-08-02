@@ -61,9 +61,8 @@ TaskPoolImpl::AddTask(std::function<void()>&& task_fn)
     if (m_thread_count < max_threads)
     {
         m_thread_count++;
-        // Note that this detach call needs to happen with the m_tasks_mutex held. This prevents the thread
-        // from exiting prematurely and triggering a linux libc bug
-        // (https://sourceware.org/bugzilla/show_bug.cgi?id=19951).
+        lock.unlock();
+
         std::thread (Worker, this).detach();
     }
 }

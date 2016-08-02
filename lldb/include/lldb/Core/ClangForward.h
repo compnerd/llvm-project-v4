@@ -136,6 +136,11 @@ namespace llvm
     class APSInt;
     class LLVMContext;
     class ExecutionEngine;
+    class LLVMContext;
+    class MemoryBuffer;
+    class Module;
+    class SourceMgr;
+    class TargetOptions;
 }
 
 #endif  // #if defined(__cplusplus)

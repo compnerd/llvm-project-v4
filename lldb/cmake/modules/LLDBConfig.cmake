@@ -1,5 +1,3 @@
-include(CheckCXXSymbolExists)
-
 set(LLDB_PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 set(LLDB_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/source")
 set(LLDB_INCLUDE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -25,6 +23,8 @@ endif()
 
 set(LLDB_DISABLE_PYTHON ${LLDB_DEFAULT_DISABLE_PYTHON} CACHE BOOL
   "Disables the Python scripting integration.")
+set(LLDB_ALLOW_STATIC_BINDINGS FALSE CACHE BOOL
+  "Enable using static/baked language bindings if swig is not present.")
 set(LLDB_DISABLE_CURSES ${LLDB_DEFAULT_DISABLE_CURSES} CACHE BOOL
   "Disables the Curses integration.")
 
@@ -167,6 +167,12 @@ function(find_python_libs_windows)
 endfunction(find_python_libs_windows)
 
 if (NOT LLDB_DISABLE_PYTHON)
+  if(UNIX)
+    # This is necessary for crosscompile on Ubuntu 14.04 64bit. Need a proper fix.
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+      set(CMAKE_LIBRARY_ARCHITECTURE "x86_64-linux-gnu")
+    endif()
+  endif()
 
   if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
     find_python_libs_windows()
@@ -315,6 +321,7 @@ if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
   ${CORE_FOUNDATION_LIBRARY} ${CORE_SERVICES_LIBRARY} ${SECURITY_LIBRARY}
   ${DEBUG_SYMBOLS_LIBRARY})
 
+  include_directories(AFTER /usr/include/libxml2)
 else()
   if (LIBXML2_FOUND)
     add_definitions( -DLIBXML2_DEFINED )
@@ -331,6 +338,28 @@ endif(HAVE_LIBPTHREAD)
 if (HAVE_LIBDL)
   list(APPEND system_libs ${CMAKE_DL_LIBS})
 endif()
+
+if(LLDB_REQUIRES_EH)
+  set(LLDB_REQUIRES_RTTI ON)
+else()
+  if(LLVM_COMPILER_IS_GCC_COMPATIBLE)
+    set(LLDB_COMPILE_FLAGS "${LLDB_COMPILE_FLAGS} -fno-exceptions")
+  elseif(MSVC)
+    add_definitions( -D_HAS_EXCEPTIONS=0 )
+    set(LLDB_COMPILE_FLAGS "${LLDB_COMPILE_FLAGS} /EHs-c-")
+  endif()
+endif()
+
+# Disable RTTI by default
+if(NOT LLDB_REQUIRES_RTTI)
+  if (LLVM_COMPILER_IS_GCC_COMPATIBLE)
+    set(LLDB_COMPILE_FLAGS "${LLDB_COMPILE_FLAGS} -fno-rtti")
+  elseif(MSVC)
+    set(LLDB_COMPILE_FLAGS "${LLDB_COMPILE_FLAGS} /GR-")
+  endif()
+endif()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LLDB_COMPILE_FLAGS}")
 
 if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     # Check for syscall used by lldb-server on linux.
@@ -389,25 +418,3 @@ if (NOT LLDB_DISABLE_CURSES)
     list(APPEND system_libs ${CURSES_LIBRARIES})
     include_directories(${CURSES_INCLUDE_DIR})
 endif ()
-
-check_cxx_symbol_exists("__GLIBCXX__" "string" LLDB_USING_LIBSTDCXX)
-if(LLDB_USING_LIBSTDCXX)
-    # There doesn't seem to be an easy way to check the library version. Instead, we rely on the
-    # fact that std::set did not have the allocator constructor available until version 4.9
-    check_cxx_source_compiles("
-            #include <set>
-            std::set<int> s = std::set<int>(std::allocator<int>());
-            int main() { return 0; }"
-            LLDB_USING_LIBSTDCXX_4_9)
-    if (NOT LLDB_USING_LIBSTDCXX_4_9 AND NOT LLVM_ENABLE_EH)
-        message(WARNING
-            "You appear to be linking to libstdc++ version lesser than 4.9 without exceptions "
-            "enabled. These versions of the library have an issue, which causes occasional "
-            "lldb crashes. See <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=59656> for "
-            "details. Possible courses of action are:\n"
-            "- use libstdc++ version 4.9 or newer\n"
-            "- use libc++ (via LLVM_ENABLE_LIBCXX)\n"
-            "- enable exceptions (via LLVM_ENABLE_EH)\n"
-            "- ignore this warning and accept occasional instability")
-    endif()
-endif()

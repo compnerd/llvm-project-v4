@@ -59,7 +59,8 @@ class UnpicklingForwardingReaderChannel(asyncore.dispatcher):
         # the initiators of the socket to await this to ensure
         # that this end is up and running (and therefore already
         # into the async map).
-        ack_bytes = b'*'
+        ack_bytes = bytearray()
+        ack_bytes.append(chr(42))
         file_object.send(ack_bytes)
 
     def deserialize_payload(self):

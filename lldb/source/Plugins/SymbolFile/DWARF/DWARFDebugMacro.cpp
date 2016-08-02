@@ -69,6 +69,8 @@ DWARFDebugMacroEntry::ReadMacroEntries(const DWARFDataExtractor &debug_macro_dat
                                        SymbolFileDWARF *sym_file_dwarf,
                                        DebugMacrosSP &debug_macros_sp)
 {
+#if TODO_REQUIRES_LLVM_ORG_SYNC
+    // This code can go back in once llvm.org macros support is in the relevant GitHub llvm branch.
     llvm::dwarf::MacroEntryType type = static_cast<llvm::dwarf::MacroEntryType>(debug_macro_data.GetU8(offset));
     while (type != 0)
     {
@@ -125,4 +127,5 @@ DWARFDebugMacroEntry::ReadMacroEntries(const DWARFDataExtractor &debug_macro_dat
         }
         type = static_cast<llvm::dwarf::MacroEntryType>(debug_macro_data.GetU8(offset));
     }
+#endif
 }

@@ -14,7 +14,6 @@
 
 #include "llvm/Support/ConvertUTF.h"
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>

@@ -24,6 +24,7 @@ class SetValuesTestCase(TestBase):
         self.line4 = line_number('main.c', '// Set break point #4.')
         self.line5 = line_number('main.c', '// Set break point #5.')
 
+    @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr21765")
     def test(self):
         """Test settings and readings of program variables."""
         self.build()

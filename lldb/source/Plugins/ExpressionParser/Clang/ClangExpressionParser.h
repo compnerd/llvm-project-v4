@@ -57,7 +57,6 @@ public:
     
     //------------------------------------------------------------------
     /// Destructor
-    //------------------------------------------------------------------
     ~ClangExpressionParser () override;
     
     //------------------------------------------------------------------
@@ -72,7 +71,10 @@ public:
     ///     success.
     //------------------------------------------------------------------
     unsigned
-    Parse(DiagnosticManager &diagnostic_manager) override;
+    Parse (DiagnosticManager &diagnostic_manager,
+           uint32_t first_line = 0,
+           uint32_t last_line = UINT32_MAX,
+           uint32_t line_offset = 0) override;
     
     bool
     RewriteExpression(DiagnosticManager &diagnostic_manager) override;
@@ -114,7 +116,7 @@ public:
     ///     An error code indicating the success or failure of the operation.
     ///     Test with Success().
     //------------------------------------------------------------------
-    Error
+    virtual Error
     PrepareForExecution (lldb::addr_t &func_addr,
                          lldb::addr_t &func_end,
                          lldb::IRExecutionUnitSP &execution_unit_sp,
@@ -137,19 +139,7 @@ public:
     Error
     RunStaticInitializers (lldb::IRExecutionUnitSP &execution_unit_sp,
                            ExecutionContext &exe_ctx);
-
-    //------------------------------------------------------------------
-    /// Returns a string representing current ABI.
-    ///
-    /// @param[in] target_arch
-    ///     The target architecture.
-    ///
-    /// @return
-    ///     A string representing target ABI for the current architecture.
-    //-------------------------------------------------------------------
-    std::string
-    GetClangTargetABI (const ArchSpec &target_arch);
- 
+        
 private:
     std::unique_ptr<llvm::LLVMContext>       m_llvm_context;         ///< The LLVM context to generate IR into
     std::unique_ptr<clang::FileManager>      m_file_manager;         ///< The Clang file manager object used by the compiler

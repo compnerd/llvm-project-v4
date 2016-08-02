@@ -13,6 +13,7 @@
 
 #include "lldb/Target/Language.h"
 
+#include "lldb/Host/Mutex.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Stream.h"
 
@@ -35,23 +36,23 @@ GetLanguagesMap ()
     
     return *g_map;
 }
-static std::mutex &
-GetLanguagesMutex()
+static Mutex&
+GetLanguagesMutex ()
 {
-    static std::mutex *g_mutex = nullptr;
+    static Mutex *g_mutex = nullptr;
     static std::once_flag g_initialize;
-
+    
     std::call_once(g_initialize, [] {
-        g_mutex = new std::mutex(); // NOTE: INTENTIONAL LEAK due to global destructor chain
+        g_mutex = new Mutex(); // NOTE: INTENTIONAL LEAK due to global destructor chain
     });
-
+    
     return *g_mutex;
 }
 
 Language*
 Language::FindPlugin (lldb::LanguageType language)
 {
-    std::lock_guard<std::mutex> guard(GetLanguagesMutex());
+    Mutex::Locker locker(GetLanguagesMutex());
     LanguagesMap& map(GetLanguagesMap());
     auto iter = map.find(language), end = map.end();
     if (iter != end)
@@ -79,7 +80,7 @@ Language::FindPlugin (lldb::LanguageType language)
 void
 Language::ForEach (std::function<bool(Language*)> callback)
 {
-    std::lock_guard<std::mutex> guard(GetLanguagesMutex());
+    Mutex::Locker locker(GetLanguagesMutex());
     LanguagesMap& map(GetLanguagesMap());
     for (const auto& entry : map)
     {

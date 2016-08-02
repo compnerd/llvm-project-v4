@@ -819,8 +819,6 @@ ProcessMonitor::ProcessMonitor(ProcessFreeBSD *process,
       m_terminal_fd(-1),
       m_operation(0)
 {
-    using namespace std::placeholders;
-
     std::unique_ptr<LaunchArgs> args(new LaunchArgs(this, module, argv, envp,
                                                     stdin_file_spec,
                                                     stdout_file_spec,
@@ -858,7 +856,7 @@ WAIT_AGAIN:
 
     // Finally, start monitoring the child process for change in state.
     m_monitor_thread = Host::StartMonitoringChildProcess(
-        std::bind(&ProcessMonitor::MonitorCallback, this, _1, _2, _3, _4), GetPID(), true);
+        ProcessMonitor::MonitorCallback, this, GetPID(), true);
     if (!m_monitor_thread.IsJoinable())
     {
         error.SetErrorToGenericError();
@@ -875,8 +873,6 @@ ProcessMonitor::ProcessMonitor(ProcessFreeBSD *process,
       m_terminal_fd(-1),
       m_operation(0)
 {
-    using namespace std::placeholders;
-
     sem_init(&m_operation_pending, 0, 0);
     sem_init(&m_operation_done, 0, 0);
 
@@ -910,7 +906,7 @@ WAIT_AGAIN:
 
     // Finally, start monitoring the child process for change in state.
     m_monitor_thread = Host::StartMonitoringChildProcess(
-        std::bind(&ProcessMonitor::MonitorCallback, this, _1, _2, _3, _4), GetPID(), true);
+        ProcessMonitor::MonitorCallback, this, GetPID(), true);
     if (!m_monitor_thread.IsJoinable())
     {
         error.SetErrorToGenericError();
@@ -1184,9 +1180,14 @@ ProcessMonitor::GetCurrentThreadIDs(std::vector<lldb::tid_t>&thread_ids)
 }
 
 bool
-ProcessMonitor::MonitorCallback(ProcessMonitor *monitor, lldb::pid_t pid, bool exited, int signal, int status)
+ProcessMonitor::MonitorCallback(void *callback_baton,
+                                lldb::pid_t pid,
+                                bool exited,
+                                int signal,
+                                int status)
 {
     ProcessMessage message;
+    ProcessMonitor *monitor = static_cast<ProcessMonitor*>(callback_baton);
     ProcessFreeBSD *process = monitor->m_process;
     assert(process);
     bool stop_monitoring;
@@ -1348,7 +1349,7 @@ ProcessMonitor::ServeOperation(OperationArgs *args)
 void
 ProcessMonitor::DoOperation(Operation *op)
 {
-    std::lock_guard<std::mutex> guard(m_operation_mutex);
+    Mutex::Locker lock(m_operation_mutex);
 
     m_operation = op;
 

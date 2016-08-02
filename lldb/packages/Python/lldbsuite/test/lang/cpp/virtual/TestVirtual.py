@@ -22,6 +22,9 @@ class CppVirtualMadness(TestBase):
     # printf() stmts (see main.cpp).
     pattern = re.compile("^([^=]*) = '([^=]*)'$")
 
+    # Assert message.
+    PRINTF_OUTPUT_GROKKED = "The printf output from compiled code is parsed correctly"
+
     def setUp(self):
         # Call super's setUp().
         TestBase.setUp(self)
@@ -55,13 +58,11 @@ class CppVirtualMadness(TestBase):
         thread = lldbutil.get_stopped_thread(process, lldb.eStopReasonBreakpoint)
         self.assertTrue(thread.IsValid(), "There should be a thread stopped due to breakpoint condition")
 
-        # First, capture the golden output from the program itself.
-        golden = thread.GetFrameAtIndex(0).FindVariable("golden")
-        self.assertTrue(golden.IsValid(), "Encountered an error reading the process's golden variable")
-        error = lldb.SBError()
-        golden_str = process.ReadCStringFromMemory(golden.AddressOf().GetValueAsUnsigned(), 4096, error);
-        self.assertTrue(error.Success())
-        self.assertTrue("c_as_C" in golden_str)
+        # First, capture the golden output from the program itself from the
+        # series of printf statements.
+        stdout = process.GetSTDOUT(1024)
+        
+        self.assertIsNotNone(stdout, "Encountered an error reading the process's output")
 
         # This golden list contains a list of "my_expr = 'value' pairs extracted
         # from the golden output.
@@ -71,7 +72,7 @@ class CppVirtualMadness(TestBase):
         #
         #     my_expr = 'value'
         #
-        for line in golden_str.split(os.linesep):
+        for line in stdout.split(os.linesep):
             match = self.pattern.search(line)
             if match:
                 my_expr, val = match.group(1), match.group(2)

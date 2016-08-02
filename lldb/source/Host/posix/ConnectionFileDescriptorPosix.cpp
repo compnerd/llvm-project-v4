@@ -79,12 +79,12 @@ GetURLAddress(const char *url, const char *scheme)
 }
 
 ConnectionFileDescriptor::ConnectionFileDescriptor(bool child_processes_inherit)
-    : Connection(),
-      m_pipe(),
-      m_mutex(),
-      m_shutting_down(false),
-      m_waiting_for_accept(false),
-      m_child_processes_inherit(child_processes_inherit)
+    : Connection()
+    , m_pipe()
+    , m_mutex(Mutex::eMutexTypeRecursive)
+    , m_shutting_down(false)
+    , m_waiting_for_accept(false)
+    , m_child_processes_inherit(child_processes_inherit)
 {
     Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_CONNECTION | LIBLLDB_LOG_OBJECT));
     if (log)
@@ -92,30 +92,30 @@ ConnectionFileDescriptor::ConnectionFileDescriptor(bool child_processes_inherit)
 }
 
 ConnectionFileDescriptor::ConnectionFileDescriptor(int fd, bool owns_fd)
-    : Connection(),
-      m_pipe(),
-      m_mutex(),
-      m_shutting_down(false),
-      m_waiting_for_accept(false),
-      m_child_processes_inherit(false)
+    : Connection()
+    , m_pipe()
+    , m_mutex(Mutex::eMutexTypeRecursive)
+    , m_shutting_down(false)
+    , m_waiting_for_accept(false)
+    , m_child_processes_inherit(false)
 {
     m_write_sp.reset(new File(fd, owns_fd));
     m_read_sp.reset(new File(fd, false));
 
     Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_CONNECTION | LIBLLDB_LOG_OBJECT));
     if (log)
-        log->Printf("%p ConnectionFileDescriptor::ConnectionFileDescriptor (fd = %i, owns_fd = %i)",
-                    static_cast<void *>(this), fd, owns_fd);
+        log->Printf("%p ConnectionFileDescriptor::ConnectionFileDescriptor (fd = %i, owns_fd = %i)", static_cast<void *>(this), fd,
+                    owns_fd);
     OpenCommandPipe();
 }
 
-ConnectionFileDescriptor::ConnectionFileDescriptor(Socket *socket)
-    : Connection(),
-      m_pipe(),
-      m_mutex(),
-      m_shutting_down(false),
-      m_waiting_for_accept(false),
-      m_child_processes_inherit(false)
+ConnectionFileDescriptor::ConnectionFileDescriptor(Socket* socket)
+    : Connection()
+    , m_pipe()
+    , m_mutex(Mutex::eMutexTypeRecursive)
+    , m_shutting_down(false)
+    , m_waiting_for_accept(false)
+    , m_child_processes_inherit(false)
 {
     InitializeSocket(socket);
 }
@@ -170,7 +170,7 @@ ConnectionFileDescriptor::IsConnected() const
 ConnectionStatus
 ConnectionFileDescriptor::Connect(const char *s, Error *error_ptr)
 {
-    std::lock_guard<std::recursive_mutex> guard(m_mutex);
+    Mutex::Locker locker(m_mutex);
     Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_CONNECTION));
     if (log)
         log->Printf("%p ConnectionFileDescriptor::Connect (url = '%s')", static_cast<void *>(this), s);
@@ -374,8 +374,10 @@ ConnectionFileDescriptor::Disconnect(Error *error_ptr)
 
     m_shutting_down = true;
 
-    std::unique_lock<std::recursive_mutex> locker(m_mutex, std::defer_lock);
-    if (!locker.try_lock())
+    Mutex::Locker locker;
+    bool got_lock = locker.TryLock(m_mutex);
+
+    if (!got_lock)
     {
         if (m_pipe.CanWrite())
         {
@@ -390,7 +392,7 @@ ConnectionFileDescriptor::Disconnect(Error *error_ptr)
             log->Printf("%p ConnectionFileDescriptor::Disconnect(): Couldn't get the lock, but no command pipe is available.",
                         static_cast<void *>(this));
         }
-        locker.lock();
+        locker.Lock(m_mutex);
     }
 
     Error error = m_read_sp->Close();
@@ -413,8 +415,9 @@ ConnectionFileDescriptor::Read(void *dst, size_t dst_len, uint32_t timeout_usec,
 {
     Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_CONNECTION));
 
-    std::unique_lock<std::recursive_mutex> locker(m_mutex, std::defer_lock);
-    if (!locker.try_lock())
+    Mutex::Locker locker;
+    bool got_lock = locker.TryLock(m_mutex);
+    if (!got_lock)
     {
         if (log)
             log->Printf("%p ConnectionFileDescriptor::Read () failed to get the connection lock.", static_cast<void *>(this));
@@ -606,7 +609,7 @@ ConnectionFileDescriptor::BytesAvailable(uint32_t timeout_usec, Error *error_ptr
     struct timeval tv;
     if (timeout_usec == UINT32_MAX)
     {
-        // Infinite wait...
+        // Inifinite wait...
         tv_ptr = nullptr;
     }
     else
@@ -877,7 +880,11 @@ ConnectionFileDescriptor::GetListeningPort(uint32_t timeout_sec)
     if (timeout_sec == UINT32_MAX)
         m_port_predicate.WaitForValueNotEqualTo(0, bound_port);
     else
-        m_port_predicate.WaitForValueNotEqualTo(0, bound_port, std::chrono::seconds(timeout_sec));
+    {
+        TimeValue timeout = TimeValue::Now();
+        timeout.OffsetWithSeconds(timeout_sec);
+        m_port_predicate.WaitForValueNotEqualTo(0, bound_port, &timeout);
+    }
     return bound_port;
 }
 

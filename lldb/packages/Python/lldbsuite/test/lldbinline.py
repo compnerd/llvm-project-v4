@@ -1,6 +1,10 @@
 from __future__ import print_function
 from __future__ import absolute_import
 
+import lldb
+from lldbsuite.test.lldbtest import *
+import lldbsuite.test.lldbutil as lldbutil
+import lldbsuite.test.test_categories as test_categories
 # System modules
 import os
 
@@ -21,7 +25,8 @@ def source_type(filename):
         '.cxx' : 'CXX_SOURCES',
         '.cc' : 'CXX_SOURCES',
         '.m' : 'OBJC_SOURCES',
-        '.mm' : 'OBJCXX_SOURCES'
+        '.mm' : 'OBJCXX_SOURCES',
+        '.swift' : 'SWIFT_SOURCES'
     }.get(extension, None)
 
 
@@ -207,7 +212,7 @@ def MakeInlineTest(__file, __globals, decorators=None):
     InlineTest.mydir = TestBase.compute_mydir(__file)
 
     test_name, _ = os.path.splitext(file_basename)
-    # Build the test case
+    # Build the test case 
     test = type(test_name, (InlineTest,), {'using_dsym': None})
     test.name = test_name
 
