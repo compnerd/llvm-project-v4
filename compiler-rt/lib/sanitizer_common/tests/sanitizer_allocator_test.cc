@@ -36,21 +36,62 @@ using namespace __sanitizer;
 // space that is always available. Thus, a dynamically allocated address space
 // is used instead (i.e. ~(uptr)0).
 static const uptr kAllocatorSpace = ~(uptr)0;
-static const uptr kAllocatorSize  =  0x10000000000ULL;  // 1T.
-static const u64 kAddressSpaceSize = 1ULL << 40;
+static const uptr kAllocatorSize  =  0x8000000000ULL;  // 500G
+static const u64 kAddressSpaceSize = 1ULL << 47;
+typedef DefaultSizeClassMap SizeClassMap;
+#elif SANITIZER_ANDROID && defined(__aarch64__)
+static const uptr kAllocatorSpace = 0x3000000000ULL;
+static const uptr kAllocatorSize  = 0x2000000000ULL;
+static const u64 kAddressSpaceSize = 1ULL << 39;
+typedef VeryCompactSizeClassMap SizeClassMap;
 #else
 static const uptr kAllocatorSpace = 0x700000000000ULL;
 static const uptr kAllocatorSize  = 0x010000000000ULL;  // 1T.
 static const u64 kAddressSpaceSize = 1ULL << 47;
+typedef DefaultSizeClassMap SizeClassMap;
 #endif
 
-typedef SizeClassAllocator64<
-  kAllocatorSpace, kAllocatorSize, 16, DefaultSizeClassMap> Allocator64;
-typedef SizeClassAllocator64<
-  ~(uptr)0, kAllocatorSize, 16, DefaultSizeClassMap> Allocator64Dynamic;
+struct AP64 {  // Allocator Params. Short name for shorter demangled names..
+  static const uptr kSpaceBeg = kAllocatorSpace;
+  static const uptr kSpaceSize = kAllocatorSize;
+  static const uptr kMetadataSize = 16;
+  typedef ::SizeClassMap SizeClassMap;
+  typedef NoOpMapUnmapCallback MapUnmapCallback;
+  static const uptr kFlags = 0;
+};
 
-typedef SizeClassAllocator64<
-  kAllocatorSpace, kAllocatorSize, 16, CompactSizeClassMap> Allocator64Compact;
+struct AP64Dyn {
+  static const uptr kSpaceBeg = ~(uptr)0;
+  static const uptr kSpaceSize = kAllocatorSize;
+  static const uptr kMetadataSize = 16;
+  typedef ::SizeClassMap SizeClassMap;
+  typedef NoOpMapUnmapCallback MapUnmapCallback;
+  static const uptr kFlags = 0;
+};
+
+struct AP64Compact {
+  static const uptr kSpaceBeg = ~(uptr)0;
+  static const uptr kSpaceSize = kAllocatorSize;
+  static const uptr kMetadataSize = 16;
+  typedef CompactSizeClassMap SizeClassMap;
+  typedef NoOpMapUnmapCallback MapUnmapCallback;
+  static const uptr kFlags = 0;
+};
+
+struct AP64VeryCompact {
+  static const uptr kSpaceBeg = ~(uptr)0;
+  static const uptr kSpaceSize = 1ULL << 37;
+  static const uptr kMetadataSize = 16;
+  typedef VeryCompactSizeClassMap SizeClassMap;
+  typedef NoOpMapUnmapCallback MapUnmapCallback;
+  static const uptr kFlags = 0;
+};
+
+
+typedef SizeClassAllocator64<AP64> Allocator64;
+typedef SizeClassAllocator64<AP64Dyn> Allocator64Dynamic;
+typedef SizeClassAllocator64<AP64Compact> Allocator64Compact;
+typedef SizeClassAllocator64<AP64VeryCompact> Allocator64VeryCompact;
 #elif defined(__mips64)
 static const u64 kAddressSpaceSize = 1ULL << 40;
 #elif defined(__aarch64__)
@@ -77,7 +118,7 @@ typedef SizeClassAllocator32<
 template <class SizeClassMap>
 void TestSizeClassMap() {
   typedef SizeClassMap SCMap;
-  // SCMap::Print();
+  SCMap::Print();
   SCMap::Validate();
 }
 
@@ -89,6 +130,10 @@ TEST(SanitizerCommon, CompactSizeClassMap) {
   TestSizeClassMap<CompactSizeClassMap>();
 }
 
+TEST(SanitizerCommon, VeryCompactSizeClassMap) {
+  TestSizeClassMap<VeryCompactSizeClassMap>();
+}
+
 TEST(SanitizerCommon, InternalSizeClassMap) {
   TestSizeClassMap<InternalSizeClassMap>();
 }
@@ -96,13 +141,15 @@ TEST(SanitizerCommon, InternalSizeClassMap) {
 template <class Allocator>
 void TestSizeClassAllocator() {
   Allocator *a = new Allocator;
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   SizeClassAllocatorLocalCache<Allocator> cache;
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
 
-  static const uptr sizes[] = {1, 16, 30, 40, 100, 1000, 10000,
-    50000, 60000, 100000, 120000, 300000, 500000, 1000000, 2000000};
+  static const uptr sizes[] = {
+    1, 16,  30, 40, 100, 1000, 10000,
+    50000, 60000, 100000, 120000, 300000, 500000, 1000000, 2000000
+  };
 
   std::vector<void *> allocated;
 
@@ -172,8 +219,14 @@ TEST(SanitizerCommon, SizeClassAllocator64Dynamic) {
   TestSizeClassAllocator<Allocator64Dynamic>();
 }
 
+#if !SANITIZER_ANDROID
 TEST(SanitizerCommon, SizeClassAllocator64Compact) {
   TestSizeClassAllocator<Allocator64Compact>();
+}
+#endif
+
+TEST(SanitizerCommon, SizeClassAllocator64VeryCompact) {
+  TestSizeClassAllocator<Allocator64VeryCompact>();
 }
 #endif
 #endif
@@ -185,7 +238,7 @@ TEST(SanitizerCommon, SizeClassAllocator32Compact) {
 template <class Allocator>
 void SizeClassAllocatorMetadataStress() {
   Allocator *a = new Allocator;
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   SizeClassAllocatorLocalCache<Allocator> cache;
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
@@ -194,7 +247,7 @@ void SizeClassAllocatorMetadataStress() {
   void *allocated[kNumAllocs];
   void *meta[kNumAllocs];
   for (uptr i = 0; i < kNumAllocs; i++) {
-    void *x = cache.Allocate(a, 1 + i % 50);
+    void *x = cache.Allocate(a, 1 + i % (Allocator::kNumClasses - 1));
     allocated[i] = x;
     meta[i] = a->GetMetaData(x);
   }
@@ -205,7 +258,7 @@ void SizeClassAllocatorMetadataStress() {
     EXPECT_EQ(m, meta[idx]);
   }
   for (uptr i = 0; i < kNumAllocs; i++) {
-    cache.Deallocate(a, 1 + i % 50, allocated[i]);
+    cache.Deallocate(a, 1 + i % (Allocator::kNumClasses - 1), allocated[i]);
   }
 
   a->TestOnlyUnmap();
@@ -224,9 +277,12 @@ TEST(SanitizerCommon, SizeClassAllocator64DynamicMetadataStress) {
   SizeClassAllocatorMetadataStress<Allocator64Dynamic>();
 }
 
+#if !SANITIZER_ANDROID
 TEST(SanitizerCommon, SizeClassAllocator64CompactMetadataStress) {
   SizeClassAllocatorMetadataStress<Allocator64Compact>();
 }
+#endif
+
 #endif
 #endif  // SANITIZER_CAN_USE_ALLOCATOR64
 TEST(SanitizerCommon, SizeClassAllocator32CompactMetadataStress) {
@@ -234,18 +290,17 @@ TEST(SanitizerCommon, SizeClassAllocator32CompactMetadataStress) {
 }
 
 template <class Allocator>
-void SizeClassAllocatorGetBlockBeginStress() {
+void SizeClassAllocatorGetBlockBeginStress(u64 TotalSize) {
   Allocator *a = new Allocator;
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   SizeClassAllocatorLocalCache<Allocator> cache;
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
 
   uptr max_size_class = Allocator::SizeClassMapT::kLargestClassID;
   uptr size = Allocator::SizeClassMapT::Size(max_size_class);
-  u64 G8 = 1ULL << 33;
   // Make sure we correctly compute GetBlockBegin() w/o overflow.
-  for (size_t i = 0; i <= G8 / size; i++) {
+  for (size_t i = 0; i <= TotalSize / size; i++) {
     void *x = cache.Allocate(a, max_size_class);
     void *beg = a->GetBlockBegin(x);
     // if ((i & (i - 1)) == 0)
@@ -262,16 +317,24 @@ void SizeClassAllocatorGetBlockBeginStress() {
 // to run them all at the same time. FIXME: Make them not flaky and reenable.
 #if !SANITIZER_WINDOWS
 TEST(SanitizerCommon, SizeClassAllocator64GetBlockBegin) {
-  SizeClassAllocatorGetBlockBeginStress<Allocator64>();
+  SizeClassAllocatorGetBlockBeginStress<Allocator64>(
+      1ULL << (SANITIZER_ANDROID ? 31 : 33));
 }
 TEST(SanitizerCommon, SizeClassAllocator64DynamicGetBlockBegin) {
-  SizeClassAllocatorGetBlockBeginStress<Allocator64Dynamic>();
+  SizeClassAllocatorGetBlockBeginStress<Allocator64Dynamic>(
+      1ULL << (SANITIZER_ANDROID ? 31 : 33));
 }
+#if !SANITIZER_ANDROID
 TEST(SanitizerCommon, SizeClassAllocator64CompactGetBlockBegin) {
-  SizeClassAllocatorGetBlockBeginStress<Allocator64Compact>();
+  SizeClassAllocatorGetBlockBeginStress<Allocator64Compact>(1ULL << 33);
+}
+#endif
+TEST(SanitizerCommon, SizeClassAllocator64VeryCompactGetBlockBegin) {
+  // Does not have > 4Gb for each class.
+  SizeClassAllocatorGetBlockBeginStress<Allocator64VeryCompact>(1ULL << 31);
 }
 TEST(SanitizerCommon, SizeClassAllocator32CompactGetBlockBegin) {
-  SizeClassAllocatorGetBlockBeginStress<Allocator32Compact>();
+  SizeClassAllocatorGetBlockBeginStress<Allocator32Compact>(1ULL << 33);
 }
 #endif
 #endif  // SANITIZER_CAN_USE_ALLOCATOR64
@@ -288,22 +351,33 @@ int TestMapUnmapCallback::unmap_count;
 // These tests can fail on Windows if memory is somewhat full and lit happens
 // to run them all at the same time. FIXME: Make them not flaky and reenable.
 #if !SANITIZER_WINDOWS
+
+struct AP64WithCallback {
+  static const uptr kSpaceBeg = kAllocatorSpace;
+  static const uptr kSpaceSize = kAllocatorSize;
+  static const uptr kMetadataSize = 16;
+  typedef ::SizeClassMap SizeClassMap;
+  typedef TestMapUnmapCallback MapUnmapCallback;
+  static const uptr kFlags = 0;
+};
+
 TEST(SanitizerCommon, SizeClassAllocator64MapUnmapCallback) {
   TestMapUnmapCallback::map_count = 0;
   TestMapUnmapCallback::unmap_count = 0;
-  typedef SizeClassAllocator64<
-      kAllocatorSpace, kAllocatorSize, 16, DefaultSizeClassMap,
-      TestMapUnmapCallback> Allocator64WithCallBack;
+  typedef SizeClassAllocator64<AP64WithCallback> Allocator64WithCallBack;
   Allocator64WithCallBack *a = new Allocator64WithCallBack;
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   EXPECT_EQ(TestMapUnmapCallback::map_count, 1);  // Allocator state.
   SizeClassAllocatorLocalCache<Allocator64WithCallBack> cache;
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
   AllocatorStats stats;
   stats.Init();
-  a->AllocateBatch(&stats, &cache, 32);
-  EXPECT_EQ(TestMapUnmapCallback::map_count, 3);  // State + alloc + metadata.
+  const size_t kNumChunks = 128;
+  uint32_t chunks[kNumChunks];
+  a->GetFromAllocator(&stats, 30, chunks, kNumChunks);
+  // State + alloc + metadata + freearray.
+  EXPECT_EQ(TestMapUnmapCallback::map_count, 4);
   a->TestOnlyUnmap();
   EXPECT_EQ(TestMapUnmapCallback::unmap_count, 1);  // The whole thing.
   delete a;
@@ -323,7 +397,7 @@ TEST(SanitizerCommon, SizeClassAllocator32MapUnmapCallback) {
       TestMapUnmapCallback>
     Allocator32WithCallBack;
   Allocator32WithCallBack *a = new Allocator32WithCallBack;
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   EXPECT_EQ(TestMapUnmapCallback::map_count, 0);
   SizeClassAllocatorLocalCache<Allocator32WithCallBack>  cache;
   memset(&cache, 0, sizeof(cache));
@@ -356,14 +430,16 @@ TEST(SanitizerCommon, LargeMmapAllocatorMapUnmapCallback) {
 template<class Allocator>
 void FailInAssertionOnOOM() {
   Allocator a;
-  a.Init();
+  a.Init(kReleaseToOSIntervalNever);
   SizeClassAllocatorLocalCache<Allocator> cache;
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
   AllocatorStats stats;
   stats.Init();
+  const size_t kNumChunks = 128;
+  uint32_t chunks[kNumChunks];
   for (int i = 0; i < 1000000; i++) {
-    a.AllocateBatch(&stats, &cache, 52);
+    a.GetFromAllocator(&stats, 52, chunks, kNumChunks);
   }
 
   a.TestOnlyUnmap();
@@ -371,7 +447,7 @@ void FailInAssertionOnOOM() {
 
 // Don't test OOM conditions on Win64 because it causes other tests on the same
 // machine to OOM.
-#if SANITIZER_CAN_USE_ALLOCATOR64 && !SANITIZER_WINDOWS64
+#if SANITIZER_CAN_USE_ALLOCATOR64 && !SANITIZER_WINDOWS64 && !SANITIZER_ANDROID
 TEST(SanitizerCommon, SizeClassAllocator64Overflow) {
   EXPECT_DEATH(FailInAssertionOnOOM<Allocator64>(), "Out of memory");
 }
@@ -462,7 +538,7 @@ void TestCombinedAllocator() {
       CombinedAllocator<PrimaryAllocator, AllocatorCache, SecondaryAllocator>
       Allocator;
   Allocator *a = new Allocator;
-  a->Init(/* may_return_null */ true);
+  a->Init(/* may_return_null */ true, kReleaseToOSIntervalNever);
 
   AllocatorCache cache;
   memset(&cache, 0, sizeof(cache));
@@ -524,10 +600,18 @@ TEST(SanitizerCommon, CombinedAllocator64Dynamic) {
       SizeClassAllocatorLocalCache<Allocator64Dynamic> > ();
 }
 
+#if !SANITIZER_ANDROID
 TEST(SanitizerCommon, CombinedAllocator64Compact) {
   TestCombinedAllocator<Allocator64Compact,
       LargeMmapAllocator<>,
       SizeClassAllocatorLocalCache<Allocator64Compact> > ();
+}
+#endif
+
+TEST(SanitizerCommon, CombinedAllocator64VeryCompact) {
+  TestCombinedAllocator<Allocator64VeryCompact,
+      LargeMmapAllocator<>,
+      SizeClassAllocatorLocalCache<Allocator64VeryCompact> > ();
 }
 #endif
 
@@ -543,7 +627,7 @@ void TestSizeClassAllocatorLocalCache() {
   typedef typename AllocatorCache::Allocator Allocator;
   Allocator *a = new Allocator();
 
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
 
@@ -585,9 +669,15 @@ TEST(SanitizerCommon, SizeClassAllocator64DynamicLocalCache) {
       SizeClassAllocatorLocalCache<Allocator64Dynamic> >();
 }
 
+#if !SANITIZER_ANDROID
 TEST(SanitizerCommon, SizeClassAllocator64CompactLocalCache) {
   TestSizeClassAllocatorLocalCache<
       SizeClassAllocatorLocalCache<Allocator64Compact> >();
+}
+#endif
+TEST(SanitizerCommon, SizeClassAllocator64VeryCompactLocalCache) {
+  TestSizeClassAllocatorLocalCache<
+      SizeClassAllocatorLocalCache<Allocator64VeryCompact> >();
 }
 #endif
 #endif
@@ -612,7 +702,7 @@ void *AllocatorLeakTestWorker(void *arg) {
 TEST(SanitizerCommon, AllocatorLeakTest) {
   typedef AllocatorCache::Allocator Allocator;
   Allocator a;
-  a.Init();
+  a.Init(kReleaseToOSIntervalNever);
   uptr total_used_memory = 0;
   for (int i = 0; i < 100; i++) {
     pthread_t t;
@@ -645,7 +735,7 @@ static void *DeallocNewThreadWorker(void *arg) {
 // able to call Deallocate on a zeroed cache, and it will self-initialize.
 TEST(Allocator, AllocatorCacheDeallocNewThread) {
   AllocatorCache::Allocator allocator;
-  allocator.Init();
+  allocator.Init(kReleaseToOSIntervalNever);
   AllocatorCache main_cache;
   AllocatorCache child_cache;
   memset(&main_cache, 0, sizeof(main_cache));
@@ -716,7 +806,7 @@ void IterationTestCallback(uptr chunk, void *arg) {
 template <class Allocator>
 void TestSizeClassAllocatorIteration() {
   Allocator *a = new Allocator;
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   SizeClassAllocatorLocalCache<Allocator> cache;
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
@@ -839,33 +929,58 @@ TEST(SanitizerCommon, LargeMmapAllocatorBlockBegin) {
 
 // Don't test OOM conditions on Win64 because it causes other tests on the same
 // machine to OOM.
-#if SANITIZER_CAN_USE_ALLOCATOR64 && !SANITIZER_WINDOWS64
+#if SANITIZER_CAN_USE_ALLOCATOR64 && !SANITIZER_WINDOWS64 && !SANITIZER_ANDROID
+typedef SizeClassMap<3, 4, 8, 63, 128, 16> SpecialSizeClassMap;
+struct AP64_SpecialSizeClassMap {
+  static const uptr kSpaceBeg = kAllocatorSpace;
+  static const uptr kSpaceSize = kAllocatorSize;
+  static const uptr kMetadataSize = 0;
+  typedef SpecialSizeClassMap SizeClassMap;
+  typedef NoOpMapUnmapCallback MapUnmapCallback;
+  static const uptr kFlags = 0;
+};
+
 // Regression test for out-of-memory condition in PopulateFreeList().
 TEST(SanitizerCommon, SizeClassAllocator64PopulateFreeListOOM) {
   // In a world where regions are small and chunks are huge...
-  typedef SizeClassMap<63, 128, 16> SpecialSizeClassMap;
-  typedef SizeClassAllocator64<kAllocatorSpace, kAllocatorSize, 0,
-                               SpecialSizeClassMap> SpecialAllocator64;
+  typedef SizeClassAllocator64<AP64_SpecialSizeClassMap> SpecialAllocator64;
   const uptr kRegionSize =
       kAllocatorSize / SpecialSizeClassMap::kNumClassesRounded;
   SpecialAllocator64 *a = new SpecialAllocator64;
-  a->Init();
+  a->Init(kReleaseToOSIntervalNever);
   SizeClassAllocatorLocalCache<SpecialAllocator64> cache;
   memset(&cache, 0, sizeof(cache));
   cache.Init(0);
 
   // ...one man is on a mission to overflow a region with a series of
   // successive allocations.
+
   const uptr kClassID = 107;
-  const uptr kAllocationSize = DefaultSizeClassMap::Size(kClassID);
+  const uptr kAllocationSize = SpecialSizeClassMap::Size(kClassID);
   ASSERT_LT(2 * kAllocationSize, kRegionSize);
   ASSERT_GT(3 * kAllocationSize, kRegionSize);
   cache.Allocate(a, kClassID);
   EXPECT_DEATH(cache.Allocate(a, kClassID) && cache.Allocate(a, kClassID),
                "The process has exhausted");
+
+  const uptr Class2 = 100;
+  const uptr Size2 = SpecialSizeClassMap::Size(Class2);
+  ASSERT_EQ(Size2 * 8, kRegionSize);
+  char *p[7];
+  for (int i = 0; i < 7; i++) {
+    p[i] = (char*)cache.Allocate(a, Class2);
+    fprintf(stderr, "p[%d] %p s = %lx\n", i, (void*)p[i], Size2);
+    p[i][Size2 - 1] = 42;
+    if (i) ASSERT_LT(p[i - 1], p[i]);
+  }
+  EXPECT_DEATH(cache.Allocate(a, Class2), "The process has exhausted");
+  cache.Deallocate(a, Class2, p[0]);
+  cache.Drain(a);
+  ASSERT_EQ(p[6][Size2 - 1], 42);
   a->TestOnlyUnmap();
   delete a;
 }
+
 #endif
 
 TEST(SanitizerCommon, TwoLevelByteMap) {

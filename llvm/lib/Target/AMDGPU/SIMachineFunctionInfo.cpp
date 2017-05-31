@@ -48,8 +48,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     PrivateSegmentWaveByteOffsetSystemSGPR(AMDGPU::NoRegister),
     PSInputAddr(0),
     ReturnsVoid(true),
-    MaximumWorkGroupSize(0),
-    DebuggerReservedVGPRCount(0),
+    FlatWorkGroupSizes(0, 0),
+    WavesPerEU(0, 0),
     DebuggerWorkGroupIDStackObjectIndices({{0, 0, 0}}),
     DebuggerWorkItemIDStackObjectIndices({{0, 0, 0}}),
     LDSWaveSpillSize(0),
@@ -77,7 +77,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
     PrivateSegmentWaveByteOffset(false),
     WorkItemIDX(false),
     WorkItemIDY(false),
-    WorkItemIDZ(false) {
+    WorkItemIDZ(false),
+    PrivateMemoryInputPtr(false) {
   const SISubtarget &ST = MF.getSubtarget<SISubtarget>();
   const Function *F = MF.getFunction();
 
@@ -114,7 +115,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   if (HasStackObjects || MaySpill)
     PrivateSegmentWaveByteOffset = true;
 
-  if (ST.isAmdHsaOS()) {
+  if (ST.isAmdCodeObjectV2(MF)) {
     if (HasStackObjects || MaySpill)
       PrivateSegmentBuffer = true;
 
@@ -126,6 +127,9 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
 
     if (F->hasFnAttribute("amdgpu-dispatch-id"))
       DispatchID = true;
+  } else if (ST.isMesaGfxShader(MF)) {
+    if (HasStackObjects || MaySpill)
+      PrivateMemoryInputPtr = true;
   }
 
   // We don't need to worry about accessing spills with flat instructions.
@@ -135,13 +139,8 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
       ST.isAmdHsaOS())
     FlatScratchInit = true;
 
-  if (AMDGPU::isCompute(F->getCallingConv()))
-    MaximumWorkGroupSize = AMDGPU::getMaximumWorkGroupSize(*F);
-  else
-    MaximumWorkGroupSize = ST.getWavefrontSize();
-
-  if (ST.debuggerReserveRegs())
-    DebuggerReservedVGPRCount = 4;
+  FlatWorkGroupSizes = ST.getFlatWorkGroupSizes(*F);
+  WavesPerEU = ST.getWavesPerEU(*F);
 }
 
 unsigned SIMachineFunctionInfo::addPrivateSegmentBuffer(
@@ -187,6 +186,13 @@ unsigned SIMachineFunctionInfo::addFlatScratchInit(const SIRegisterInfo &TRI) {
   return FlatScratchInitUserSGPR;
 }
 
+unsigned SIMachineFunctionInfo::addPrivateMemoryPtr(const SIRegisterInfo &TRI) {
+  PrivateMemoryPtrUserSGPR = TRI.getMatchingSuperReg(
+    getNextUserSGPR(), AMDGPU::sub0, &AMDGPU::SReg_64RegClass);
+  NumUserSGPRs += 2;
+  return PrivateMemoryPtrUserSGPR;
+}
+
 SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg (
                                                        MachineFunction *MF,
                                                        unsigned FrameIndex,
@@ -228,9 +234,4 @@ SIMachineFunctionInfo::SpilledReg SIMachineFunctionInfo::getSpilledReg (
 
   Spill.VGPR = LaneVGPRs[LaneVGPRIdx];
   return Spill;
-}
-
-unsigned SIMachineFunctionInfo::getMaximumWorkGroupSize(
-                                              const MachineFunction &MF) const {
-  return MaximumWorkGroupSize;
 }

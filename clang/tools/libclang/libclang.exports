@@ -35,6 +35,7 @@ clang_Cursor_getReceiverType
 clang_Cursor_isAnonymous
 clang_Cursor_isBitField
 clang_Cursor_isDynamicCall
+clang_Cursor_isExternalSymbol
 clang_Cursor_isNull
 clang_Cursor_isObjCOptional
 clang_Cursor_isVariadic
@@ -88,6 +89,7 @@ clang_Type_getTemplateArgumentAsType
 clang_Type_getCXXRefQualifier
 clang_Type_visitFields
 clang_Type_getNamedType
+clang_Type_isTransparentTagTypedef
 clang_VerbatimBlockLineComment_getText
 clang_VerbatimLineComment_getText
 clang_HTMLTagComment_getAsString
@@ -142,6 +144,7 @@ clang_findReferencesInFile
 clang_findReferencesInFileWithBlock
 clang_formatDiagnostic
 clang_free
+clang_getAllSkippedRanges
 clang_getArgType
 clang_getArrayElementType
 clang_getArraySize
@@ -334,6 +337,9 @@ clang_Cursor_hasAttrs
 clang_Cursor_Evaluate
 clang_EvalResult_getKind
 clang_EvalResult_getAsInt
+clang_EvalResult_getAsLongLong
+clang_EvalResult_getAsUnsigned
+clang_EvalResult_isUnsignedInt
 clang_EvalResult_getAsDouble
 clang_EvalResult_getAsStr
 clang_EvalResult_dispose

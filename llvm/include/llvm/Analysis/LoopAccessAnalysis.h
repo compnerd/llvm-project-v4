@@ -20,7 +20,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AliasSetTracker.h"
-#include "llvm/Analysis/LoopPassManager.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/ValueHandle.h"
@@ -518,38 +518,6 @@ public:
   LoopAccessInfo(Loop *L, ScalarEvolution *SE, const TargetLibraryInfo *TLI,
                  AliasAnalysis *AA, DominatorTree *DT, LoopInfo *LI);
 
-  // FIXME:
-  // Hack for MSVC 2013 which sems like it can't synthesize this even 
-  // with default keyword:
-  // LoopAccessInfo(LoopAccessInfo &&LAI) = default;
-  LoopAccessInfo(LoopAccessInfo &&LAI)
-      : PSE(std::move(LAI.PSE)), PtrRtChecking(std::move(LAI.PtrRtChecking)),
-        DepChecker(std::move(LAI.DepChecker)), TheLoop(LAI.TheLoop),
-        NumLoads(LAI.NumLoads), NumStores(LAI.NumStores),
-        MaxSafeDepDistBytes(LAI.MaxSafeDepDistBytes), CanVecMem(LAI.CanVecMem),
-        StoreToLoopInvariantAddress(LAI.StoreToLoopInvariantAddress),
-        Report(std::move(LAI.Report)),
-        SymbolicStrides(std::move(LAI.SymbolicStrides)),
-        StrideSet(std::move(LAI.StrideSet)) {}
-  // LoopAccessInfo &operator=(LoopAccessInfo &&LAI) = default;
-  LoopAccessInfo &operator=(LoopAccessInfo &&LAI) {
-    assert(this != &LAI);
-
-    PSE = std::move(LAI.PSE);
-    PtrRtChecking = std::move(LAI.PtrRtChecking);
-    DepChecker = std::move(LAI.DepChecker);
-    TheLoop = LAI.TheLoop;
-    NumLoads = LAI.NumLoads;
-    NumStores = LAI.NumStores;
-    MaxSafeDepDistBytes = LAI.MaxSafeDepDistBytes;
-    CanVecMem = LAI.CanVecMem;
-    StoreToLoopInvariantAddress = LAI.StoreToLoopInvariantAddress;
-    Report = std::move(LAI.Report);
-    SymbolicStrides = std::move(LAI.SymbolicStrides);
-    StrideSet = std::move(LAI.StrideSet);
-    return *this;
-  }
-
   /// Return true we can analyze the memory accesses in the loop and there are
   /// no memory dependence cycles.
   bool canVectorizeMemory() const { return CanVecMem; }
@@ -720,7 +688,7 @@ const SCEV *replaceSymbolicStrideSCEV(PredicatedScalarEvolution &PSE,
 /// run-time assumptions.
 int64_t getPtrStride(PredicatedScalarEvolution &PSE, Value *Ptr, const Loop *Lp,
                      const ValueToValueMap &StridesMap = ValueToValueMap(),
-                     bool Assume = false);
+                     bool Assume = false, bool ShouldCheckWrap = true);
 
 /// \brief Returns true if the memory operations \p A and \p B are consecutive.
 /// This is a simple API that does not depend on the analysis pass. 
@@ -781,22 +749,12 @@ private:
 class LoopAccessAnalysis
     : public AnalysisInfoMixin<LoopAccessAnalysis> {
   friend AnalysisInfoMixin<LoopAccessAnalysis>;
-  static char PassID;
+  static AnalysisKey Key;
 
 public:
   typedef LoopAccessInfo Result;
-  Result run(Loop &, LoopAnalysisManager &);
-  static StringRef name() { return "LoopAccessAnalysis"; }
-};
 
-/// \brief Printer pass for the \c LoopAccessInfo results.
-class LoopAccessInfoPrinterPass
-    : public PassInfoMixin<LoopAccessInfoPrinterPass> {
-  raw_ostream &OS;
-
-public:
-  explicit LoopAccessInfoPrinterPass(raw_ostream &OS) : OS(OS) {}
-  PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM);
+  Result run(Loop &L, LoopAnalysisManager &AM, LoopStandardAnalysisResults &AR);
 };
 
 inline Instruction *MemoryDepChecker::Dependence::getSource(

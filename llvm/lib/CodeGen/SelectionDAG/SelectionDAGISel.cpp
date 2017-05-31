@@ -426,6 +426,10 @@ static void SplitCriticalSideEffectEdges(Function &Fn) {
 }
 
 bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
+  // If we already selected that function, we do not need to run SDISel.
+  if (mf.getProperties().hasProperty(
+          MachineFunctionProperties::Property::Selected))
+    return false;
   // Do some sanity-checking on the command-line options.
   assert((!EnableFastISelVerbose || TM.Options.EnableFastISel) &&
          "-fast-isel-verbose requires -fast-isel");
@@ -644,13 +648,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
     MRI.replaceRegWith(From, To);
   }
 
-  if (TLI->hasCopyImplyingStackAdjustment(MF))
-    MFI.setHasCopyImplyingStackAdjustment(true);
-
-  // Freeze the set of reserved registers now that MachineFrameInfo has been
-  // set up. All the information required by getReservedRegs() should be
-  // available now.
-  MRI.freezeReservedRegs(*MF);
+  TLI->finalizeLowering(*MF);
 
   // Release function-specific state. SDB and CurDAG are already cleared
   // at this point.
@@ -1010,10 +1008,10 @@ bool SelectionDAGISel::PrepareEHLandingPad() {
 
   // Add a label to mark the beginning of the landing pad.  Deletion of the
   // landing pad can thus be detected via the MachineModuleInfo.
-  MCSymbol *Label = MF->getMMI().addLandingPad(MBB);
+  MCSymbol *Label = MF->addLandingPad(MBB);
 
   // Assign the call site to the landing pad's begin label.
-  MF->getMMI().setCallSiteLandingPad(Label, SDB->LPadToCallSiteMap[MBB]);
+  MF->setCallSiteLandingPad(Label, SDB->LPadToCallSiteMap[MBB]);
 
   const MCInstrDesc &II = TII->get(TargetOpcode::EH_LABEL);
   BuildMI(*MBB, FuncInfo->InsertPt, SDB->getCurDebugLoc(), II)
@@ -1471,7 +1469,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
 
           if (EnableFastISelVerbose || EnableFastISelAbort) {
             dbgs() << "FastISel missed call: ";
-            Inst->dump();
+            Inst->print(dbgs());
           }
           if (EnableFastISelAbort > 2)
             // FastISel selector couldn't handle something and bailed.
@@ -1515,7 +1513,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
           } else {
             dbgs() << "FastISel miss: ";
           }
-          Inst->dump();
+          Inst->print(dbgs());
         }
         if (ShouldAbort)
           // FastISel selector couldn't handle something and bailed.
@@ -1552,6 +1550,12 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
       // block.
       bool HadTailCall;
       SelectBasicBlock(Begin, BI, HadTailCall);
+
+      // But if FastISel was run, we already selected some of the block.
+      // If we emitted a tail-call, we need to delete any previously emitted
+      // instruction that follows it.
+      if (HadTailCall && FuncInfo->InsertPt != FuncInfo->MBB->end())
+        FastIS->removeDeadCode(FuncInfo->InsertPt, FuncInfo->MBB->end());
     }
 
     FinishBasicBlock();
@@ -2244,7 +2248,7 @@ GetVBR(uint64_t Val, const unsigned char *MatcherTable, unsigned &Idx) {
 /// to use the new results.
 void SelectionDAGISel::UpdateChains(
     SDNode *NodeToMatch, SDValue InputChain,
-    const SmallVectorImpl<SDNode *> &ChainNodesMatched, bool isMorphNodeTo) {
+    SmallVectorImpl<SDNode *> &ChainNodesMatched, bool isMorphNodeTo) {
   SmallVector<SDNode*, 4> NowDeadNodes;
 
   // Now that all the normal results are replaced, we replace the chain and
@@ -2256,6 +2260,11 @@ void SelectionDAGISel::UpdateChains(
     // Replace all the chain results with the final chain we ended up with.
     for (unsigned i = 0, e = ChainNodesMatched.size(); i != e; ++i) {
       SDNode *ChainNode = ChainNodesMatched[i];
+      // If ChainNode is null, it's because we replaced it on a previous
+      // iteration and we cleared it out of the map. Just skip it.
+      if (!ChainNode)
+        continue;
+
       assert(ChainNode->getOpcode() != ISD::DELETED_NODE &&
              "Deleted node left in chain");
 
@@ -2268,6 +2277,11 @@ void SelectionDAGISel::UpdateChains(
       if (ChainVal.getValueType() == MVT::Glue)
         ChainVal = ChainVal.getValue(ChainVal->getNumValues()-2);
       assert(ChainVal.getValueType() == MVT::Other && "Not a chain?");
+      SelectionDAG::DAGNodeDeletedListener NDL(
+          *CurDAG, [&](SDNode *N, SDNode *E) {
+            std::replace(ChainNodesMatched.begin(), ChainNodesMatched.end(), N,
+                         static_cast<SDNode *>(nullptr));
+          });
       CurDAG->ReplaceAllUsesOfValueWith(ChainVal, InputChain);
 
       // If the node became dead and we haven't already seen it, delete it.
@@ -2768,14 +2782,15 @@ struct MatchScope {
 /// for this.
 class MatchStateUpdater : public SelectionDAG::DAGUpdateListener
 {
-      SmallVectorImpl<std::pair<SDValue, SDNode*> > &RecordedNodes;
-      SmallVectorImpl<MatchScope> &MatchScopes;
+  SDNode **NodeToMatch;
+  SmallVectorImpl<std::pair<SDValue, SDNode *>> &RecordedNodes;
+  SmallVectorImpl<MatchScope> &MatchScopes;
 public:
-  MatchStateUpdater(SelectionDAG &DAG,
-                    SmallVectorImpl<std::pair<SDValue, SDNode*> > &RN,
-                    SmallVectorImpl<MatchScope> &MS) :
-    SelectionDAG::DAGUpdateListener(DAG),
-    RecordedNodes(RN), MatchScopes(MS) { }
+  MatchStateUpdater(SelectionDAG &DAG, SDNode **NodeToMatch,
+                    SmallVectorImpl<std::pair<SDValue, SDNode *>> &RN,
+                    SmallVectorImpl<MatchScope> &MS)
+      : SelectionDAG::DAGUpdateListener(DAG), NodeToMatch(NodeToMatch),
+        RecordedNodes(RN), MatchScopes(MS) {}
 
   void NodeDeleted(SDNode *N, SDNode *E) override {
     // Some early-returns here to avoid the search if we deleted the node or
@@ -2785,6 +2800,9 @@ public:
     // update listener during matching a complex patterns.
     if (!E || E->isMachineOpcode())
       return;
+    // Check if NodeToMatch was updated.
+    if (N == *NodeToMatch)
+      *NodeToMatch = E;
     // Performing linear search here does not matter because we almost never
     // run this code.  You'd have to have a CSE during complex pattern
     // matching.
@@ -3077,7 +3095,7 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
       // consistent.
       std::unique_ptr<MatchStateUpdater> MSU;
       if (ComplexPatternFuncMutatesDAG())
-        MSU.reset(new MatchStateUpdater(*CurDAG, RecordedNodes,
+        MSU.reset(new MatchStateUpdater(*CurDAG, &NodeToMatch, RecordedNodes,
                                         MatchScopes));
 
       if (!CheckComplexPattern(NodeToMatch, RecordedNodes[RecNo].second,
@@ -3363,6 +3381,15 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
       RecordedNodes.push_back(std::pair<SDValue,SDNode*>(Res, nullptr));
       continue;
     }
+    case OPC_Coverage: {
+      // This is emitted right before MorphNode/EmitNode.
+      // So it should be safe to assume that this node has been selected
+      unsigned index = MatcherTable[MatcherIndex++];
+      index |= (MatcherTable[MatcherIndex++] << 8);
+      dbgs() << "COVERED: " << getPatternForIndex(index) << "\n";
+      dbgs() << "INCLUDED: " << getIncludePathForIndex(index) << "\n";
+      continue;
+    }
 
     case OPC_EmitNode:     case OPC_MorphNodeTo:
     case OPC_EmitNode0:    case OPC_EmitNode1:    case OPC_EmitNode2:
@@ -3561,7 +3588,7 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
                 NodeToMatch->getValueType(i) == MVT::iPTR ||
                 Res.getValueType() == MVT::iPTR ||
                 NodeToMatch->getValueType(i).getSizeInBits() ==
-                    Res.getValueType().getSizeInBits()) &&
+                    Res.getValueSizeInBits()) &&
                "invalid replacement");
         CurDAG->ReplaceAllUsesOfValueWith(SDValue(NodeToMatch, i), Res);
       }
@@ -3653,7 +3680,7 @@ void SelectionDAGISel::CannotYetSelect(SDNode *N) {
     unsigned iid =
       cast<ConstantSDNode>(N->getOperand(HasInputChain))->getZExtValue();
     if (iid < Intrinsic::num_intrinsics)
-      Msg << "intrinsic %" << Intrinsic::getName((Intrinsic::ID)iid);
+      Msg << "intrinsic %" << Intrinsic::getName((Intrinsic::ID)iid, None);
     else if (const TargetIntrinsicInfo *TII = TM.getIntrinsicInfo())
       Msg << "target intrinsic %" << TII->getName(iid);
     else

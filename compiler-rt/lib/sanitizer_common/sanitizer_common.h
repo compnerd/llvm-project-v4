@@ -103,7 +103,9 @@ uptr FindAvailableMemoryRange(uptr size, uptr alignment, uptr left_padding);
 
 // Used to check if we can map shadow memory to a fixed location.
 bool MemoryRangeIsAvailable(uptr range_start, uptr range_end);
-void FlushUnneededShadowMemory(uptr addr, uptr size);
+// Releases memory pages entirely within the [beg, end] address range. Noop if
+// the provided range does not contain at least one entire page.
+void ReleaseMemoryPagesToOS(uptr beg, uptr end);
 void IncreaseTotalMmap(uptr size);
 void DecreaseTotalMmap(uptr size);
 uptr GetRSS();
@@ -118,16 +120,14 @@ void RunFreeHooks(const void *ptr);
 // keep frame size low.
 // FIXME: use InternalAlloc instead of MmapOrDie once
 // InternalAlloc is made libc-free.
-template<typename T>
+template <typename T>
 class InternalScopedBuffer {
  public:
   explicit InternalScopedBuffer(uptr cnt) {
     cnt_ = cnt;
-    ptr_ = (T*)MmapOrDie(cnt * sizeof(T), "InternalScopedBuffer");
+    ptr_ = (T *)MmapOrDie(cnt * sizeof(T), "InternalScopedBuffer");
   }
-  ~InternalScopedBuffer() {
-    UnmapOrDie(ptr_, cnt_ * sizeof(T));
-  }
+  ~InternalScopedBuffer() { UnmapOrDie(ptr_, cnt_ * sizeof(T)); }
   T &operator[](uptr i) { return ptr_[i]; }
   T *data() { return ptr_; }
   uptr size() { return cnt_ * sizeof(T); }
@@ -135,9 +135,11 @@ class InternalScopedBuffer {
  private:
   T *ptr_;
   uptr cnt_;
-  // Disallow evil constructors.
-  InternalScopedBuffer(const InternalScopedBuffer&);
-  void operator=(const InternalScopedBuffer&);
+  // Disallow copies and moves.
+  InternalScopedBuffer(const InternalScopedBuffer &) = delete;
+  InternalScopedBuffer &operator=(const InternalScopedBuffer &) = delete;
+  InternalScopedBuffer(InternalScopedBuffer &&) = delete;
+  InternalScopedBuffer &operator=(InternalScopedBuffer &&) = delete;
 };
 
 class InternalScopedString : public InternalScopedBuffer<char> {
@@ -334,6 +336,7 @@ void SleepForMillis(int millis);
 u64 NanoTime();
 int Atexit(void (*function)(void));
 void SortArray(uptr *array, uptr size);
+void SortArray(u32 *array, uptr size);
 bool TemplateMatch(const char *templ, const char *str);
 
 // Exit
@@ -388,12 +391,16 @@ const int kMaxSummaryLength = 1024;
 // Construct a one-line string:
 //   SUMMARY: SanitizerToolName: error_message
 // and pass it to __sanitizer_report_error_summary.
-void ReportErrorSummary(const char *error_message);
+// If alt_tool_name is provided, it's used in place of SanitizerToolName.
+void ReportErrorSummary(const char *error_message,
+                        const char *alt_tool_name = nullptr);
 // Same as above, but construct error_message as:
 //   error_type file:line[:column][ function]
-void ReportErrorSummary(const char *error_type, const AddressInfo &info);
+void ReportErrorSummary(const char *error_type, const AddressInfo &info,
+                        const char *alt_tool_name = nullptr);
 // Same as above, but obtains AddressInfo by symbolizing top stack trace frame.
-void ReportErrorSummary(const char *error_type, const StackTrace *trace);
+void ReportErrorSummary(const char *error_type, const StackTrace *trace,
+                        const char *alt_tool_name = nullptr);
 
 // Math
 #if SANITIZER_WINDOWS && !defined(__clang__) && !defined(__GNUC__)
@@ -450,8 +457,8 @@ INLINE uptr RoundUpToPowerOfTwo(uptr size) {
   if (IsPowerOfTwo(size)) return size;
 
   uptr up = MostSignificantSetBitIndex(size);
-  CHECK(size < (1ULL << (up + 1)));
-  CHECK(size > (1ULL << up));
+  CHECK_LT(size, (1ULL << (up + 1)));
+  CHECK_GT(size, (1ULL << up));
   return 1ULL << (up + 1);
 }
 
@@ -545,6 +552,13 @@ class InternalMmapVectorNoCtor {
   uptr capacity() const {
     return capacity_;
   }
+  void resize(uptr new_size) {
+    Resize(new_size);
+    if (new_size > size_) {
+      internal_memset(&data_[size_], 0, sizeof(T) * (new_size - size_));
+    }
+    size_ = new_size;
+  }
 
   void clear() { size_ = 0; }
   bool empty() const { return size() == 0; }
@@ -629,20 +643,19 @@ void InternalSort(Container *v, uptr size, Compare comp) {
   }
 }
 
-template<class Container, class Value, class Compare>
-uptr InternalBinarySearch(const Container &v, uptr first, uptr last,
-                          const Value &val, Compare comp) {
-  uptr not_found = last + 1;
-  while (last >= first) {
+// Works like std::lower_bound: finds the first element that is not less
+// than the val.
+template <class Container, class Value, class Compare>
+uptr InternalLowerBound(const Container &v, uptr first, uptr last,
+                        const Value &val, Compare comp) {
+  while (last > first) {
     uptr mid = (first + last) / 2;
     if (comp(v[mid], val))
       first = mid + 1;
-    else if (comp(val, v[mid]))
-      last = mid - 1;
     else
-      return mid;
+      last = mid;
   }
-  return not_found;
+  return first;
 }
 
 enum ModuleArch {
@@ -681,6 +694,7 @@ inline const char *ModuleArchToString(ModuleArch arch) {
       return "arm64";
   }
   CHECK(0 && "Invalid module arch");
+  return "";
 }
 
 const uptr kModuleUUIDSize = 16;
@@ -895,6 +909,10 @@ struct StackDepotStats {
   uptr n_uniq_ids;
   uptr allocated;
 };
+
+// The default value for allocator_release_to_os_interval_ms common flag to
+// indicate that sanitizer allocator should not attempt to release memory to OS.
+const s32 kReleaseToOSIntervalNever = -1;
 
 }  // namespace __sanitizer
 

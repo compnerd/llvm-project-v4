@@ -15,6 +15,9 @@ function(llvm_update_compile_flags name)
       message(AUTHOR_WARNING "Exception handling requires RTTI. Enabling RTTI for ${name}")
       set(LLVM_REQUIRES_RTTI ON)
     endif()
+    if(MSVC)
+      list(APPEND LLVM_COMPILE_FLAGS "/EHsc")
+    endif()
   else()
     if(LLVM_COMPILER_IS_GCC_COMPATIBLE)
       list(APPEND LLVM_COMPILE_FLAGS "-fno-exceptions")
@@ -35,6 +38,8 @@ function(llvm_update_compile_flags name)
     elseif (MSVC)
       list(APPEND LLVM_COMPILE_FLAGS "/GR-")
     endif ()
+  elseif(MSVC)
+    list(APPEND LLVM_COMPILE_FLAGS "/GR")
   endif()
 
   # Assume that;
@@ -407,6 +412,7 @@ function(llvm_add_library name)
 
   if(ARG_MODULE)
     add_library(${name} MODULE ${ALL_FILES})
+    llvm_setup_rpath(${name})
   elseif(ARG_SHARED)
     add_windows_version_resource_file(ALL_FILES ${ALL_FILES})
     add_library(${name} SHARED ${ALL_FILES})
@@ -416,6 +422,8 @@ function(llvm_add_library name)
   else()
     add_library(${name} STATIC ${ALL_FILES})
   endif()
+
+  setup_dependency_debugging(${name} ${LLVM_COMMON_DEPENDS})
 
   if(DEFINED windows_resource_file)
     set_windows_version_resource_properties(${name} ${windows_resource_file})
@@ -447,6 +455,16 @@ function(llvm_add_library name)
       set_target_properties(${name} PROPERTIES
         PREFIX ""
         )
+    endif()
+
+    # Set SOVERSION on shared libraries that lack explicit SONAME
+    # specifier, on *nix systems that are not Darwin.
+    if(UNIX AND NOT APPLE AND NOT ARG_SONAME)
+      set_target_properties(${name}
+        PROPERTIES
+        # Since 4.0.0, the ABI version is indicated by the major version
+        SOVERSION ${LLVM_VERSION_MAJOR}
+        VERSION ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}${LLVM_VERSION_SUFFIX})
     endif()
   endif()
 
@@ -553,7 +571,8 @@ macro(add_llvm_library name)
   elseif(ARG_BUILDTREE_ONLY)
     set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS_BUILDTREE_ONLY ${name})
   else()
-    if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY OR ${name} STREQUAL "LTO")
+    if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY OR ${name} STREQUAL "LTO" OR
+        (LLVM_LINK_LLVM_DYLIB AND ${name} STREQUAL "LLVM"))
       set(install_dir lib${LLVM_LIBDIR_SUFFIX})
       if(ARG_SHARED OR BUILD_SHARED_LIBS)
         if(WIN32 OR CYGWIN OR MINGW)
@@ -566,10 +585,16 @@ macro(add_llvm_library name)
         set(install_type ARCHIVE)
       endif()
 
+      if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
+          NOT LLVM_DISTRIBUTION_COMPONENTS)
+        set(export_to_llvmexports EXPORT LLVMExports)
+        set_property(GLOBAL PROPERTY LLVM_HAS_EXPORTS True)
+      endif()
+
       install(TARGETS ${name}
-            EXPORT LLVMExports
-            ${install_type} DESTINATION ${install_dir}
-            COMPONENT ${name})
+              ${export_to_llvmexports}
+              ${install_type} DESTINATION ${install_dir}
+              COMPONENT ${name})
 
       if (NOT CMAKE_CONFIGURATION_TYPES)
         add_custom_target(install-${name}
@@ -600,10 +625,17 @@ macro(add_llvm_loadable_module name)
         else()
           set(dlldir "lib${LLVM_LIBDIR_SUFFIX}")
         endif()
+
+        if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
+            NOT LLVM_DISTRIBUTION_COMPONENTS)
+          set(export_to_llvmexports EXPORT LLVMExports)
+          set_property(GLOBAL PROPERTY LLVM_HAS_EXPORTS True)
+        endif()
+
         install(TARGETS ${name}
-          EXPORT LLVMExports
-          LIBRARY DESTINATION ${dlldir}
-          ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX})
+                ${export_to_llvmexports}
+                LIBRARY DESTINATION ${dlldir}
+                ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX})
       endif()
       set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${name})
     endif()
@@ -614,8 +646,10 @@ endmacro(add_llvm_loadable_module name)
 
 
 macro(add_llvm_executable name)
-  cmake_parse_arguments(ARG "DISABLE_LLVM_LINK_LLVM_DYLIB;IGNORE_EXTERNALIZE_DEBUGINFO" "" "" ${ARGN})
+  cmake_parse_arguments(ARG "DISABLE_LLVM_LINK_LLVM_DYLIB;IGNORE_EXTERNALIZE_DEBUGINFO;NO_INSTALL_RPATH" "" "DEPENDS" ${ARGN})
   llvm_process_sources( ALL_FILES ${ARG_UNPARSED_ARGUMENTS} )
+
+  list(APPEND LLVM_COMMON_DEPENDS ${ARG_DEPENDS})
 
   # Generate objlib
   if(LLVM_ENABLE_OBJLIB)
@@ -637,14 +671,18 @@ macro(add_llvm_executable name)
     # it forces Xcode to properly link the static library.
     list(APPEND ALL_FILES "${LLVM_MAIN_SRC_DIR}/cmake/dummy.cpp")
   endif()
-
+  
   if( EXCLUDE_FROM_ALL )
     add_executable(${name} EXCLUDE_FROM_ALL ${ALL_FILES})
   else()
     add_executable(${name} ${ALL_FILES})
   endif()
 
-  llvm_setup_rpath(${name})
+  setup_dependency_debugging(${name} ${LLVM_COMMON_DEPENDS})
+
+  if(NOT ARG_NO_INSTALL_RPATH)
+    llvm_setup_rpath(${name})
+  endif()
 
   if(DEFINED windows_resource_file)
     set_windows_version_resource_properties(${name} ${windows_resource_file})
@@ -680,11 +718,11 @@ macro(add_llvm_executable name)
   if(NOT ARG_IGNORE_EXTERNALIZE_DEBUGINFO)
     llvm_externalize_debuginfo(${name})
   endif()
-  if (PTHREAD_LIB)
+  if (LLVM_PTHREAD_LIB)
     # libpthreads overrides some standard library symbols, so main
     # executable must be linked with it in order to provide consistent
     # API for all shared libaries loaded by this executable.
-    target_link_libraries(${name} ${PTHREAD_LIB})
+    target_link_libraries(${name} ${LLVM_PTHREAD_LIB})
   endif()
 endmacro(add_llvm_executable name)
 
@@ -777,8 +815,14 @@ macro(add_llvm_tool name)
 
   if ( ${name} IN_LIST LLVM_TOOLCHAIN_TOOLS OR NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     if( LLVM_BUILD_TOOLS )
+      if(${name} IN_LIST LLVM_DISTRIBUTION_COMPONENTS OR
+          NOT LLVM_DISTRIBUTION_COMPONENTS)
+        set(export_to_llvmexports EXPORT LLVMExports)
+        set_property(GLOBAL PROPERTY LLVM_HAS_EXPORTS True)
+      endif()
+
       install(TARGETS ${name}
-              EXPORT LLVMExports
+              ${export_to_llvmexports}
               RUNTIME DESTINATION ${LLVM_TOOLS_INSTALL_DIR}
               COMPONENT ${name})
 
@@ -961,24 +1005,29 @@ function(add_unittest test_suite test_name)
   endif()
 
   include_directories(${LLVM_MAIN_SRC_DIR}/utils/unittest/googletest/include)
+  include_directories(${LLVM_MAIN_SRC_DIR}/utils/unittest/googlemock/include)
   if (NOT LLVM_ENABLE_THREADS)
     list(APPEND LLVM_COMPILE_DEFINITIONS GTEST_HAS_PTHREAD=0)
   endif ()
 
-  if (SUPPORTS_NO_VARIADIC_MACROS_FLAG)
+  if (SUPPORTS_VARIADIC_MACROS_FLAG)
     list(APPEND LLVM_COMPILE_FLAGS "-Wno-variadic-macros")
   endif ()
+  # Some parts of gtest rely on this GNU extension, don't warn on it.
+  if(SUPPORTS_GNU_ZERO_VARIADIC_MACRO_ARGUMENTS_FLAG)
+    list(APPEND LLVM_COMPILE_FLAGS "-Wno-gnu-zero-variadic-macro-arguments")
+  endif()
 
   set(LLVM_REQUIRES_RTTI OFF)
 
   list(APPEND LLVM_LINK_COMPONENTS Support) # gtest needs it for raw_ostream
-  add_llvm_executable(${test_name} IGNORE_EXTERNALIZE_DEBUGINFO ${ARGN})
+  add_llvm_executable(${test_name} IGNORE_EXTERNALIZE_DEBUGINFO NO_INSTALL_RPATH ${ARGN})
   set(outdir ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR})
   set_output_directory(${test_name} BINARY_DIR ${outdir} LIBRARY_DIR ${outdir})
   # libpthreads overrides some standard library symbols, so main
   # executable must be linked with it in order to provide consistent
   # API for all shared libaries loaded by this executable.
-  target_link_libraries(${test_name} gtest_main gtest ${PTHREAD_LIB})
+  target_link_libraries(${test_name} gtest_main gtest ${LLVM_PTHREAD_LIB})
 
   add_dependencies(${test_suite} ${test_name})
   get_target_property(test_suite_folder ${test_suite} FOLDER)
@@ -1016,6 +1065,19 @@ function(llvm_add_go_executable binary pkgpath)
     endif()
   endif()
 endfunction()
+
+# This function canonicalize the CMake variables passed by names
+# from CMake boolean to 0/1 suitable for passing into Python or C++,
+# in place.
+function(llvm_canonicalize_cmake_booleans)
+  foreach(var ${ARGN})
+    if(${var})
+      set(${var} 1 PARENT_SCOPE)
+    else()
+      set(${var} 0 PARENT_SCOPE)
+    endif()
+  endforeach()
+endfunction(llvm_canonicalize_cmake_booleans)
 
 # This function provides an automatic way to 'configure'-like generate a file
 # based on a set of common and custom variables, specifically targeting the
@@ -1082,10 +1144,16 @@ function(add_lit_target target comment)
   if (NOT CMAKE_CFG_INTDIR STREQUAL ".")
     list(APPEND LIT_ARGS --param build_mode=${CMAKE_CFG_INTDIR})
   endif ()
-  if (LLVM_MAIN_SRC_DIR)
-    set (LIT_COMMAND ${PYTHON_EXECUTABLE} ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
+  if (EXISTS ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
+    # reset cache after erraneous r283029
+    # TODO: remove this once all buildbots run
+    if (LIT_COMMAND STREQUAL "${PYTHON_EXECUTABLE} ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py")
+      unset(LIT_COMMAND CACHE)
+    endif()
+    set (LIT_COMMAND "${PYTHON_EXECUTABLE};${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py"
+         CACHE STRING "Command used to spawn llvm-lit")
   else()
-    find_program(LIT_COMMAND llvm-lit)
+    find_program(LIT_COMMAND NAMES llvm-lit lit.py lit)
   endif ()
   list(APPEND LIT_COMMAND ${LIT_ARGS})
   foreach(param ${ARG_PARAMS})
@@ -1289,6 +1357,7 @@ function(add_llvm_tool_symlink link_name target)
     set(target_name ${link_name}-link)
   endif()
 
+
   if(ARG_ALWAYS_GENERATE)
     set_property(DIRECTORY APPEND PROPERTY
       ADDITIONAL_MAKE_CLEAN_FILES ${dest_binary})
@@ -1370,4 +1439,20 @@ function(llvm_setup_rpath name)
                         BUILD_WITH_INSTALL_RPATH On
                         INSTALL_RPATH "${_install_rpath}"
                         ${_install_name_dir})
+endfunction()
+
+function(setup_dependency_debugging name)
+  if(NOT LLVM_DEPENDENCY_DEBUGGING)
+    return()
+  endif()
+
+  if("intrinsics_gen" IN_LIST ARGN)
+    return()
+  endif()
+
+  set(deny_attributes_gen "(deny file* (literal \"${LLVM_BINARY_DIR}/include/llvm/IR/Attributes.gen\"))")
+  set(deny_intrinsics_gen "(deny file* (literal \"${LLVM_BINARY_DIR}/include/llvm/IR/Intrinsics.gen\"))")
+
+  set(sandbox_command "sandbox-exec -p '(version 1) (allow default) ${deny_attributes_gen} ${deny_intrinsics_gen}'")
+  set_target_properties(${name} PROPERTIES RULE_LAUNCH_COMPILE ${sandbox_command})
 endfunction()

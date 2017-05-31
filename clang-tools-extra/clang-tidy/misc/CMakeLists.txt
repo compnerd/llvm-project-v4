@@ -24,14 +24,15 @@ add_clang_library(clangTidyMiscModule
   NewDeleteOverloadsCheck.cpp
   NoexceptMoveConstructorCheck.cpp
   NonCopyableObjects.cpp
-  PointerAndIntegralOperationCheck.cpp
   RedundantExpressionCheck.cpp
   SizeofContainerCheck.cpp
   SizeofExpressionCheck.cpp
   StaticAssertCheck.cpp
+  StringCompareCheck.cpp
   StringConstructorCheck.cpp
   StringIntegerAssignmentCheck.cpp
   StringLiteralWithEmbeddedNulCheck.cpp
+  SuspiciousEnumUsageCheck.cpp
   SuspiciousMissingCommaCheck.cpp
   SuspiciousSemicolonCheck.cpp
   SuspiciousStringCompareCheck.cpp

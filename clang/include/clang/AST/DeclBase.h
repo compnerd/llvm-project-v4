@@ -33,6 +33,8 @@ class DeclContext;
 class DeclarationName;
 class DependentDiagnostic;
 class EnumDecl;
+class ExportDecl;
+class ExternalSourceSymbolAttr;
 class FunctionDecl;
 class FunctionType;
 enum Linkage : unsigned char;
@@ -561,11 +563,19 @@ public:
     NextInContextAndBits.setInt(Bits);
   }
 
+  /// \brief Looks on this and related declarations for an applicable
+  /// external source symbol attribute.
+  ExternalSourceSymbolAttr *getExternalSourceSymbolAttr() const;
+
   /// \brief Whether this declaration was marked as being private to the
   /// module in which it was defined.
   bool isModulePrivate() const {
     return NextInContextAndBits.getInt() & ModulePrivateFlag;
   }
+
+  /// \brief Whether this declaration is exported (by virtue of being lexically
+  /// within an ExportDecl or by being a NamespaceDecl).
+  bool isExported() const;
 
   /// Return true if this declaration has an attribute which acts as
   /// definition of the entity, such as 'alias' or 'ifunc'.
@@ -600,7 +610,7 @@ public:
   /// the given declaration (e.g., preferring 'unavailable' to
   /// 'deprecated').
   ///
-  /// \param[out] Message If non-NULL and the result is not \c
+  /// \param Message If non-NULL and the result is not \c
   /// AR_Available, will be set to a (possibly empty) message
   /// describing why the declaration has not been introduced, is
   /// deprecated, or is unavailable.
@@ -610,6 +620,14 @@ public:
   AvailabilityResult
   getAvailability(std::string *Message = nullptr,
                   VersionTuple EnclosingVersion = VersionTuple()) const;
+
+  /// \brief Retrieve the version of the target platform in which this
+  /// declaration was introduced.
+  ///
+  /// \returns An empty version tuple if this declaration has no 'introduced'
+  /// availability attributes, or the version tuple that's specified in the
+  /// attribute otherwise.
+  VersionTuple getVersionIntroduced() const;
 
   /// \brief Determine whether this declaration is marked 'deprecated'.
   ///
@@ -1135,6 +1153,7 @@ public:
 ///   ObjCMethodDecl
 ///   ObjCContainerDecl
 ///   LinkageSpecDecl
+///   ExportDecl
 ///   BlockDecl
 ///   OMPDeclareReductionDecl
 ///
@@ -1279,7 +1298,8 @@ public:
 
   /// \brief Test whether the context supports looking up names.
   bool isLookupContext() const {
-    return !isFunctionOrMethod() && DeclKind != Decl::LinkageSpec;
+    return !isFunctionOrMethod() && DeclKind != Decl::LinkageSpec &&
+           DeclKind != Decl::Export;
   }
 
   bool isFileContext() const {

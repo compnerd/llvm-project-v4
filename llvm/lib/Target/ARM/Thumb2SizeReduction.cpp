@@ -148,10 +148,10 @@ namespace {
 
     MachineFunctionProperties getRequiredProperties() const override {
       return MachineFunctionProperties().set(
-          MachineFunctionProperties::Property::AllVRegsAllocated);
+          MachineFunctionProperties::Property::NoVRegs);
     }
 
-    const char *getPassName() const override {
+    StringRef getPassName() const override {
       return "Thumb2 instruction size reduction pass";
     }
 
@@ -655,7 +655,7 @@ Thumb2SizeReduce::ReduceSpecial(MachineBasicBlock &MBB, MachineInstr *MI,
       case ARM::t2ADDSri: {
         if (ReduceTo2Addr(MBB, MI, Entry, LiveCPSR, IsSelfLoop))
           return true;
-        // fallthrough
+        LLVM_FALLTHROUGH;
       }
       case ARM::t2ADDSrr:
         return ReduceToNarrow(MBB, MI, Entry, LiveCPSR, IsSelfLoop);

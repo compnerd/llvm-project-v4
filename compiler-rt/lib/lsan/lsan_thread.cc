@@ -36,7 +36,7 @@ static const uptr kMaxThreads = 1 << 13;
 static const uptr kThreadQuarantineSize = 64;
 
 void InitializeThreadRegistry() {
-  static char thread_registry_placeholder[sizeof(ThreadRegistry)] ALIGNED(64);
+  static ALIGNED(64) char thread_registry_placeholder[sizeof(ThreadRegistry)];
   thread_registry = new(thread_registry_placeholder)
     ThreadRegistry(CreateThreadContext, kMaxThreads, kThreadQuarantineSize);
 }
@@ -97,7 +97,7 @@ void ThreadStart(u32 tid, uptr os_id) {
   args.tls_end = args.tls_begin + tls_size;
   GetAllocatorCacheRange(&args.cache_begin, &args.cache_end);
   args.dtls = DTLS_Get();
-  thread_registry->StartThread(tid, os_id, &args);
+  thread_registry->StartThread(tid, os_id, /*workerthread*/ false, &args);
 }
 
 void ThreadFinish() {

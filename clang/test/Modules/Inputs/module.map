@@ -265,6 +265,11 @@ module diag_pragma {
   header "diag_pragma.h"
 }
 
+module pragma_pack {
+  module set { header "pragma_pack_set.h" }
+  module empty { header "empty.h" }
+}
+
 module dummy {
   header "dummy.h"
 }
@@ -431,4 +436,8 @@ module DebugNestedA {
 module DebugNestedB {
   header "DebugNestedB.h"
   export *
+}
+
+module objcAtKeywordMissingEnd {
+  header "objcAtKeywordMissingEnd.h"
 }

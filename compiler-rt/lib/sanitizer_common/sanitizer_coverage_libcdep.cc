@@ -113,8 +113,6 @@ class CoverageData {
   uptr *data();
   uptr size() const;
 
-  void SetPcBuffer(uptr* data, uptr length);
-
  private:
   struct NamedPcRange {
     const char *copied_module_name;
@@ -145,9 +143,6 @@ class CoverageData {
   // Descriptor of the file mapped pc array.
   fd_t pc_fd;
 
-  uptr *pc_buffer;
-  uptr pc_buffer_len;
-
   // Vector of coverage guard arrays, protected by mu.
   InternalMmapVectorNoCtor<s32*> guard_array_vec;
 
@@ -176,7 +171,11 @@ class CoverageData {
   //   - not thread-safe;
   //   - does not support long traces;
   //   - not tuned for performance.
-  static const uptr kTrEventArrayMaxSize = FIRST_32_SECOND_64(1 << 22, 1 << 30);
+  // Windows doesn't do overcommit (committed virtual memory costs swap), so
+  // programs can't reliably map such large amounts of virtual memory.
+  // TODO(etienneb): Find a way to support coverage of larger executable
+static const uptr kTrEventArrayMaxSize =
+    (SANITIZER_WORDSIZE == 32 || SANITIZER_WINDOWS) ? 1 << 22 : 1 << 30;
   u32 *tr_event_array;
   uptr tr_event_array_size;
   u32 *tr_event_pointer;
@@ -218,9 +217,6 @@ void CoverageData::Enable() {
   } else {
     atomic_store(&pc_array_size, kPcArrayMaxSize, memory_order_relaxed);
   }
-
-  pc_buffer = nullptr;
-  pc_buffer_len = 0;
 
   cc_array = reinterpret_cast<uptr **>(MmapNoReserveOrDie(
       sizeof(uptr *) * kCcArrayMaxSize, "CovInit::cc_array"));
@@ -427,7 +423,6 @@ void CoverageData::Add(uptr pc, u32 *guard) {
            atomic_load(&pc_array_size, memory_order_acquire));
   uptr counter = atomic_fetch_add(&coverage_counter, 1, memory_order_relaxed);
   pc_array[idx] = BundlePcAndCounter(pc, counter);
-  if (pc_buffer && counter < pc_buffer_len) pc_buffer[counter] = pc;
 }
 
 // Registers a pair caller=>callee.
@@ -881,11 +876,6 @@ void CoverageData::DumpAll() {
   DumpCallerCalleePairs();
 }
 
-void CoverageData::SetPcBuffer(uptr* data, uptr length) {
-  pc_buffer = data;
-  pc_buffer_len = length;
-}
-
 void CovPrepareForSandboxing(__sanitizer_sandbox_arguments *args) {
   if (!args) return;
   if (!coverage_enabled) return;
@@ -968,6 +958,9 @@ SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_cov_init() {
 }
 SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_cov_dump() {
   coverage_data.DumpAll();
+#if SANITIZER_LINUX
+  __sanitizer_dump_trace_pc_guard_coverage();
+#endif
 }
 SANITIZER_INTERFACE_ATTRIBUTE void
 __sanitizer_cov_module_init(s32 *guards, uptr npcs, u8 *counters,
@@ -1021,16 +1014,6 @@ uptr __sanitizer_get_coverage_guards(uptr **data) {
 }
 
 SANITIZER_INTERFACE_ATTRIBUTE
-void __sanitizer_set_coverage_pc_buffer(uptr *data, uptr length) {
-  coverage_data.SetPcBuffer(data, length);
-}
-
-SANITIZER_INTERFACE_ATTRIBUTE
-uptr __sanitizer_get_coverage_pc_buffer_pos() {
-  return __sanitizer_get_total_unique_coverage();
-}
-
-SANITIZER_INTERFACE_ATTRIBUTE
 uptr __sanitizer_get_number_of_counters() {
   return coverage_data.GetNumberOf8bitCounters();
 }
@@ -1040,8 +1023,26 @@ uptr __sanitizer_update_counter_bitset_and_clear_counters(u8 *bitset) {
   return coverage_data.Update8bitCounterBitsetAndClearCounters(bitset);
 }
 // Default empty implementations (weak). Users should redefine them.
+#if !SANITIZER_WINDOWS  // weak does not work on Windows.
 SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
 void __sanitizer_cov_trace_cmp() {}
 SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_cmp1() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_cmp2() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_cmp4() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_cmp8() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
 void __sanitizer_cov_trace_switch() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_div4() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_div8() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_gep() {}
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+void __sanitizer_cov_trace_pc_indir() {}
+#endif  // !SANITIZER_WINDOWS
 } // extern "C"

@@ -4,7 +4,9 @@
 // RUN: %clang_cc1 -fsyntax-only %s -I%t  -verify
 
 // expected-error@a.h:1 {{redefinition of 'yyy'}}
-// expected-note-re@redefinition-same-header.c:9 {{'{{.*}}/a.h' included multiple times, consider augmenting this header with #ifdef guards}}
+// expected-note@a.h:1 {{unguarded header; consider using #ifdef guards or #pragma once}}
+// expected-note-re@redefinition-same-header.c:11 {{'{{.*}}/a.h' included multiple times, additional include site here}}
+// expected-note-re@redefinition-same-header.c:12 {{'{{.*}}/a.h' included multiple times, additional include site here}}
 
 #include "a.h"
 #include "a.h"

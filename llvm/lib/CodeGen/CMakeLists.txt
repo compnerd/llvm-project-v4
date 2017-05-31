@@ -5,11 +5,13 @@ add_llvm_library(LLVMCodeGen
   AtomicExpandPass.cpp
   BasicTargetTransformInfo.cpp
   BranchFolding.cpp
+  BranchRelaxation.cpp
   BuiltinGCs.cpp
   CalcSpillWeights.cpp
   CallingConvLower.cpp
   CodeGen.cpp
   CodeGenPrepare.cpp
+  CountingFunctionInserter.cpp
   CriticalAntiDepBreaker.cpp
   DeadMachineInstructionElim.cpp
   DetectDeadLanes.cpp
@@ -34,6 +36,7 @@ add_llvm_library(LLVMCodeGen
   InterleavedAccessPass.cpp
   IntrinsicLowering.cpp
   LatencyPriorityQueue.cpp
+  LazyMachineBlockFrequencyInfo.cpp
   LexicalScopes.cpp
   LiveDebugValues.cpp
   LiveDebugVariables.cpp
@@ -59,7 +62,7 @@ add_llvm_library(LLVMCodeGen
   MachineCSE.cpp
   MachineDominanceFrontier.cpp
   MachineDominators.cpp
-  MachineFunctionAnalysis.cpp
+  MachineFrameInfo.cpp
   MachineFunction.cpp
   MachineFunctionPass.cpp
   MachineFunctionPrinterPass.cpp
@@ -69,6 +72,7 @@ add_llvm_library(LLVMCodeGen
   MachineLoopInfo.cpp
   MachineModuleInfo.cpp
   MachineModuleInfoImpls.cpp
+  MachineOptimizationRemarkEmitter.cpp
   MachinePassRegistry.cpp
   MachinePipeliner.cpp
   MachinePostDominators.cpp
@@ -106,6 +110,7 @@ add_llvm_library(LLVMCodeGen
   RegisterUsageInfo.cpp
   RegUsageInfoCollector.cpp
   RegUsageInfoPropagate.cpp
+  ResetMachineFunctionPass.cpp
   SafeStack.cpp
   SafeStackColoring.cpp
   SafeStackLayout.cpp
@@ -134,6 +139,7 @@ add_llvm_library(LLVMCodeGen
   TargetPassConfig.cpp
   TargetRegisterInfo.cpp
   TargetSchedule.cpp
+  TargetSubtargetInfo.cpp
   TwoAddressInstructionPass.cpp
   UnreachableBlockElim.cpp
   VirtRegMap.cpp
@@ -144,10 +150,11 @@ add_llvm_library(LLVMCodeGen
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/CodeGen
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/CodeGen/PBQP
 
-  LINK_LIBS ${PTHREAD_LIB}
-  )
+  LINK_LIBS ${LLVM_PTHREAD_LIB}
 
-add_dependencies(LLVMCodeGen intrinsics_gen)
+  DEPENDS
+  intrinsics_gen
+  )
 
 add_subdirectory(SelectionDAG)
 add_subdirectory(AsmPrinter)

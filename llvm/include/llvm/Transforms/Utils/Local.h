@@ -49,8 +49,6 @@ class LazyValueInfo;
 
 template<typename T> class SmallVectorImpl;
 
-typedef SmallVector<DbgValueInst *, 1> DbgValueList;
-
 //===----------------------------------------------------------------------===//
 //  Local constant propagation.
 //
@@ -164,10 +162,15 @@ AllocaInst *DemoteRegToStack(Instruction &X,
 /// deleted and it returns the pointer to the alloca inserted.
 AllocaInst *DemotePHIToStack(PHINode *P, Instruction *AllocaPoint = nullptr);
 
-/// If the specified pointer has an alignment that we can determine, return it,
-/// otherwise return 0. If PrefAlign is specified, and it is more than the
-/// alignment of the ultimate object, see if we can increase the alignment of
-/// the ultimate object, making this check succeed.
+/// Try to ensure that the alignment of \p V is at least \p PrefAlign bytes. If
+/// the owning object can be modified and has an alignment less than \p
+/// PrefAlign, it will be increased and \p PrefAlign returned. If the alignment
+/// cannot be increased, the known alignment of the value is returned.
+///
+/// It is not always possible to modify the alignment of the underlying object,
+/// so if alignment is important, a more reliable approach is to simply align
+/// all global variables and allocation instructions to their preferred
+/// alignment from the beginning.
 unsigned getOrEnforceKnownAlignment(Value *V, unsigned PrefAlign,
                                     const DataLayout &DL,
                                     const Instruction *CxtI = nullptr,
@@ -212,7 +215,7 @@ Value *EmitGEPOffset(IRBuilderTy *Builder, const DataLayout &DL, User *GEP,
         continue;
 
       // Handle a struct index, which adds its field offset to the pointer.
-      if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+      if (StructType *STy = GTI.getStructTypeOrNull()) {
         if (OpC->getType()->isVectorTy())
           OpC = OpC->getSplatValue();
 
@@ -273,8 +276,8 @@ bool LowerDbgDeclare(Function &F);
 /// Finds the llvm.dbg.declare intrinsic corresponding to an alloca, if any.
 DbgDeclareInst *FindAllocaDbgDeclare(Value *V);
 
-/// Finds the llvm.dbg.value intrinsics corresponding to an alloca, if any.
-void FindAllocaDbgValues(DbgValueList &DbgValues, Value *V);
+/// Finds the llvm.dbg.value intrinsics describing a value.
+void findDbgValues(SmallVectorImpl<DbgValueInst *> &DbgValues, Value *V);
 
 /// Replaces llvm.dbg.declare instruction when the address it describes
 /// is replaced with a new value. If Deref is true, an additional DW_OP_deref is
@@ -301,13 +304,19 @@ bool replaceDbgDeclareForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
 void replaceDbgValueForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
                               DIBuilder &Builder, int Offset = 0);
 
+/// Assuming the instruction \p I is going to be deleted, attempt to salvage any
+/// dbg.value intrinsics referring to \p I by rewriting its effect into a
+/// DIExpression.
+void salvageDebugInfo(Instruction &I);
+
 /// Remove all instructions from a basic block other than it's terminator
 /// and any present EH pad instructions.
 unsigned removeAllNonTerminatorAndEHPadInstructions(BasicBlock *BB);
 
 /// Insert an unreachable instruction before the specified
 /// instruction, making it and the rest of the code in the block dead.
-unsigned changeToUnreachable(Instruction *I, bool UseLLVMTrap);
+unsigned changeToUnreachable(Instruction *I, bool UseLLVMTrap,
+                             bool PreserveLCSSA = false);
 
 /// Convert the CallInst to InvokeInst with the specified unwind edge basic
 /// block.  This also splits the basic block where CI is located, because

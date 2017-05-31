@@ -91,11 +91,6 @@ public:
   Timer(StringRef Name, StringRef Description, TimerGroup &tg) {
     init(Name, Description, tg);
   }
-  /// Compatibility constructor.
-  explicit Timer(StringRef Name) : Timer(Name, Name) { }
-  /// Compatibility constructor.
-  Timer(StringRef Name, TimerGroup &TG) : Timer(Name, Name, TG) { }
-
   Timer(const Timer &RHS) {
     assert(!RHS.TG && "Can only copy uninitialized timers");
   }
@@ -166,9 +161,6 @@ struct NamedRegionTimer : public TimeRegion {
   explicit NamedRegionTimer(StringRef Name, StringRef Description,
                             StringRef GroupName,
                             StringRef GroupDescription, bool Enabled = true);
-  /// Compatibility constructor.
-  explicit NamedRegionTimer(StringRef Name, StringRef GroupName,
-                            bool Enabled = true);
 };
 
 /// The TimerGroup class is used to group together related timers into a single
@@ -202,8 +194,6 @@ class TimerGroup {
 
 public:
   explicit TimerGroup(StringRef Name, StringRef Description);
-  /// Compatibility constructor.
-  explicit TimerGroup(StringRef Name);
   ~TimerGroup();
 
   void setName(StringRef NewName, StringRef NewDescription) {
@@ -216,6 +206,9 @@ public:
 
   /// This static method prints all timers and clears them all out.
   static void printAll(raw_ostream &OS);
+
+  /// Prints all timers as JSON key/value pairs, and clears them all out.
+  static const char *printAllJSONValues(raw_ostream &OS, const char *delim);
 
   /// Ensure global timer group lists are initialized. This function is mostly
   /// used by the Statistic code to influence the construction and destruction
@@ -231,7 +224,6 @@ private:
   void printJSONValue(raw_ostream &OS, const PrintRecord &R,
                       const char *suffix, double Value);
   const char *printJSONValues(raw_ostream &OS, const char *delim);
-  static const char *printAllJSONValues(raw_ostream &OS, const char *delim);
 };
 
 } // end namespace llvm

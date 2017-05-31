@@ -160,13 +160,16 @@ def fno_math_builtin : Flag<["-"], "fno-math-builtin">,
   HelpText<"Disable implicit builtin knowledge of math functions">;
 }
 
-def disable_llvm_optzns : Flag<["-"], "disable-llvm-optzns">,
-  HelpText<"Don't run LLVM optimization passes">;
 def disable_llvm_verifier : Flag<["-"], "disable-llvm-verifier">,
   HelpText<"Don't run the LLVM IR verifier pass">;
 def disable_llvm_passes : Flag<["-"], "disable-llvm-passes">,
   HelpText<"Use together with -emit-llvm to get pristine LLVM IR from the "
            "frontend by not running any LLVM passes at all">;
+def disable_llvm_optzns : Flag<["-"], "disable-llvm-optzns">,
+  Alias<disable_llvm_passes>;
+def disable_lifetimemarkers : Flag<["-"], "disable-lifetime-markers">,
+  HelpText<"Disable lifetime-markers emission even when optimizations are "
+           "enabled">;
 def disable_red_zone : Flag<["-"], "disable-red-zone">,
   HelpText<"Do not emit code that uses the red zone.">;
 def dwarf_column_info : Flag<["-"], "dwarf-column-info">,
@@ -192,9 +195,14 @@ def femit_coverage_notes : Flag<["-"], "femit-coverage-notes">,
   HelpText<"Emit a gcov coverage notes file when compiling.">;
 def femit_coverage_data: Flag<["-"], "femit-coverage-data">,
   HelpText<"Instrument the program to emit gcov coverage data when run.">;
-def coverage_file : Separate<["-"], "coverage-file">,
-  HelpText<"Emit coverage data to this filename. The extension will be replaced.">;
-def coverage_file_EQ : Joined<["-"], "coverage-file=">, Alias<coverage_file>;
+def coverage_data_file : Separate<["-"], "coverage-data-file">,
+  HelpText<"Emit coverage data to this filename.">;
+def coverage_data_file_EQ : Joined<["-"], "coverage-data-file=">,
+  Alias<coverage_data_file>;
+def coverage_notes_file : Separate<["-"], "coverage-notes-file">,
+  HelpText<"Emit coverage notes to this filename.">;
+def coverage_notes_file_EQ : Joined<["-"], "coverage-notes-file=">,
+  Alias<coverage_notes_file>;
 def coverage_cfg_checksum : Flag<["-"], "coverage-cfg-checksum">,
   HelpText<"Emit CFG checksum for functions in .gcno files.">;
 def coverage_no_function_names_in_data : Flag<["-"], "coverage-no-function-names-in-data">,
@@ -272,12 +280,21 @@ def fsanitize_coverage_trace_bb
 def fsanitize_coverage_trace_cmp
     : Flag<["-"], "fsanitize-coverage-trace-cmp">,
       HelpText<"Enable cmp instruction tracing in sanitizer coverage">;
+def fsanitize_coverage_trace_div
+    : Flag<["-"], "fsanitize-coverage-trace-div">,
+      HelpText<"Enable div instruction tracing in sanitizer coverage">;
+def fsanitize_coverage_trace_gep
+    : Flag<["-"], "fsanitize-coverage-trace-gep">,
+      HelpText<"Enable gep instruction tracing in sanitizer coverage">;
 def fsanitize_coverage_8bit_counters
     : Flag<["-"], "fsanitize-coverage-8bit-counters">,
       HelpText<"Enable frequency counters in sanitizer coverage">;
 def fsanitize_coverage_trace_pc
     : Flag<["-"], "fsanitize-coverage-trace-pc">,
       HelpText<"Enable PC tracing in sanitizer coverage">;
+def fsanitize_coverage_trace_pc_guard
+    : Flag<["-"], "fsanitize-coverage-trace-pc-guard">,
+      HelpText<"Enable PC tracing with guard in sanitizer coverage">;
 def fprofile_instrument_EQ : Joined<["-"], "fprofile-instrument=">,
     HelpText<"Enable PGO instrumentation. The accepted value is clang, llvm, "
              "or none">;
@@ -391,8 +408,6 @@ def ast_dump_filter : Separate<["-"], "ast-dump-filter">,
   HelpText<"Use with -ast-dump or -ast-print to dump/print only AST declaration"
            " nodes having a certain substring in a qualified name. Use"
            " -ast-list to list all filterable declaration node names.">;
-def fmodules_ts : Flag <["-"], "fmodules-ts">, Group<f_Group>,
-  HelpText<"Enable support for the C++ Modules TS">;
 def fno_modules_global_index : Flag<["-"], "fno-modules-global-index">,
   HelpText<"Do not automatically generate or update the global module index">;
 def fno_modules_error_recovery : Flag<["-"], "fno-modules-error-recovery">,
@@ -417,6 +432,8 @@ def fmodules_local_submodule_visibility :
 def fmodule_format_EQ : Joined<["-"], "fmodule-format=">,
   HelpText<"Select the container format for clang modules and PCH. "
            "Supported options are 'raw' and 'obj'.">;
+def fmodules_hash_error_diagnostics : Flag<["-"], "fmodules-hash-error-diagnostics">,
+  HelpText<"Use a separate module cache for modules compiled with conflicting -Werror options">;
 def ftest_module_file_extension_EQ :
   Joined<["-"], "ftest-module-file-extension=">,
   HelpText<"introduce a module file extension for testing purposes. "
@@ -459,6 +476,8 @@ def print_decl_contexts : Flag<["-"], "print-decl-contexts">,
   HelpText<"Print DeclContexts and their Decls">;
 def emit_module : Flag<["-"], "emit-module">,
   HelpText<"Generate pre-compiled module file from a module map">;
+def emit_module_interface : Flag<["-"], "emit-module-interface">,
+  HelpText<"Generate pre-compiled module file from a C++ module interface">;
 def emit_pth : Flag<["-"], "emit-pth">,
   HelpText<"Generate pre-tokenized header file">;
 def emit_pch : Flag<["-"], "emit-pch">,
@@ -562,6 +581,8 @@ def pic_is_pie : Flag<["-"], "pic-is-pie">,
   HelpText<"File is for a position independent executable">;
 def fno_validate_pch : Flag<["-"], "fno-validate-pch">,
   HelpText<"Disable validation of precompiled headers">;
+def fallow_pch_with_errors : Flag<["-"], "fallow-pch-with-compiler-errors">,
+  HelpText<"Accept a PCH file that was created with compiler errors">;
 def dump_deserialized_pch_decls : Flag<["-"], "dump-deserialized-decls">,
   HelpText<"Dump declarations that are deserialized from PCH, for testing">;
 def error_on_deserialized_pch_decl : Separate<["-"], "error-on-deserialized-decl">,
@@ -627,9 +648,11 @@ def fdefault_calling_conv_EQ : Joined<["-"], "fdefault-calling-conv=">,
 def finclude_default_header : Flag<["-"], "finclude-default-header">,
   HelpText<"Include the default header file for OpenCL">;
 
-// C++ TSes.
-def fcoroutines : Flag<["-"], "fcoroutines">,
-  HelpText<"Enable support for the C++ Coroutines TS">;
+// FIXME: Remove these entirely once functionality/tests have been excised.
+def fobjc_gc_only : Flag<["-"], "fobjc-gc-only">, Group<f_Group>,
+  HelpText<"Use GC exclusively for Objective-C related memory management">;
+def fobjc_gc : Flag<["-"], "fobjc-gc">, Group<f_Group>,
+  HelpText<"Enable Objective-C garbage collection">;
 
 //===----------------------------------------------------------------------===//
 // Header Search Options
@@ -676,6 +699,13 @@ def token_cache : Separate<["-"], "token-cache">, MetaVarName<"<path>">,
   HelpText<"Use specified token cache file">;
 def detailed_preprocessing_record : Flag<["-"], "detailed-preprocessing-record">,
   HelpText<"include a detailed record of preprocessing actions">;
+
+//===----------------------------------------------------------------------===//
+// OpenCL Options
+//===----------------------------------------------------------------------===//
+
+def cl_ext_EQ : CommaJoined<["-"], "cl-ext=">,
+  HelpText<"OpenCL only. Enable or disable OpenCL extensions. The argument is a comma-separated sequence of one or more extension names, each prefixed by '+' or '-'.">;
 
 //===----------------------------------------------------------------------===//
 // CUDA Options
@@ -728,4 +758,6 @@ def show_inst : Flag<["-"], "show-inst">,
 def dwarf_debug_producer : Separate<["-"], "dwarf-debug-producer">,
   HelpText<"The string to embed in the Dwarf debug AT_producer record.">;
 
+def defsym : Separate<["-"], "defsym">,
+  HelpText<"Define a value for a symbol">;
 } // let Flags = [CC1AsOption]

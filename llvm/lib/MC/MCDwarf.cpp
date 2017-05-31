@@ -122,7 +122,8 @@ EmitDwarfLineTable(MCObjectStreamer *MCOS, MCSection *Section,
       MCOS->EmitIntValue(dwarf::DW_LNS_set_column, 1);
       MCOS->EmitULEB128IntValue(Column);
     }
-    if (Discriminator != LineEntry.getDiscriminator()) {
+    if (Discriminator != LineEntry.getDiscriminator() &&
+        MCOS->getContext().getDwarfVersion() >= 4) {
       Discriminator = LineEntry.getDiscriminator();
       unsigned Size = getULEB128Size(Discriminator);
       MCOS->EmitIntValue(dwarf::DW_LNS_extended_op, 1);
@@ -660,7 +661,14 @@ static void EmitGenDwarfInfo(MCStreamer *MCOS,
   // The 2 byte DWARF version.
   MCOS->EmitIntValue(context.getDwarfVersion(), 2);
 
+  // The DWARF v5 header has unit type, address size, abbrev offset.
+  // Earlier versions have abbrev offset, address size.
   const MCAsmInfo &AsmInfo = *context.getAsmInfo();
+  int AddrSize = AsmInfo.getPointerSize();
+  if (context.getDwarfVersion() >= 5) {
+    MCOS->EmitIntValue(dwarf::DW_UT_compile, 1);
+    MCOS->EmitIntValue(AddrSize, 1);
+  }
   // The 4 byte offset to the debug abbrevs from the start of the .debug_abbrev,
   // it is at the start of that section so this is zero.
   if (AbbrevSectionSymbol == nullptr)
@@ -668,11 +676,8 @@ static void EmitGenDwarfInfo(MCStreamer *MCOS,
   else
     MCOS->EmitSymbolValue(AbbrevSectionSymbol, 4,
                           AsmInfo.needsDwarfSectionOffsetDirective());
-
-  const MCAsmInfo *asmInfo = context.getAsmInfo();
-  int AddrSize = asmInfo->getPointerSize();
-  // The 1 byte size of an address.
-  MCOS->EmitIntValue(AddrSize, 1);
+  if (context.getDwarfVersion() <= 4)
+    MCOS->EmitIntValue(AddrSize, 1);
 
   // Second part: the compile_unit DIE.
 
@@ -916,7 +921,7 @@ void MCGenDwarfLabelEntry::Make(MCSymbol *Symbol, MCStreamer *MCOS,
   MCContext &context = MCOS->getContext();
   // We won't create dwarf labels for symbols in sections that we are not
   // generating debug info for.
-  if (!context.getGenDwarfSectionSyms().count(MCOS->getCurrentSection().first))
+  if (!context.getGenDwarfSectionSyms().count(MCOS->getCurrentSectionOnly()))
     return;
 
   // The dwarf label's name does not have the symbol name's leading

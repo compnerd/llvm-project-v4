@@ -494,6 +494,11 @@ public: // Part of public interface to class.
     return getBinding(getRegionBindings(S), L, T);
   }
 
+  Optional<SVal> getDefaultBinding(Store S, const MemRegion *R) override {
+    RegionBindingsRef B = getRegionBindings(S);
+    return B.getDefaultBinding(R);
+  }
+
   SVal getBinding(RegionBindingsConstRef B, Loc L, QualType T = QualType());
 
   SVal getBindingForElement(RegionBindingsConstRef B, const ElementRegion *R);
@@ -1336,7 +1341,8 @@ SVal RegionStoreManager::ArrayToPointer(Loc Array, QualType T) {
   if (!Array.getAs<loc::MemRegionVal>())
     return UnknownVal();
 
-  const MemRegion* R = Array.castAs<loc::MemRegionVal>().getRegion();
+  const SubRegion *R =
+      cast<SubRegion>(Array.castAs<loc::MemRegionVal>().getRegion());
   NonLoc ZeroIdx = svalBuilder.makeZeroArrayIndex();
   return loc::MemRegionVal(MRMgr.getElementRegion(T, ZeroIdx, R, Ctx));
 }
@@ -1379,7 +1385,7 @@ SVal RegionStoreManager::getBinding(RegionBindingsConstRef B, Loc L, QualType T)
         T = SR->getSymbol()->getType();
       }
     }
-    MR = GetElementZeroRegion(MR, T);
+    MR = GetElementZeroRegion(cast<SubRegion>(MR), T);
   }
 
   // FIXME: Perhaps this method should just take a 'const MemRegion*' argument
@@ -2075,11 +2081,10 @@ RegionStoreManager::bindArray(RegionBindingsConstRef B,
   if (Init.getAs<nonloc::LazyCompoundVal>())
     return bindAggregate(B, R, Init);
 
-  // Remaining case: explicit compound values.
-
   if (Init.isUnknown())
-    return setImplicitDefaultValue(B, R, ElementTy);
+    return bindAggregate(B, R, UnknownVal());
 
+  // Remaining case: explicit compound values.
   const nonloc::CompoundVal& CV = Init.castAs<nonloc::CompoundVal>();
   nonloc::CompoundVal::iterator VI = CV.begin(), VE = CV.end();
   uint64_t i = 0;

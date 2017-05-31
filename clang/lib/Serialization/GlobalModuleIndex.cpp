@@ -245,12 +245,8 @@ GlobalModuleIndex::readIndex(StringRef Path) {
     return std::make_pair(nullptr, EC_NotFound);
   std::unique_ptr<llvm::MemoryBuffer> Buffer = std::move(BufferOrErr.get());
 
-  /// \brief The bitstream reader from which we'll read the AST file.
-  llvm::BitstreamReader Reader((const unsigned char *)Buffer->getBufferStart(),
-                               (const unsigned char *)Buffer->getBufferEnd());
-
   /// \brief The main bitstream cursor for the main block.
-  llvm::BitstreamCursor Cursor(Reader);
+  llvm::BitstreamCursor Cursor(*Buffer);
 
   // Sniff for the signature.
   if (Cursor.Read(8) != 'B' ||
@@ -387,9 +383,8 @@ namespace {
     off_t StoredSize;
     time_t StoredModTime;
     ASTFileSignature StoredSignature;
-    ImportedModuleFileInfo(off_t Size, time_t ModTime, ASTFileSignature Sig) :
-      StoredSize(Size), StoredModTime(ModTime), StoredSignature(Sig) {
-    }
+    ImportedModuleFileInfo(off_t Size, time_t ModTime, ASTFileSignature Sig)
+        : StoredSize(Size), StoredModTime(ModTime), StoredSignature(Sig) {}
   };
 
   /// \brief Builder that generates the global module index file.
@@ -397,10 +392,10 @@ namespace {
     FileManager &FileMgr;
     const PCHContainerReader &PCHContainerRdr;
 
-    /// \brief Mapping from files to module file information.
+    /// Mapping from files to module file information.
     typedef llvm::MapVector<const FileEntry *, ModuleFileInfo> ModuleFilesMap;
 
-    /// \brief Information about each of the known module files.
+    /// Information about each of the known module files.
     ModuleFilesMap ModuleFiles;
 
     /// \brief Mapping from the imported module file to the imported
@@ -432,7 +427,6 @@ namespace {
       unsigned NewID = ModuleFiles.size();
       ModuleFileInfo &Info = ModuleFiles[File];
       Info.ID = NewID;
-      Info.Signature = {{0}};
       return Info;
     }
 
@@ -480,7 +474,7 @@ static void emitRecordID(unsigned ID, const char *Name,
 void
 GlobalModuleIndexBuilder::emitBlockInfoBlock(llvm::BitstreamWriter &Stream) {
   SmallVector<uint64_t, 64> Record;
-  Stream.EnterSubblock(llvm::bitc::BLOCKINFO_BLOCK_ID, 3);
+  Stream.EnterBlockInfoBlock();
 
 #define BLOCK(X) emitBlockID(X ## _ID, #X, Stream, Record)
 #define RECORD(X) emitRecordID(X, #X, Stream, Record)
@@ -524,9 +518,7 @@ bool GlobalModuleIndexBuilder::loadModuleFile(const FileEntry *File) {
   }
 
   // Initialize the input stream
-  llvm::BitstreamReader InStreamFile;
-  PCHContainerRdr.ExtractPCH((*Buffer)->getMemBufferRef(), InStreamFile);
-  llvm::BitstreamCursor InStream(InStreamFile);
+  llvm::BitstreamCursor InStream(PCHContainerRdr.ExtractPCH(**Buffer));
 
   // Sniff for the signature.
   if (InStream.Read(8) != 'C' ||
@@ -622,10 +614,10 @@ bool GlobalModuleIndexBuilder::loadModuleFile(const FileEntry *File) {
 
         // Skip the stored signature.
         // FIXME: we could read the signature out of the import and validate it.
-        ASTFileSignature StoredSignature =
+        ASTFileSignature StoredSignature = {
             {{(uint32_t)Record[Idx++], (uint32_t)Record[Idx++],
               (uint32_t)Record[Idx++], (uint32_t)Record[Idx++],
-              (uint32_t)Record[Idx++]}};
+              (uint32_t)Record[Idx++]}}};
 
         // Retrieve the imported file name.
         unsigned Length = Record[Idx++];
@@ -643,8 +635,9 @@ bool GlobalModuleIndexBuilder::loadModuleFile(const FileEntry *File) {
 
         // Save the information in ImportedModuleFileInfo so we can verify after
         // loading all pcms.
-        ImportedModuleFiles.insert(std::make_pair(DependsOnFile,
-          ImportedModuleFileInfo(StoredSize, StoredModTime, StoredSignature)));
+        ImportedModuleFiles.insert(std::make_pair(
+            DependsOnFile, ImportedModuleFileInfo(StoredSize, StoredModTime,
+                                                  StoredSignature)));
 
         // Record the dependency.
         unsigned DependsOnID = getModuleFileInfo(DependsOnFile).ID;
@@ -676,9 +669,9 @@ bool GlobalModuleIndexBuilder::loadModuleFile(const FileEntry *File) {
 
     // Get Signature.
     if (State == DiagnosticOptionsBlock && Code == SIGNATURE)
-      getModuleFileInfo(File).Signature = {{(uint32_t)Record[0],
-          (uint32_t)Record[1], (uint32_t)Record[2],
-          (uint32_t)Record[3], (uint32_t)Record[4]}};
+      getModuleFileInfo(File).Signature = {
+          {{(uint32_t)Record[0], (uint32_t)Record[1], (uint32_t)Record[2],
+            (uint32_t)Record[3], (uint32_t)Record[4]}}};
 
     // We don't care about this record.
   }
@@ -732,13 +725,12 @@ bool GlobalModuleIndexBuilder::writeIndex(llvm::BitstreamWriter &Stream) {
   for (auto MapEntry : ImportedModuleFiles) {
     auto *File = MapEntry.first;
     ImportedModuleFileInfo &Info = MapEntry.second;
-    if (getModuleFileInfo(File).Signature != ASTFileSignature({{0}})) {
+    if (getModuleFileInfo(File).Signature) {
       if (getModuleFileInfo(File).Signature != Info.StoredSignature)
         // Verify Signature.
         return true;
-    }
-    else if (Info.StoredSize != File->getSize() ||
-             Info.StoredModTime != File->getModificationTime())
+    } else if (Info.StoredSize != File->getSize() ||
+               Info.StoredModTime != File->getModificationTime())
       // Verify Size and ModTime.
       return true;
   }
@@ -806,11 +798,11 @@ bool GlobalModuleIndexBuilder::writeIndex(llvm::BitstreamWriter &Stream) {
     }
 
     // Create a blob abbreviation
-    BitCodeAbbrev *Abbrev = new BitCodeAbbrev();
+    auto Abbrev = std::make_shared<BitCodeAbbrev>();
     Abbrev->Add(BitCodeAbbrevOp(IDENTIFIER_INDEX));
     Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 32));
     Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob));
-    unsigned IDTableAbbrev = Stream.EmitAbbrev(Abbrev);
+    unsigned IDTableAbbrev = Stream.EmitAbbrev(std::move(Abbrev));
 
     // Write the identifier table
     uint64_t Record[] = {IDENTIFIER_INDEX, BucketOffset};

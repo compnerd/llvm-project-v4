@@ -14,6 +14,8 @@
 #error This file must be included inside sanitizer_allocator.h
 #endif
 
+template<class SizeClassAllocator> struct SizeClassAllocator32LocalCache;
+
 // SizeClassAllocator32 -- allocator for 32-bit address space.
 // This allocator can theoretically be used on 64-bit arch, but there it is less
 // efficient than SizeClassAllocator64.
@@ -81,18 +83,24 @@ class SizeClassAllocator32 {
                  SizeClassMap::kMaxNumCachedHint * sizeof(uptr));
 
   static uptr ClassIdToSize(uptr class_id) {
-    return class_id == SizeClassMap::kBatchClassID
-               ? sizeof(TransferBatch)
-               : SizeClassMap::Size(class_id);
+    return SizeClassMap::Size(class_id);
   }
 
   typedef SizeClassAllocator32<kSpaceBeg, kSpaceSize, kMetadataSize,
       SizeClassMap, kRegionSizeLog, ByteMap, MapUnmapCallback> ThisT;
-  typedef SizeClassAllocatorLocalCache<ThisT> AllocatorCache;
+  typedef SizeClassAllocator32LocalCache<ThisT> AllocatorCache;
 
-  void Init() {
+  void Init(s32 release_to_os_interval_ms) {
     possible_regions.TestOnlyInit();
     internal_memset(size_class_info_array, 0, sizeof(size_class_info_array));
+  }
+
+  s32 ReleaseToOSIntervalMs() const {
+    return kReleaseToOSIntervalNever;
+  }
+
+  void SetReleaseToOSIntervalMs(s32 release_to_os_interval_ms) {
+    // This is empty here. Currently only implemented in 64-bit allocator.
   }
 
   void *MapWithCallback(uptr size) {

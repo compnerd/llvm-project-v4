@@ -86,8 +86,19 @@ if (NOT DEFINED LLVM_MAIN_SRC_DIR)
   # Enable unit tests if available.
   set(UNITTEST_DIR ${LLVM_SOURCE_ROOT}/utils/unittest)
   if(EXISTS ${UNITTEST_DIR}/googletest/include/gtest/gtest.h)
-    add_library(gtest ${UNITTEST_DIR}/googletest/src/gtest-all.cc)
-    target_include_directories(gtest PUBLIC "${UNITTEST_DIR}/googletest/include" PRIVATE "${UNITTEST_DIR}/googletest")
+    add_library(gtest
+      ${UNITTEST_DIR}/googletest/src/gtest-all.cc
+      ${UNITTEST_DIR}/googlemock/src/gmock-all.cc
+    )
+    target_include_directories(gtest
+      PUBLIC
+      "${UNITTEST_DIR}/googletest/include"
+      "${UNITTEST_DIR}/googlemock/include"
+
+      PRIVATE
+      "${UNITTEST_DIR}/googletest"
+      "${UNITTEST_DIR}/googlemock"
+    )
     target_link_libraries(gtest ${LLVM_SYSTEM_LIBS})
 
     add_library(gtest_main ${UNITTEST_DIR}/UnitTestMain/TestMain.cpp)
@@ -223,5 +234,3 @@ set_target_properties(polly-check-format PROPERTIES FOLDER "Polly")
 add_custom_target(polly-update-format DEPENDS ${update_format_depends})
 set_target_properties(polly-update-format PROPERTIES FOLDER "Polly")
 
-# Set the variable POLLY_LINK_LIBS in the llvm/tools/ dir.
-set(POLLY_LINK_LIBS ${POLLY_LINK_LIBS} PARENT_SCOPE)

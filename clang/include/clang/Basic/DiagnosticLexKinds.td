@@ -183,7 +183,7 @@ def ext_hex_constant_invalid : Extension<
 def ext_hex_literal_invalid : Extension<
   "hexadecimal floating literals are a C++1z feature">, InGroup<CXX1z>;
 def warn_cxx1z_hex_literal : Warning<
-  "hexidecimal floating literals are incompatible with "
+  "hexadecimal floating literals are incompatible with "
   "C++ standards before C++1z">,
   InGroup<CXXPre1zCompatPedantic>, DefaultIgnore;
 def ext_binary_literal : Extension<
@@ -242,6 +242,7 @@ def warn_bad_character_encoding : ExtWarn<
   "illegal character encoding in character literal">,
   InGroup<InvalidSourceEncoding>;
 def err_lexing_string : Error<"failure when lexing a string">;
+def err_placeholder_in_source : Error<"editor placeholder in source file">;
 
 
 //===----------------------------------------------------------------------===//
@@ -502,7 +503,7 @@ def warn_pragma_diagnostic_invalid_token :
    InGroup<UnknownPragmas>;
 def warn_pragma_diagnostic_unknown_warning :
    ExtWarn<"unknown warning group '%0', ignored">,
-   InGroup<UnknownPragmas>;
+   InGroup<UnknownWarningOption>;
 // - #pragma __debug
 def warn_pragma_debug_unexpected_command : Warning<
   "unexpected debug command '%0'">, InGroup<IgnoredPragmas>;
@@ -642,6 +643,11 @@ def err_mmap_expected_feature : Error<"expected a feature name">;
 def err_mmap_expected_attribute : Error<"expected an attribute name">;
 def warn_mmap_unknown_attribute : Warning<"unknown attribute '%0'">,
   InGroup<IgnoredAttributes>;
+def warn_mmap_mismatched_top_level_private : Warning<
+  "top-level module '%0' in private module map, expected a submodule of '%1'">,
+  InGroup<PrivateModule>;
+def note_mmap_rename_top_level_private_as_submodule : Note<
+  "make '%0' a submodule of '%1' to ensure it can be found by name">;
 
 def warn_auto_module_import : Warning<
   "treating #%select{include|import|include_next|__include_macros}0 as an "
@@ -673,13 +679,6 @@ def warn_header_guard : Warning<
   InGroup<DiagGroup<"header-guard">>;
 def note_header_guard : Note<
   "%0 is defined here; did you mean %1?">;
-
-def warn_defined_in_object_type_macro : Warning<
-  "macro expansion producing 'defined' has undefined behavior">,
-  InGroup<ExpansionToDefined>;
-def warn_defined_in_function_type_macro : Extension<
-  "macro expansion producing 'defined' has undefined behavior">,
-  InGroup<ExpansionToDefined>;
 
 let CategoryName = "Nullability Issue" in {
 

@@ -32,7 +32,7 @@
  * compatible, thus CINDEX_VERSION_MAJOR is expected to remain stable.
  */
 #define CINDEX_VERSION_MAJOR 0
-#define CINDEX_VERSION_MINOR 35
+#define CINDEX_VERSION_MINOR 37
 
 #define CINDEX_VERSION_ENCODE(major, minor) ( \
       ((major) * 10000)                       \
@@ -326,7 +326,7 @@ clang_isFileMultipleIncludeGuarded(CXTranslationUnit tu, CXFile file);
  *
  * \param tu the translation unit
  *
-* \param file_name the name of the file.
+ * \param file_name the name of the file.
  *
  * \returns the file handle for the named file in the translation unit \p tu,
  * or a NULL file handle if the file was not a part of this translation unit.
@@ -625,6 +625,15 @@ typedef struct {
  */
 CINDEX_LINKAGE CXSourceRangeList *clang_getSkippedRanges(CXTranslationUnit tu,
                                                          CXFile file);
+
+/**
+ * \brief Retrieve all ranges from all files that were skipped by the
+ * preprocessor.
+ *
+ * The preprocessor will skip lines when they are surrounded by an
+ * if/ifdef/ifndef directive whose condition does not evaluate to true.
+ */
+CINDEX_LINKAGE CXSourceRangeList *clang_getAllSkippedRanges(CXTranslationUnit tu);
 
 /**
  * \brief Destroy the given \c CXSourceRangeList.
@@ -2333,7 +2342,39 @@ enum CXCursorKind {
    */
   CXCursor_OMPTeamsDistributeDirective = 271,
 
-  CXCursor_LastStmt = CXCursor_OMPTeamsDistributeDirective,
+  /** \brief OpenMP teams distribute simd directive.
+   */
+  CXCursor_OMPTeamsDistributeSimdDirective = 272,
+
+  /** \brief OpenMP teams distribute parallel for simd directive.
+   */
+  CXCursor_OMPTeamsDistributeParallelForSimdDirective = 273,
+
+  /** \brief OpenMP teams distribute parallel for directive.
+   */
+  CXCursor_OMPTeamsDistributeParallelForDirective = 274,
+
+  /** \brief OpenMP target teams directive.
+   */
+  CXCursor_OMPTargetTeamsDirective = 275,
+
+  /** \brief OpenMP target teams distribute directive.
+   */
+  CXCursor_OMPTargetTeamsDistributeDirective = 276,
+
+  /** \brief OpenMP target teams distribute parallel for directive.
+   */
+  CXCursor_OMPTargetTeamsDistributeParallelForDirective = 277,
+
+  /** \brief OpenMP target teams distribute parallel for simd directive.
+   */
+  CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective = 278,
+
+  /** \brief OpenMP target teams distribute simd directive.
+   */
+  CXCursor_OMPTargetTeamsDistributeSimdDirective = 279,
+
+  CXCursor_LastStmt = CXCursor_OMPTargetTeamsDistributeSimdDirective,
 
   /**
    * \brief Cursor that represents the translation unit itself.
@@ -2391,8 +2432,12 @@ enum CXCursorKind {
    * \brief A static_assert or _Static_assert node
    */
   CXCursor_StaticAssert                  = 602,
+  /**
+   * \brief a friend declaration.
+   */
+  CXCursor_FriendDecl                    = 603,
   CXCursor_FirstExtraDecl                = CXCursor_ModuleImportDecl,
-  CXCursor_LastExtraDecl                 = CXCursor_StaticAssert,
+  CXCursor_LastExtraDecl                 = CXCursor_FriendDecl,
 
   /**
    * \brief A code completion overload candidate.
@@ -3009,7 +3054,7 @@ enum CXCallingConv {
   CXCallingConv_X86Pascal = 5,
   CXCallingConv_AAPCS = 6,
   CXCallingConv_AAPCS_VFP = 7,
-  /* Value 8 was PnaclCall, but it was never used, so it could safely be re-used. */
+  CXCallingConv_X86RegCall = 8,
   CXCallingConv_IntelOclBicc = 9,
   CXCallingConv_X86_64Win64 = 10,
   CXCallingConv_X86_64SysV = 11,
@@ -3391,6 +3436,16 @@ CINDEX_LINKAGE long long clang_getArraySize(CXType T);
 CINDEX_LINKAGE CXType clang_Type_getNamedType(CXType T);
 
 /**
+ * \brief Determine if a typedef is 'transparent' tag.
+ *
+ * A typedef is considered 'transparent' if it shares a name and spelling
+ * location with its underlying tag type, as is the case with the NS_ENUM macro.
+ *
+ * \returns non-zero if transparent and zero otherwise.
+ */
+CINDEX_LINKAGE unsigned clang_Type_isTransparentTagTypedef(CXType T);
+
+/**
  * \brief List the possible error codes for \c clang_Type_getSizeOf,
  *   \c clang_Type_getAlignOf, \c clang_Type_getOffsetOf and
  *   \c clang_Cursor_getOffsetOf.
@@ -3499,11 +3554,8 @@ enum CXRefQualifierKind {
 };
 
 /**
- * \brief Returns the number of template arguments for given class template
- * specialization, or -1 if type \c T is not a class template specialization.
- *
- * Variadic argument packs count as only one argument, and can not be inspected
- * further.
+ * \brief Returns the number of template arguments for given template
+ * specialization, or -1 if type \c T is not a template specialization.
  */
 CINDEX_LINKAGE int clang_Type_getNumTemplateArguments(CXType T);
 
@@ -3922,8 +3974,8 @@ CINDEX_LINKAGE int clang_Cursor_getObjCSelectorIndex(CXCursor);
 CINDEX_LINKAGE int clang_Cursor_isDynamicCall(CXCursor C);
 
 /**
- * \brief Given a cursor pointing to an Objective-C message, returns the CXType
- * of the receiver.
+ * \brief Given a cursor pointing to an Objective-C message or property
+ * reference, or C++ method call, returns the CXType of the receiver.
  */
 CINDEX_LINKAGE CXType clang_Cursor_getReceiverType(CXCursor C);
 
@@ -3981,8 +4033,8 @@ CINDEX_LINKAGE unsigned clang_Cursor_getObjCDeclQualifiers(CXCursor C);
 
 /**
  * \brief Given a cursor that represents an Objective-C method or property
- * declaration, return non-zero if the declaration was affected by "@optional".
- * Returns zero if the cursor is not such a declaration or it is "@required".
+ * declaration, return non-zero if the declaration was affected by "\@optional".
+ * Returns zero if the cursor is not such a declaration or it is "\@required".
  */
 CINDEX_LINKAGE unsigned clang_Cursor_isObjCOptional(CXCursor C);
 
@@ -3990,6 +4042,23 @@ CINDEX_LINKAGE unsigned clang_Cursor_isObjCOptional(CXCursor C);
  * \brief Returns non-zero if the given cursor is a variadic function or method.
  */
 CINDEX_LINKAGE unsigned clang_Cursor_isVariadic(CXCursor C);
+
+/**
+ * \brief Returns non-zero if the given cursor points to a symbol marked with
+ * external_source_symbol attribute.
+ *
+ * \param language If non-NULL, and the attribute is present, will be set to
+ * the 'language' string from the attribute.
+ *
+ * \param definedIn If non-NULL, and the attribute is present, will be set to
+ * the 'definedIn' string from the attribute.
+ *
+ * \param isGenerated If non-NULL, and the attribute is present, will be set to
+ * non-zero if the 'generated_declaration' is set in the attribute.
+ */
+CINDEX_LINKAGE unsigned clang_Cursor_isExternalSymbol(CXCursor C,
+                                       CXString *language, CXString *definedIn,
+                                       unsigned *isGenerated);
 
 /**
  * \brief Given a cursor that represents a declaration, return the associated
@@ -4658,7 +4727,7 @@ enum CXCompletionChunkKind {
    */
   CXCompletionChunk_HorizontalSpace,
   /**
-   * Vertical space ('\n'), after which it is generally a good idea to
+   * Vertical space ('\\n'), after which it is generally a good idea to
    * perform indentation.
    */
   CXCompletionChunk_VerticalSpace
@@ -5248,6 +5317,25 @@ CINDEX_LINKAGE CXEvalResultKind clang_EvalResult_getKind(CXEvalResult E);
 CINDEX_LINKAGE int clang_EvalResult_getAsInt(CXEvalResult E);
 
 /**
+ * \brief Returns the evaluation result as a long long integer if the
+ * kind is Int. This prevents overflows that may happen if the result is
+ * returned with clang_EvalResult_getAsInt.
+ */
+CINDEX_LINKAGE long long clang_EvalResult_getAsLongLong(CXEvalResult E);
+
+/**
+ * \brief Returns a non-zero value if the kind is Int and the evaluation
+ * result resulted in an unsigned integer.
+ */
+CINDEX_LINKAGE unsigned clang_EvalResult_isUnsignedInt(CXEvalResult E);
+
+/**
+ * \brief Returns the evaluation result as an unsigned integer if
+ * the kind is Int and clang_EvalResult_isUnsignedInt is non-zero.
+ */
+CINDEX_LINKAGE unsigned long long clang_EvalResult_getAsUnsigned(CXEvalResult E);
+
+/**
  * \brief Returns the evaluation result as double if the
  * kind is double.
  */
@@ -5528,7 +5616,8 @@ typedef enum {
   CXIdxEntityLang_None = 0,
   CXIdxEntityLang_C    = 1,
   CXIdxEntityLang_ObjC = 2,
-  CXIdxEntityLang_CXX  = 3
+  CXIdxEntityLang_CXX  = 3,
+  CXIdxEntityLang_Swift  = 4
 } CXIdxEntityLanguage;
 
 /**

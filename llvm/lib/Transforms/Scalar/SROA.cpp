@@ -44,12 +44,12 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/Chrono.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/TimeValue.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -692,7 +692,7 @@ private:
           break;
 
         // Handle a struct index, which adds its field offset to the pointer.
-        if (StructType *STy = dyn_cast<StructType>(*GTI)) {
+        if (StructType *STy = GTI.getStructTypeOrNull()) {
           unsigned ElementIdx = OpC->getZExtValue();
           const StructLayout *SL = DL.getStructLayout(STy);
           GEPOffset +=
@@ -1000,7 +1000,8 @@ AllocaSlices::AllocaSlices(const DataLayout &DL, AllocaInst &AI)
 
 #ifndef NDEBUG
   if (SROARandomShuffleSlices) {
-    std::mt19937 MT(static_cast<unsigned>(sys::TimeValue::now().msec()));
+    std::mt19937 MT(static_cast<unsigned>(
+        std::chrono::system_clock::now().time_since_epoch().count()));
     std::shuffle(Slices.begin(), Slices.end(), MT);
   }
 #endif
@@ -2482,8 +2483,8 @@ private:
     }
     V = convertValue(DL, IRB, V, NewAllocaTy);
     StoreInst *Store = IRB.CreateAlignedStore(V, &NewAI, NewAI.getAlignment());
+    Store->copyMetadata(SI, LLVMContext::MD_mem_parallel_loop_access);
     Pass.DeadInsts.insert(&SI);
-    (void)Store;
     DEBUG(dbgs() << "          to: " << *Store << "\n");
     return true;
   }
@@ -2545,6 +2546,7 @@ private:
       NewSI = IRB.CreateAlignedStore(V, NewPtr, getSliceAlign(V->getType()),
                                      SI.isVolatile());
     }
+    NewSI->copyMetadata(SI, LLVMContext::MD_mem_parallel_loop_access);
     if (SI.isVolatile())
       NewSI->setAtomic(SI.getOrdering(), SI.getSynchScope());
     Pass.DeadInsts.insert(&SI);
@@ -2874,6 +2876,17 @@ private:
     // Record this instruction for deletion.
     Pass.DeadInsts.insert(&II);
 
+    // Lifetime intrinsics are only promotable if they cover the whole alloca.
+    // Therefore, we drop lifetime intrinsics which don't cover the whole
+    // alloca.
+    // (In theory, intrinsics which partially cover an alloca could be
+    // promoted, but PromoteMemToReg doesn't handle that case.)
+    // FIXME: Check whether the alloca is promotable before dropping the
+    // lifetime intrinsics?
+    if (NewBeginOffset != NewAllocaBeginOffset ||
+        NewEndOffset != NewAllocaEndOffset)
+      return true;
+
     ConstantInt *Size =
         ConstantInt::get(cast<IntegerType>(II.getArgOperand(0)->getType()),
                          NewEndOffset - NewBeginOffset);
@@ -2887,12 +2900,7 @@ private:
     (void)New;
     DEBUG(dbgs() << "          to: " << *New << "\n");
 
-    // Lifetime intrinsics are only promotable if they cover the whole alloca.
-    // (In theory, intrinsics which partially cover an alloca could be
-    // promoted, but PromoteMemToReg doesn't handle that case.)
-    bool IsWholeAlloca = NewBeginOffset == NewAllocaBeginOffset &&
-                         NewEndOffset == NewAllocaEndOffset;
-    return IsWholeAlloca;
+    return true;
   }
 
   bool visitPHINode(PHINode &PN) {
@@ -3211,20 +3219,11 @@ static Type *getTypePartition(const DataLayout &DL, Type *Ty, uint64_t Offset,
     return nullptr;
 
   if (SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
-    // We can't partition pointers...
-    if (SeqTy->isPointerTy())
-      return nullptr;
-
     Type *ElementTy = SeqTy->getElementType();
     uint64_t ElementSize = DL.getTypeAllocSize(ElementTy);
     uint64_t NumSkippedElements = Offset / ElementSize;
-    if (ArrayType *ArrTy = dyn_cast<ArrayType>(SeqTy)) {
-      if (NumSkippedElements >= ArrTy->getNumElements())
-        return nullptr;
-    } else if (VectorType *VecTy = dyn_cast<VectorType>(SeqTy)) {
-      if (NumSkippedElements >= VecTy->getNumElements())
-        return nullptr;
-    }
+    if (NumSkippedElements >= SeqTy->getNumElements())
+      return nullptr;
     Offset -= NumSkippedElements * ElementSize;
 
     // First check if we need to recurse.
@@ -3569,6 +3568,7 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
                          PartPtrTy, BasePtr->getName() + "."),
           getAdjustedAlignment(LI, PartOffset, DL), /*IsVolatile*/ false,
           LI->getName());
+      PLoad->copyMetadata(*LI, LLVMContext::MD_mem_parallel_loop_access); 
 
       // Append this load onto the list of split loads so we can find it later
       // to rewrite the stores.
@@ -3621,7 +3621,7 @@ bool SROA::presplitLoadsAndStores(AllocaInst &AI, AllocaSlices &AS) {
                                   APInt(DL.getPointerSizeInBits(), PartOffset),
                                   PartPtrTy, StoreBasePtr->getName() + "."),
             getAdjustedAlignment(SI, PartOffset, DL), /*IsVolatile*/ false);
-        (void)PStore;
+        PStore->copyMetadata(*LI, LLVMContext::MD_mem_parallel_loop_access);
         DEBUG(dbgs() << "      +" << PartOffset << ":" << *PStore << "\n");
       }
 
@@ -4274,7 +4274,7 @@ public:
     AU.setPreservesCFG();
   }
 
-  const char *getPassName() const override { return "SROA"; }
+  StringRef getPassName() const override { return "SROA"; }
   static char ID;
 };
 

@@ -1,14 +1,14 @@
 # CMake build for CompilerRT.
 #
 # This build assumes that CompilerRT is checked out into the
-# 'projects/compiler-rt' inside of an LLVM tree.
+# 'projects/compiler-rt' or 'runtimes/compiler-rt' inside of an LLVM tree.
 # Standalone build system for CompilerRT is not yet ready.
 #
 # An important constraint of the build is that it only produces libraries
 # based on the ability of the host toolchain to target various platforms.
 
 # Check if compiler-rt is built as a standalone project.
-if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR COMPILER_RT_STANDALONE_BUILD)
   project(CompilerRT C CXX ASM)
   set(COMPILER_RT_STANDALONE_BUILD TRUE)
 endif()
@@ -85,11 +85,24 @@ option(COMPILER_RT_EXTERNALIZE_DEBUGINFO
 # COMPILER_RT_DEBUG_PYBOOL is used by lit.common.configured.in.
 pythonize_bool(COMPILER_RT_DEBUG)
 
+include(config-ix)
+
+if(APPLE AND SANITIZER_MIN_OSX_VERSION VERSION_LESS "10.9")
+  # Mac OS X prior to 10.9 had problems with exporting symbols from
+  # libc++/libc++abi.
+  set(use_cxxabi_default OFF)
+elseif(MSVC)
+  set(use_cxxabi_default OFF)
+else()
+  set(use_cxxabi_default ON)
+endif()
+
+option(SANITIZER_CAN_USE_CXXABI "Sanitizers can use cxxabi" ${use_cxxabi_default})
+pythonize_bool(SANITIZER_CAN_USE_CXXABI)
+
 #================================
 # Setup Compiler Flags
 #================================
-
-include(config-ix)
 
 if(MSVC)
   # Override any existing /W flags with /W4. This is what LLVM does.  Failing to
@@ -116,10 +129,12 @@ if(NOT COMPILER_RT_HAS_FUNC_SYMBOL)
 endif()
 
 # Provide some common commmandline flags for Sanitizer runtimes.
-append_list_if(COMPILER_RT_HAS_FPIC_FLAG -fPIC SANITIZER_COMMON_CFLAGS)
+if(NOT WIN32)
+  append_list_if(COMPILER_RT_HAS_FPIC_FLAG -fPIC SANITIZER_COMMON_CFLAGS)
+endif()
 append_list_if(COMPILER_RT_HAS_FNO_BUILTIN_FLAG -fno-builtin SANITIZER_COMMON_CFLAGS)
 append_list_if(COMPILER_RT_HAS_FNO_EXCEPTIONS_FLAG -fno-exceptions SANITIZER_COMMON_CFLAGS)
-if(NOT COMPILER_RT_DEBUG)
+if(NOT COMPILER_RT_DEBUG AND NOT APPLE)
   append_list_if(COMPILER_RT_HAS_FOMIT_FRAME_POINTER_FLAG -fomit-frame-pointer SANITIZER_COMMON_CFLAGS)
 endif()
 append_list_if(COMPILER_RT_HAS_FUNWIND_TABLES_FLAG -funwind-tables SANITIZER_COMMON_CFLAGS)
@@ -210,16 +225,16 @@ append_list_if(COMPILER_RT_HAS_WD4800_FLAG /wd4800 SANITIZER_COMMON_CFLAGS)
 # Warnings to turn off for all libraries, not just sanitizers.
 append_string_if(COMPILER_RT_HAS_WUNUSED_PARAMETER_FLAG -Wno-unused-parameter CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
 
-if(APPLE AND SANITIZER_MIN_OSX_VERSION AND SANITIZER_MIN_OSX_VERSION VERSION_LESS "10.9")
-  # Mac OS X prior to 10.9 had problems with exporting symbols from
-  # libc++/libc++abi.
-  set(SANITIZER_CAN_USE_CXXABI FALSE)
-elseif(MSVC)
-  set(SANITIZER_CAN_USE_CXXABI FALSE)
-else()
-  set(SANITIZER_CAN_USE_CXXABI TRUE)
+if (CMAKE_LINKER MATCHES "link.exe$")
+  # Silence MSVC linker warnings caused by empty object files. The
+  # sanitizer libraries intentionally use ifdefs that result in empty
+  # files, rather than skipping these files in the build system.
+  # Ideally, we would pass this flag only for the libraries that need
+  # it, but CMake doesn't seem to have a way to set linker flags for
+  # individual static libraries, so we enable the suppression flag for
+  # the whole compiler-rt project.
+  append("/IGNORE:4221" CMAKE_STATIC_LINKER_FLAGS)
 endif()
-pythonize_bool(SANITIZER_CAN_USE_CXXABI)
 
 add_subdirectory(include)
 

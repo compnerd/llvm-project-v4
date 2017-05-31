@@ -18,10 +18,12 @@
 #include "polly/CodeGen/IslAst.h"
 #include "polly/CodeGen/IslExprBuilder.h"
 #include "polly/CodeGen/LoopGenerators.h"
+#include "polly/CodeGen/RuntimeDebugBuilder.h"
 #include "polly/CodeGen/Utils.h"
 #include "polly/Config/config.h"
 #include "polly/DependenceInfo.h"
 #include "polly/LinkAllPasses.h"
+#include "polly/Options.h"
 #include "polly/ScopInfo.h"
 #include "polly/Support/GICHelper.h"
 #include "polly/Support/SCEVValidator.h"
@@ -48,11 +50,34 @@
 using namespace polly;
 using namespace llvm;
 
+#define DEBUG_TYPE "polly-codegen"
+
+STATISTIC(VersionedScops, "Number of SCoPs that required versioning.");
+
 // The maximal number of dimensions we allow during invariant load construction.
 // More complex access ranges will result in very high compile time and are also
 // unlikely to result in good code. This value is very high and should only
 // trigger for corner cases (e.g., the "dct_luma" function in h264, SPEC2006).
 static int const MaxDimensionsInAccessRange = 9;
+
+static cl::opt<bool> PollyGenerateRTCPrint(
+    "polly-codegen-emit-rtc-print",
+    cl::desc("Emit code that prints the runtime check result dynamically."),
+    cl::Hidden, cl::init(false), cl::ZeroOrMore, cl::cat(PollyCategory));
+
+// If this option is set we always use the isl AST generator to regenerate
+// memory accesses. Without this option set we regenerate expressions using the
+// original SCEV expressions and only generate new expressions in case the
+// access relation has been changed and consequently must be regenerated.
+static cl::opt<bool> PollyGenerateExpressions(
+    "polly-codegen-generate-expressions",
+    cl::desc("Generate AST expressions for unmodified and modified accesses"),
+    cl::Hidden, cl::init(false), cl::ZeroOrMore, cl::cat(PollyCategory));
+
+static cl::opt<int> PollyTargetFirstLevelCacheLineSize(
+    "polly-target-first-level-cache-line-size",
+    cl::desc("The size of the first level cache line size specified in bytes."),
+    cl::Hidden, cl::init(64), cl::ZeroOrMore, cl::cat(PollyCategory));
 
 __isl_give isl_ast_expr *
 IslNodeBuilder::getUpperBound(__isl_keep isl_ast_node *For,
@@ -183,8 +208,7 @@ static int findReferencesInBlock(struct SubtreeReferences &References,
   for (const Instruction &Inst : *BB)
     for (Value *SrcVal : Inst.operands()) {
       auto *Scope = References.LI.getLoopFor(BB);
-      if (canSynthesize(SrcVal, References.S, &References.LI, &References.SE,
-                        Scope)) {
+      if (canSynthesize(SrcVal, References.S, &References.SE, Scope)) {
         References.SCEVs.insert(References.SE.getSCEVAtScope(SrcVal, Scope));
         continue;
       } else if (Value *NewVal = References.GlobalMap.lookup(SrcVal))
@@ -717,13 +741,45 @@ IslNodeBuilder::createNewAccesses(ScopStmt *Stmt,
   Stmt->setAstBuild(Build);
 
   for (auto *MA : *Stmt) {
-    if (!MA->hasNewAccessRelation())
-      continue;
+    if (!MA->hasNewAccessRelation()) {
+      if (PollyGenerateExpressions) {
+        if (!MA->isAffine())
+          continue;
+        if (MA->getLatestScopArrayInfo()->getBasePtrOriginSAI())
+          continue;
 
+        auto *BasePtr =
+            dyn_cast<Instruction>(MA->getLatestScopArrayInfo()->getBasePtr());
+        if (BasePtr && Stmt->getParent()->getRegion().contains(BasePtr))
+          continue;
+      } else {
+        continue;
+      }
+    }
+    assert(MA->isAffine() &&
+           "Only affine memory accesses can be code generated");
     assert(!MA->getLatestScopArrayInfo()->getBasePtrOriginSAI() &&
            "Generating new index expressions to indirect arrays not working");
 
     auto Schedule = isl_ast_build_get_schedule(Build);
+
+#ifndef NDEBUG
+    auto Dom = Stmt->getDomain();
+    auto SchedDom = isl_set_from_union_set(
+        isl_union_map_domain(isl_union_map_copy(Schedule)));
+    auto AccDom = isl_map_domain(MA->getAccessRelation());
+    Dom = isl_set_intersect_params(Dom, Stmt->getParent()->getContext());
+    SchedDom =
+        isl_set_intersect_params(SchedDom, Stmt->getParent()->getContext());
+    assert(isl_set_is_subset(SchedDom, AccDom) &&
+           "Access relation not defined on full schedule domain");
+    assert(isl_set_is_subset(Dom, AccDom) &&
+           "Access relation not defined on full domain");
+    isl_set_free(AccDom);
+    isl_set_free(SchedDom);
+    isl_set_free(Dom);
+#endif
+
     auto PWAccRel = MA->applyScheduleToAccessRelation(Schedule);
 
     auto AccessExpr = isl_ast_build_access_from_pw_multi_aff(Build, PWAccRel);
@@ -1218,8 +1274,8 @@ void IslNodeBuilder::allocateNewArrays() {
 
     auto InstIt =
         Builder.GetInsertBlock()->getParent()->getEntryBlock().getTerminator();
-    Value *CreatedArray =
-        new AllocaInst(NewArrayType, SAI->getName(), &*InstIt);
+    auto *CreatedArray = new AllocaInst(NewArrayType, SAI->getName(), &*InstIt);
+    CreatedArray->setAlignment(PollyTargetFirstLevelCacheLineSize);
     SAI->setBasePtr(CreatedArray);
   }
 }
@@ -1286,7 +1342,8 @@ Value *IslNodeBuilder::generateSCEV(const SCEV *Expr) {
          "Insert location points after last valid instruction");
   Instruction *InsertLocation = &*Builder.GetInsertPoint();
   return expandCodeFor(S, SE, DL, "polly", Expr, Expr->getType(),
-                       InsertLocation, &ValueMap);
+                       InsertLocation, &ValueMap,
+                       StartBlock->getSinglePredecessor());
 }
 
 /// The AST expression we generate to perform the run-time check assumes
@@ -1301,7 +1358,21 @@ Value *IslNodeBuilder::createRTC(isl_ast_expr *Condition) {
     RTC = Builder.CreateIsNotNull(RTC);
   Value *OverflowHappened =
       Builder.CreateNot(ExprBuilder.getOverflowState(), "polly.rtc.overflown");
+
+  if (PollyGenerateRTCPrint) {
+    auto *F = Builder.GetInsertBlock()->getParent();
+    RuntimeDebugBuilder::createCPUPrinter(
+        Builder,
+        "F: " + F->getName().str() + " R: " + S.getRegion().getNameStr() +
+            " __RTC: ",
+        RTC, " Overflow: ", OverflowHappened, "\n");
+  }
+
   RTC = Builder.CreateAnd(RTC, OverflowHappened, "polly.rtc.result");
   ExprBuilder.setTrackOverflow(false);
+
+  if (!isa<ConstantInt>(RTC))
+    VersionedScops++;
+
   return RTC;
 }

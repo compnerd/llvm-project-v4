@@ -14,6 +14,7 @@ set(ADTSources
   DeltaAlgorithmTest.cpp
   DenseMapTest.cpp
   DenseSetTest.cpp
+  DepthFirstIteratorTest.cpp
   FoldingSet.cpp
   FunctionRefTest.cpp
   HashingTest.cpp
@@ -40,6 +41,7 @@ set(ADTSources
   PostOrderIteratorTest.cpp
   PriorityWorklistTest.cpp
   RangeAdapterTest.cpp
+  ReverseIterationTest.cpp
   SCCIteratorTest.cpp
   STLExtrasTest.cpp
   ScopeExitTest.cpp
@@ -55,6 +57,7 @@ set(ADTSources
   StringExtrasTest.cpp
   StringMapTest.cpp
   StringRefTest.cpp
+  StringSwitchTest.cpp
   TinyPtrVectorTest.cpp
   TripleTest.cpp
   TwineTest.cpp

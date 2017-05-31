@@ -70,6 +70,8 @@ std::string getInstrProfErrString(instrprof_error Err) {
     return "Failed to compress data (zlib)";
   case instrprof_error::uncompress_failed:
     return "Failed to uncompress data (zlib)";
+  case instrprof_error::empty_raw_profile:
+    return "Empty raw profile file";
   }
   llvm_unreachable("A value of instrprof_error has no message.");
 }
@@ -78,7 +80,7 @@ std::string getInstrProfErrString(instrprof_error Err) {
 // will be removed once this transition is complete. Clients should prefer to
 // deal with the Error value directly, rather than converting to error_code.
 class InstrProfErrorCategoryType : public std::error_category {
-  const char *name() const LLVM_NOEXCEPT override { return "llvm.instrprof"; }
+  const char *name() const noexcept override { return "llvm.instrprof"; }
   std::string message(int IE) const override {
     return getInstrProfErrString(static_cast<instrprof_error>(IE));
   }
@@ -789,7 +791,7 @@ bool needsComdatForCounter(const Function &F, const Module &M) {
     return true;
 
   Triple TT(M.getTargetTriple());
-  if (!TT.isOSBinFormatELF())
+  if (!TT.isOSBinFormatELF() && !TT.isOSBinFormatWasm())
     return false;
 
   // See createPGOFuncNameVar for more details. To avoid link errors, profile
@@ -807,6 +809,49 @@ bool needsComdatForCounter(const Function &F, const Module &M) {
       Linkage != GlobalValue::AvailableExternallyLinkage)
     return false;
 
+  return true;
+}
+
+// Check if INSTR_PROF_RAW_VERSION_VAR is defined.
+bool isIRPGOFlagSet(const Module *M) {
+  auto IRInstrVar =
+      M->getNamedGlobal(INSTR_PROF_QUOTE(INSTR_PROF_RAW_VERSION_VAR));
+  if (!IRInstrVar || IRInstrVar->isDeclaration() ||
+      IRInstrVar->hasLocalLinkage())
+    return false;
+
+  // Check if the flag is set.
+  if (!IRInstrVar->hasInitializer())
+    return false;
+
+  const Constant *InitVal = IRInstrVar->getInitializer();
+  if (!InitVal)
+    return false;
+
+  return (dyn_cast<ConstantInt>(InitVal)->getZExtValue() &
+          VARIANT_MASK_IR_PROF) != 0;
+}
+
+// Check if we can safely rename this Comdat function.
+bool canRenameComdatFunc(const Function &F, bool CheckAddressTaken) {
+  if (F.getName().empty())
+    return false;
+  if (!needsComdatForCounter(F, *(F.getParent())))
+    return false;
+  // Unsafe to rename the address-taken function (which can be used in
+  // function comparison).
+  if (CheckAddressTaken && F.hasAddressTaken())
+    return false;
+  // Only safe to do if this function may be discarded if it is not used
+  // in the compilation unit.
+  if (!GlobalValue::isDiscardableIfUnused(F.getLinkage()))
+    return false;
+
+  // For AvailableExternallyLinkage functions.
+  if (!F.hasComdat()) {
+    assert(F.getLinkage() == GlobalValue::AvailableExternallyLinkage);
+    return true;
+  }
   return true;
 }
 } // end namespace llvm

@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
   BitReader
   BitWriter
   Core
+  Coroutines
   Coverage
   IPO
   IRReader
@@ -13,6 +14,7 @@ set(LLVM_LINK_COMPONENTS
   MC
   ObjCARCOpts
   Object
+  Passes
   ProfileData
   ScalarOpts
   Support
@@ -42,6 +44,7 @@ add_clang_library(clangCodeGen
   CGCall.cpp
   CGClass.cpp
   CGCleanup.cpp
+  CGCoroutine.cpp
   CGDebugInfo.cpp
   CGDecl.cpp
   CGDeclCXX.cpp
@@ -72,6 +75,7 @@ add_clang_library(clangCodeGen
   CodeGenPGO.cpp
   CodeGenTBAA.cpp
   CodeGenTypes.cpp
+  ConstantInitBuilder.cpp
   CoverageMappingGen.cpp
   ItaniumCXXABI.cpp
   MicrosoftCXXABI.cpp
@@ -80,6 +84,7 @@ add_clang_library(clangCodeGen
   SanitizerMetadata.cpp
   SwiftCallingConv.cpp
   TargetInfo.cpp
+  VarBypassDetector.cpp
 
   DEPENDS
   ${codegen_deps}
@@ -87,6 +92,7 @@ add_clang_library(clangCodeGen
   LINK_LIBS
   clangAnalysis
   clangAST
+  clangAnalysis
   clangBasic
   clangFrontend
   clangLex

@@ -35,11 +35,6 @@
  parameter has a nullability value. For 'audited' APIs, we assume the default
  nullability for any underspecified type.
 
- FactoryAsInit can have the following values:
-   C - Treat as class method.
-   I - Treat as initializer.
-   A - Automatically infer based on the name and type (default).
-
 ---
  Name: AppKit             # The name of the framework
 
@@ -98,8 +93,6 @@
 
        AvailabilityMsg: ""
 
-       FactoryAsInit: C               # Optional: Specifies if this method is a
-                                      # factory initializer (false/true)
        DesignatedInit: false          # Optional: Specifies if this method is a
                                       # designated initializer (false/true)
 
@@ -158,13 +151,35 @@ namespace {
     Instance,
   };
 
+  /// Old attribute deprecated in favor of SwiftName.
+  enum class FactoryAsInitKind {
+    /// Infer based on name and type (the default).
+    Infer,
+    /// Treat as a class method.
+    AsClassMethod,
+    /// Treat as an initializer.
+    AsInitializer
+  };
+  
+  /// Syntactic sugar for EnumExtensibility and FlagEnum
+  enum class EnumConvenienceAliasKind {
+    /// EnumExtensibility: none, FlagEnum: false
+    None,
+    /// EnumExtensibility: open, FlagEnum: false
+    CFEnum,
+    /// EnumExtensibility: open, FlagEnum: true
+    CFOptions,
+    /// EnumExtensibility: closed, FlagEnum: false
+    CFClosedEnum
+  };
+
   struct AvailabilityItem {
     APIAvailability Mode = APIAvailability::Available;
     StringRef Msg;
     AvailabilityItem() : Mode(APIAvailability::Available), Msg("") {}
   };
 
-  static llvm::Optional<NullabilityKind> AbsentNullability {};
+  static llvm::Optional<NullabilityKind> AbsentNullability = llvm::None;
   static llvm::Optional<NullabilityKind> DefaultNullability =
     NullabilityKind::NonNull;
   typedef std::vector<clang::NullabilityKind> NullabilitySeq;
@@ -186,8 +201,7 @@ namespace {
     AvailabilityItem Availability;
     Optional<bool> SwiftPrivate;
     StringRef SwiftName;
-    api_notes::FactoryAsInitKind FactoryAsInit
-      = api_notes::FactoryAsInitKind::Infer;
+    FactoryAsInitKind FactoryAsInit = FactoryAsInitKind::Infer;
     bool DesignatedInit = false;
     bool Required = false;
     StringRef ResultType;
@@ -214,6 +228,8 @@ namespace {
     StringRef SwiftName;
     Optional<StringRef> SwiftBridge;
     Optional<StringRef> NSErrorDomain;
+    Optional<bool> SwiftImportAsNonGeneric;
+    Optional<bool> SwiftObjCMembers;
     MethodsSeq Methods;
     PropertiesSeq Properties;
   };
@@ -257,6 +273,9 @@ namespace {
     Optional<bool> SwiftPrivate;
     Optional<StringRef> SwiftBridge;
     Optional<StringRef> NSErrorDomain;
+    Optional<api_notes::EnumExtensibilityKind> EnumExtensibility;
+    Optional<bool> FlagEnum;
+    Optional<EnumConvenienceAliasKind> EnumConvenienceKind;
   };
   typedef std::vector<Tag> TagsSeq;
 
@@ -330,11 +349,11 @@ namespace llvm {
     };
 
     template <>
-    struct ScalarEnumerationTraits<api_notes::FactoryAsInitKind > {
-      static void enumeration(IO &io, api_notes::FactoryAsInitKind  &value) {
-        io.enumCase(value, "A", api_notes::FactoryAsInitKind::Infer);
-        io.enumCase(value, "C", api_notes::FactoryAsInitKind::AsClassMethod);
-        io.enumCase(value, "I", api_notes::FactoryAsInitKind::AsInitializer);
+    struct ScalarEnumerationTraits<FactoryAsInitKind> {
+      static void enumeration(IO &io, FactoryAsInitKind  &value) {
+        io.enumCase(value, "A", FactoryAsInitKind::Infer);
+        io.enumCase(value, "C", FactoryAsInitKind::AsClassMethod);
+        io.enumCase(value, "I", FactoryAsInitKind::AsInitializer);
       }
     };
 
@@ -363,6 +382,30 @@ namespace llvm {
         io.enumCase(value, "none",      api_notes::SwiftWrapperKind::None);
         io.enumCase(value, "struct",    api_notes::SwiftWrapperKind::Struct);
         io.enumCase(value, "enum",      api_notes::SwiftWrapperKind::Enum);
+      }
+    };
+
+    template<>
+    struct ScalarEnumerationTraits<api_notes::EnumExtensibilityKind> {
+      static void enumeration(IO &io, api_notes::EnumExtensibilityKind &value) {
+        io.enumCase(value, "none",   api_notes::EnumExtensibilityKind::None);
+        io.enumCase(value, "open",   api_notes::EnumExtensibilityKind::Open);
+        io.enumCase(value, "closed", api_notes::EnumExtensibilityKind::Closed);
+      }
+    };
+
+    template<>
+    struct ScalarEnumerationTraits<EnumConvenienceAliasKind> {
+      static void enumeration(IO &io, EnumConvenienceAliasKind &value) {
+        io.enumCase(value, "none",      EnumConvenienceAliasKind::None);
+        io.enumCase(value, "CFEnum",    EnumConvenienceAliasKind::CFEnum);
+        io.enumCase(value, "NSEnum",    EnumConvenienceAliasKind::CFEnum);
+        io.enumCase(value, "CFOptions", EnumConvenienceAliasKind::CFOptions);
+        io.enumCase(value, "NSOptions", EnumConvenienceAliasKind::CFOptions);
+        io.enumCase(value, "CFClosedEnum",
+                    EnumConvenienceAliasKind::CFClosedEnum);
+        io.enumCase(value, "NSClosedEnum",
+                    EnumConvenienceAliasKind::CFClosedEnum);
       }
     };
 
@@ -425,7 +468,7 @@ namespace llvm {
         io.mapOptional("SwiftPrivate",    m.SwiftPrivate);
         io.mapOptional("SwiftName",       m.SwiftName);
         io.mapOptional("FactoryAsInit",   m.FactoryAsInit,
-                                          api_notes::FactoryAsInitKind::Infer);
+                                          FactoryAsInitKind::Infer);
         io.mapOptional("DesignatedInit",  m.DesignatedInit, false);
         io.mapOptional("Required",        m.Required, false);
         io.mapOptional("ResultType",      m.ResultType, StringRef(""));
@@ -443,6 +486,8 @@ namespace llvm {
         io.mapOptional("SwiftName",             c.SwiftName);
         io.mapOptional("SwiftBridge",           c.SwiftBridge);
         io.mapOptional("NSErrorDomain",         c.NSErrorDomain);
+        io.mapOptional("SwiftImportAsNonGeneric", c.SwiftImportAsNonGeneric);
+        io.mapOptional("SwiftObjCMembers",      c.SwiftObjCMembers);
         io.mapOptional("Methods",               c.Methods);
         io.mapOptional("Properties",            c.Properties);
       }
@@ -499,6 +544,9 @@ namespace llvm {
         io.mapOptional("SwiftName",             t.SwiftName);
         io.mapOptional("SwiftBridge",           t.SwiftBridge);
         io.mapOptional("NSErrorDomain",         t.NSErrorDomain);
+        io.mapOptional("EnumExtensibility",     t.EnumExtensibility);
+        io.mapOptional("FlagEnum",              t.FlagEnum);
+        io.mapOptional("EnumKind",              t.EnumConvenienceKind);
       }
     };
 
@@ -721,8 +769,10 @@ namespace {
       // Translate the initializer info.
       mInfo.DesignatedInit = meth.DesignatedInit;
       mInfo.Required = meth.Required;
-      if (meth.FactoryAsInit != FactoryAsInitKind::Infer)
-        mInfo.setFactoryAsInitKind(meth.FactoryAsInit);
+      if (meth.FactoryAsInit != FactoryAsInitKind::Infer) {
+        emitError("'FactoryAsInit' is no longer valid; "
+                  "use 'SwiftName' instead");
+      }
       mInfo.ResultType = meth.ResultType;
 
       // Translate parameter information.
@@ -748,6 +798,10 @@ namespace {
 
       if (cl.AuditedForNullability)
         cInfo.setDefaultNullability(*DefaultNullability);
+      if (cl.SwiftImportAsNonGeneric)
+        cInfo.setSwiftImportAsNonGeneric(*cl.SwiftImportAsNonGeneric);
+      if (cl.SwiftObjCMembers)
+        cInfo.setSwiftObjCMembers(*cl.SwiftObjCMembers);
 
       ContextID clID = Writer->addObjCContext(cl.Name, isClass, cInfo,
                                               swiftVersion);
@@ -916,6 +970,41 @@ namespace {
         TagInfo tagInfo;
         if (convertCommonType(t, tagInfo, t.Name))
           continue;
+
+        if (t.EnumConvenienceKind) {
+          if (t.EnumExtensibility) {
+            emitError(llvm::Twine(
+                "cannot mix EnumKind and EnumExtensibility (for ") + t.Name +
+                ")");
+            continue;
+          }
+          if (t.FlagEnum) {
+            emitError(llvm::Twine("cannot mix EnumKind and FlagEnum (for ") +
+                t.Name + ")");
+            continue;
+          }
+          switch (t.EnumConvenienceKind.getValue()) {
+          case EnumConvenienceAliasKind::None:
+            tagInfo.EnumExtensibility = EnumExtensibilityKind::None;
+            tagInfo.setFlagEnum(false);
+            break;
+          case EnumConvenienceAliasKind::CFEnum:
+            tagInfo.EnumExtensibility = EnumExtensibilityKind::Open;
+            tagInfo.setFlagEnum(false);
+            break;
+          case EnumConvenienceAliasKind::CFOptions:
+            tagInfo.EnumExtensibility = EnumExtensibilityKind::Open;
+            tagInfo.setFlagEnum(true);
+            break;
+          case EnumConvenienceAliasKind::CFClosedEnum:
+            tagInfo.EnumExtensibility = EnumExtensibilityKind::Closed;
+            tagInfo.setFlagEnum(false);
+            break;
+          }
+        } else {
+          tagInfo.EnumExtensibility = t.EnumExtensibility;
+          tagInfo.setFlagEnum(t.FlagEnum);          
+        }
 
         Writer->addTag(t.Name, tagInfo, swiftVersion);
       }
@@ -1097,6 +1186,8 @@ namespace {
       record.Name = name;
 
       handleCommonType(record, info);
+      record.SwiftImportAsNonGeneric = info.getSwiftImportAsNonGeneric();
+      record.SwiftObjCMembers = info.getSwiftObjCMembers();
 
       if (info.getDefaultNullability()) {
         record.AuditedForNullability = true;
@@ -1193,7 +1284,6 @@ namespace {
       handleParameters(method.Params, info);
       handleNullability(method.Nullability, method.NullabilityOfRet, info,
                         selector.count(':'));
-      method.FactoryAsInit = info.getFactoryAsInitKind();
       method.DesignatedInit = info.DesignatedInit;
       method.Required = info.Required;
       method.ResultType = copyString(info.ResultType);
@@ -1273,6 +1363,8 @@ namespace {
       Tag tag;
       tag.Name = name;
       handleCommonType(tag, info);
+      tag.EnumExtensibility = info.EnumExtensibility;
+      tag.FlagEnum = info.isFlagEnum();
       auto &items = getTopLevelItems(swiftVersion);
       items.Tags.push_back(tag);
     }

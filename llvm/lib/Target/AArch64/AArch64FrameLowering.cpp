@@ -204,9 +204,9 @@ void AArch64FrameLowering::emitCalleeSavedFrameMoves(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) const {
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  MachineModuleInfo &MMI = MF.getMMI();
-  const MCRegisterInfo *MRI = MMI.getContext().getRegisterInfo();
-  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  const TargetSubtargetInfo &STI = MF.getSubtarget();
+  const MCRegisterInfo *MRI = STI.getRegisterInfo();
+  const TargetInstrInfo *TII = STI.getInstrInfo();
   DebugLoc DL = MBB.findDebugLoc(MBBI);
 
   // Add callee saved registers to move list.
@@ -219,7 +219,7 @@ void AArch64FrameLowering::emitCalleeSavedFrameMoves(
     int64_t Offset =
         MFI.getObjectOffset(Info.getFrameIdx()) - getOffsetOfLocalArea();
     unsigned DwarfReg = MRI->getDwarfRegNum(Reg, true);
-    unsigned CFIIndex = MMI.addFrameInst(
+    unsigned CFIIndex = MF.addFrameInst(
         MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
     BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
         .addCFIIndex(CFIIndex)
@@ -446,7 +446,7 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
       // Label used to tie together the PROLOG_LABEL and the MachineMoves.
       MCSymbol *FrameLabel = MMI.getContext().createTempSymbol();
       // Encode the stack size of the leaf function.
-      unsigned CFIIndex = MMI.addFrameInst(
+      unsigned CFIIndex = MF.addFrameInst(
           MCCFIInstruction::createDefCfaOffset(FrameLabel, -NumBytes));
       BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex)
@@ -621,14 +621,14 @@ void AArch64FrameLowering::emitPrologue(MachineFunction &MF,
     if (HasFP) {
       // Define the current CFA rule to use the provided FP.
       unsigned Reg = RegInfo->getDwarfRegNum(FramePtr, true);
-      unsigned CFIIndex = MMI.addFrameInst(
+      unsigned CFIIndex = MF.addFrameInst(
           MCCFIInstruction::createDefCfa(nullptr, Reg, 2 * StackGrowth));
       BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex)
           .setMIFlags(MachineInstr::FrameSetup);
     } else {
       // Encode the stack size of the leaf function.
-      unsigned CFIIndex = MMI.addFrameInst(
+      unsigned CFIIndex = MF.addFrameInst(
           MCCFIInstruction::createDefCfaOffset(nullptr, -MFI.getStackSize()));
       BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex)
@@ -1102,7 +1102,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   if (RegInfo->hasBasePointer(MF))
     BasePointerReg = RegInfo->getBaseRegister();
 
-  bool ExtraCSSpill = false;
+  unsigned ExtraCSSpill = 0;
   const MCPhysReg *CSRegs = RegInfo->getCalleeSavedRegs(&MF);
   // Figure out which callee-saved registers to save/restore.
   for (unsigned i = 0; CSRegs[i]; ++i) {
@@ -1130,7 +1130,7 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
       SavedRegs.set(PairedReg);
       if (AArch64::GPR64RegClass.contains(PairedReg) &&
           !RegInfo->isReservedReg(MF, PairedReg))
-        ExtraCSSpill = true;
+        ExtraCSSpill = PairedReg;
     }
   }
 
@@ -1163,8 +1163,8 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
   // register scavenging. If we already spilled an extra callee-saved register
   // above to keep the number of spills even, we don't need to do anything else
   // here.
-  if (BigStack && !ExtraCSSpill) {
-    if (UnspilledCSGPR != AArch64::NoRegister) {
+  if (BigStack) {
+    if (!ExtraCSSpill && UnspilledCSGPR != AArch64::NoRegister) {
       DEBUG(dbgs() << "Spilling " << PrintReg(UnspilledCSGPR, RegInfo)
             << " to get a scratch register.\n");
       SavedRegs.set(UnspilledCSGPR);
@@ -1173,13 +1173,13 @@ void AArch64FrameLowering::determineCalleeSaves(MachineFunction &MF,
       // store the pair.
       if (produceCompactUnwindFrame(MF))
         SavedRegs.set(UnspilledCSGPRPaired);
-      ExtraCSSpill = true;
+      ExtraCSSpill = UnspilledCSGPRPaired;
       NumRegsSpilled = SavedRegs.count();
     }
 
     // If we didn't find an extra callee-saved register to spill, create
     // an emergency spill slot.
-    if (!ExtraCSSpill) {
+    if (!ExtraCSSpill || MF.getRegInfo().isPhysRegUsed(ExtraCSSpill)) {
       const TargetRegisterClass *RC = &AArch64::GPR64RegClass;
       int FI = MFI.CreateStackObject(RC->getSize(), RC->getAlignment(), false);
       RS->addScavengingFrameIndex(FI);

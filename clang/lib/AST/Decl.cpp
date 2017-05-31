@@ -1414,6 +1414,11 @@ void NamedDecl::printQualifiedName(raw_ostream &OS,
                                    const PrintingPolicy &P) const {
   const DeclContext *Ctx = getDeclContext();
 
+  // For ObjC methods, look through categories and use the interface as context.
+  if (auto *MD = dyn_cast<ObjCMethodDecl>(this))
+    if (auto *ID = MD->getClassInterface())
+      Ctx = ID;
+
   if (Ctx->isFunctionOrMethod()) {
     printName(OS);
     return;
@@ -2649,7 +2654,7 @@ bool FunctionDecl::isReplaceableGlobalAllocationFunction() const {
     return false;
 
   const auto *FPT = getType()->castAs<FunctionProtoType>();
-  if (FPT->getNumParams() == 0 || FPT->getNumParams() > 2 || FPT->isVariadic())
+  if (FPT->getNumParams() == 0 || FPT->getNumParams() > 3 || FPT->isVariadic())
     return false;
 
   // If this is a single-parameter function, it must be a replaceable global
@@ -2657,20 +2662,42 @@ bool FunctionDecl::isReplaceableGlobalAllocationFunction() const {
   if (FPT->getNumParams() == 1)
     return true;
 
-  // Otherwise, we're looking for a second parameter whose type is
-  // 'const std::nothrow_t &', or, in C++1y, 'std::size_t'.
-  QualType Ty = FPT->getParamType(1);
+  unsigned Params = 1;
+  QualType Ty = FPT->getParamType(Params);
   ASTContext &Ctx = getASTContext();
+
+  auto Consume = [&] {
+    ++Params;
+    Ty = Params < FPT->getNumParams() ? FPT->getParamType(Params) : QualType();
+  };
+
+  // In C++14, the next parameter can be a 'std::size_t' for sized delete.
+  bool IsSizedDelete = false;
   if (Ctx.getLangOpts().SizedDeallocation &&
-      Ctx.hasSameType(Ty, Ctx.getSizeType()))
-    return true;
-  if (!Ty->isReferenceType())
-    return false;
-  Ty = Ty->getPointeeType();
-  if (Ty.getCVRQualifiers() != Qualifiers::Const)
-    return false;
-  const CXXRecordDecl *RD = Ty->getAsCXXRecordDecl();
-  return RD && isNamed(RD, "nothrow_t") && RD->isInStdNamespace();
+      (getDeclName().getCXXOverloadedOperator() == OO_Delete ||
+       getDeclName().getCXXOverloadedOperator() == OO_Array_Delete) &&
+      Ctx.hasSameType(Ty, Ctx.getSizeType())) {
+    IsSizedDelete = true;
+    Consume();
+  }
+
+  // In C++17, the next parameter can be a 'std::align_val_t' for aligned
+  // new/delete.
+  if (Ctx.getLangOpts().AlignedAllocation && !Ty.isNull() && Ty->isAlignValT())
+    Consume();
+
+  // Finally, if this is not a sized delete, the final parameter can
+  // be a 'const std::nothrow_t&'.
+  if (!IsSizedDelete && !Ty.isNull() && Ty->isReferenceType()) {
+    Ty = Ty->getPointeeType();
+    if (Ty.getCVRQualifiers() != Qualifiers::Const)
+      return false;
+    const CXXRecordDecl *RD = Ty->getAsCXXRecordDecl();
+    if (RD && isNamed(RD, "nothrow_t") && RD->isInStdNamespace())
+      Consume();
+  }
+
+  return Params == FPT->getNumParams();
 }
 
 LanguageLinkage FunctionDecl::getLanguageLinkage() const {
@@ -2815,28 +2842,6 @@ void FunctionDecl::setParams(ASTContext &C,
   if (!NewParamInfo.empty()) {
     ParamInfo = new (C) ParmVarDecl*[NewParamInfo.size()];
     std::copy(NewParamInfo.begin(), NewParamInfo.end(), ParamInfo);
-  }
-}
-
-void FunctionDecl::setDeclsInPrototypeScope(ArrayRef<NamedDecl *> NewDecls) {
-  assert(DeclsInPrototypeScope.empty() && "Already has prototype decls!");
-
-  if (!NewDecls.empty()) {
-    NamedDecl **A = new (getASTContext()) NamedDecl*[NewDecls.size()];
-    std::copy(NewDecls.begin(), NewDecls.end(), A);
-    DeclsInPrototypeScope = llvm::makeArrayRef(A, NewDecls.size());
-    // Move declarations introduced in prototype to the function context.
-    for (auto I : NewDecls) {
-      DeclContext *DC = I->getDeclContext();
-      // Forward-declared reference to an enumeration is not added to
-      // declaration scope, so skip declaration that is absent from its
-      // declaration contexts.
-      if (DC->containsDecl(I)) {
-          DC->removeDecl(I);
-          I->setDeclContext(this);
-          addDecl(I);
-      }
-    }
   }
 }
 
@@ -2990,6 +2995,18 @@ SourceRange FunctionDecl::getReturnTypeSourceRange() const {
   return RTRange;
 }
 
+SourceRange FunctionDecl::getExceptionSpecSourceRange() const {
+  const TypeSourceInfo *TSI = getTypeSourceInfo();
+  if (!TSI)
+    return SourceRange();
+  FunctionTypeLoc FTL =
+    TSI->getTypeLoc().IgnoreParens().getAs<FunctionTypeLoc>();
+  if (!FTL)
+    return SourceRange();
+
+  return FTL.getExceptionSpecRange();
+}
+
 const Attr *FunctionDecl::getUnusedResultAttr() const {
   QualType RetType = getReturnType();
   if (RetType->isRecordType()) {
@@ -3026,7 +3043,8 @@ const Attr *FunctionDecl::getUnusedResultAttr() const {
 /// an externally visible symbol, but "extern inline" will not create an 
 /// externally visible symbol.
 bool FunctionDecl::isInlineDefinitionExternallyVisible() const {
-  assert(doesThisDeclarationHaveABody() && "Must have the function definition");
+  assert((doesThisDeclarationHaveABody() || willHaveBody()) &&
+         "Must be a function definition");
   assert(isInlined() && "Function must be inline");
   ASTContext &Context = getASTContext();
   
@@ -3504,20 +3522,6 @@ unsigned FunctionDecl::getMemoryFunctionKind() const {
   return 0;
 }
 
-void FunctionDecl::addDeferredDiag(PartialDiagnosticAt PD) {
-  getASTContext().getDeferredDiags()[this].push_back(std::move(PD));
-}
-
-std::vector<PartialDiagnosticAt> FunctionDecl::takeDeferredDiags() const {
-  auto &DD = getASTContext().getDeferredDiags();
-  auto It = DD.find(this);
-  if (It == DD.end())
-    return {};
-  auto Ret = std::move(It->second);
-  DD.erase(It);
-  return Ret;
-}
-
 //===----------------------------------------------------------------------===//
 // FieldDecl Implementation
 //===----------------------------------------------------------------------===//
@@ -3743,6 +3747,20 @@ void EnumDecl::completeDefinition(QualType NewType,
   setNumPositiveBits(NumPositiveBits);
   setNumNegativeBits(NumNegativeBits);
   TagDecl::completeDefinition();
+}
+
+bool EnumDecl::isClosed() const {
+  if (const auto *A = getAttr<EnumExtensibilityAttr>())
+    return A->getExtensibility() == EnumExtensibilityAttr::Closed;
+  return true;
+}
+
+bool EnumDecl::isClosedFlag() const {
+  return isClosed() && hasAttr<FlagEnumAttr>();
+}
+
+bool EnumDecl::isClosedNonFlag() const {
+  return isClosed() && !hasAttr<FlagEnumAttr>();
 }
 
 TemplateSpecializationKind EnumDecl::getTemplateSpecializationKind() const {
@@ -4231,6 +4249,30 @@ TagDecl *TypedefNameDecl::getAnonDeclWithTypedefName(bool AnyRedecl) const {
   return nullptr;
 }
 
+bool TypedefNameDecl::isTransparentTagSlow() const {
+  auto determineIsTransparent = [&]() {
+    if (auto *TT = getUnderlyingType()->getAs<TagType>()) {
+      if (auto *TD = TT->getDecl()) {
+        if (TD->getName() != getName())
+          return false;
+        SourceLocation TTLoc = getLocation();
+        SourceLocation TDLoc = TD->getLocation();
+        if (!TTLoc.isMacroID() || !TDLoc.isMacroID())
+          return false;
+        SourceManager &SM = getASTContext().getSourceManager();
+        return SM.getSpellingLoc(TTLoc) == SM.getSpellingLoc(TDLoc);
+      }
+    }
+    return false;
+  };
+
+  bool isTransparent = determineIsTransparent();
+  CacheIsTransparentTag = 1;
+  if (isTransparent)
+    CacheIsTransparentTag |= 0x2;
+  return isTransparent;
+}
+
 TypedefDecl *TypedefDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   return new (C, ID) TypedefDecl(C, nullptr, SourceLocation(), SourceLocation(),
                                  nullptr, nullptr);
@@ -4362,4 +4404,19 @@ SourceRange ImportDecl::getSourceRange() const {
     return SourceRange(getLocation(), *getTrailingObjects<SourceLocation>());
 
   return SourceRange(getLocation(), getIdentifierLocs().back());
+}
+
+//===----------------------------------------------------------------------===//
+// ExportDecl Implementation
+//===----------------------------------------------------------------------===//
+
+void ExportDecl::anchor() {}
+
+ExportDecl *ExportDecl::Create(ASTContext &C, DeclContext *DC,
+                               SourceLocation ExportLoc) {
+  return new (C, DC) ExportDecl(DC, ExportLoc);
+}
+
+ExportDecl *ExportDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
+  return new (C, ID) ExportDecl(nullptr, SourceLocation());
 }

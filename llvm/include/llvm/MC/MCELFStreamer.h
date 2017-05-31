@@ -44,7 +44,7 @@ public:
 
   void InitSections(bool NoExecStack) override;
   void ChangeSection(MCSection *Section, const MCExpr *Subsection) override;
-  void EmitLabel(MCSymbol *Symbol) override;
+  void EmitLabel(MCSymbol *Symbol, SMLoc Loc = SMLoc()) override;
   void EmitAssemblerFlag(MCAssemblerFlag Flag) override;
   void EmitThumbFunc(MCSymbol *Func) override;
   void EmitWeakReference(MCSymbol *Alias, const MCSymbol *Symbol) override;
@@ -57,7 +57,7 @@ public:
   void EmitCOFFSymbolType(int Type) override;
   void EndCOFFSymbolDef() override;
 
-  void emitELFSize(MCSymbolELF *Symbol, const MCExpr *Value) override;
+  void emitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
 
   void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                              unsigned ByteAlignment) override;

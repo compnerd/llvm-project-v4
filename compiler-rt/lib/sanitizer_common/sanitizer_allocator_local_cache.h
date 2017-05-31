@@ -18,7 +18,110 @@
 // or SizeClassAllocator32. Since the typical use of this class is to have one
 // object per thread in TLS, is has to be POD.
 template<class SizeClassAllocator>
-struct SizeClassAllocatorLocalCache {
+struct SizeClassAllocatorLocalCache
+    : SizeClassAllocator::AllocatorCache {
+};
+
+// Cache used by SizeClassAllocator64.
+template <class SizeClassAllocator>
+struct SizeClassAllocator64LocalCache {
+  typedef SizeClassAllocator Allocator;
+  static const uptr kNumClasses = SizeClassAllocator::kNumClasses;
+  typedef typename Allocator::SizeClassMapT SizeClassMap;
+  typedef typename Allocator::CompactPtrT CompactPtrT;
+
+  void Init(AllocatorGlobalStats *s) {
+    stats_.Init();
+    if (s)
+      s->Register(&stats_);
+  }
+
+  void Destroy(SizeClassAllocator *allocator, AllocatorGlobalStats *s) {
+    Drain(allocator);
+    if (s)
+      s->Unregister(&stats_);
+  }
+
+  void *Allocate(SizeClassAllocator *allocator, uptr class_id) {
+    CHECK_NE(class_id, 0UL);
+    CHECK_LT(class_id, kNumClasses);
+    stats_.Add(AllocatorStatAllocated, Allocator::ClassIdToSize(class_id));
+    PerClass *c = &per_class_[class_id];
+    if (UNLIKELY(c->count == 0))
+      Refill(c, allocator, class_id);
+    CHECK_GT(c->count, 0);
+    CompactPtrT chunk = c->chunks[--c->count];
+    void *res = reinterpret_cast<void *>(allocator->CompactPtrToPointer(
+        allocator->GetRegionBeginBySizeClass(class_id), chunk));
+    return res;
+  }
+
+  void Deallocate(SizeClassAllocator *allocator, uptr class_id, void *p) {
+    CHECK_NE(class_id, 0UL);
+    CHECK_LT(class_id, kNumClasses);
+    // If the first allocator call on a new thread is a deallocation, then
+    // max_count will be zero, leading to check failure.
+    InitCache();
+    stats_.Sub(AllocatorStatAllocated, Allocator::ClassIdToSize(class_id));
+    PerClass *c = &per_class_[class_id];
+    CHECK_NE(c->max_count, 0UL);
+    if (UNLIKELY(c->count == c->max_count))
+      Drain(c, allocator, class_id, c->max_count / 2);
+    CompactPtrT chunk = allocator->PointerToCompactPtr(
+        allocator->GetRegionBeginBySizeClass(class_id),
+        reinterpret_cast<uptr>(p));
+    c->chunks[c->count++] = chunk;
+  }
+
+  void Drain(SizeClassAllocator *allocator) {
+    for (uptr class_id = 0; class_id < kNumClasses; class_id++) {
+      PerClass *c = &per_class_[class_id];
+      while (c->count > 0)
+        Drain(c, allocator, class_id, c->count);
+    }
+  }
+
+  // private:
+  struct PerClass {
+    u32 count;
+    u32 max_count;
+    CompactPtrT chunks[2 * SizeClassMap::kMaxNumCachedHint];
+  };
+  PerClass per_class_[kNumClasses];
+  AllocatorStats stats_;
+
+  void InitCache() {
+    if (per_class_[1].max_count)
+      return;
+    for (uptr i = 0; i < kNumClasses; i++) {
+      PerClass *c = &per_class_[i];
+      c->max_count = 2 * SizeClassMap::MaxCachedHint(i);
+    }
+  }
+
+  NOINLINE void Refill(PerClass *c, SizeClassAllocator *allocator,
+                       uptr class_id) {
+    InitCache();
+    uptr num_requested_chunks = SizeClassMap::MaxCachedHint(class_id);
+    allocator->GetFromAllocator(&stats_, class_id, c->chunks,
+                                num_requested_chunks);
+    c->count = num_requested_chunks;
+  }
+
+  NOINLINE void Drain(PerClass *c, SizeClassAllocator *allocator, uptr class_id,
+                      uptr count) {
+    InitCache();
+    CHECK_GE(c->count, count);
+    uptr first_idx_to_drain = c->count - count;
+    c->count -= count;
+    allocator->ReturnToAllocator(&stats_, class_id,
+                                 &c->chunks[first_idx_to_drain], count);
+  }
+};
+
+// Cache used by SizeClassAllocator32.
+template <class SizeClassAllocator>
+struct SizeClassAllocator32LocalCache {
   typedef SizeClassAllocator Allocator;
   typedef typename Allocator::TransferBatch TransferBatch;
   static const uptr kNumClasses = SizeClassAllocator::kNumClasses;
@@ -93,21 +196,7 @@ struct SizeClassAllocatorLocalCache {
   // For small size classes we allocate batches separately.
   // For large size classes we may use one of the chunks to store the batch.
   // sizeof(TransferBatch) must be a power of 2 for more efficient allocation.
-
-  // If kUseSeparateSizeClassForBatch is true,
-  // all TransferBatch objects are allocated from kBatchClassID
-  // size class (except for those that are needed for kBatchClassID itself).
-  // The goal is to have TransferBatches in a totally different region of RAM
-  // to improve security and allow more efficient RAM reclamation.
-  // This is experimental and may currently increase memory usage by up to 3%
-  // in extreme cases.
-  static const bool kUseSeparateSizeClassForBatch = false;
-
   static uptr SizeClassForTransferBatch(uptr class_id) {
-    if (kUseSeparateSizeClassForBatch)
-      return class_id == SizeClassMap::kBatchClassID
-                 ? 0
-                 : SizeClassMap::kBatchClassID;
     if (Allocator::ClassIdToSize(class_id) <
         TransferBatch::AllocationSizeRequiredForNElements(
             TransferBatch::MaxCached(class_id)))
@@ -157,3 +246,4 @@ struct SizeClassAllocatorLocalCache {
     allocator->DeallocateBatch(&stats_, class_id, b);
   }
 };
+

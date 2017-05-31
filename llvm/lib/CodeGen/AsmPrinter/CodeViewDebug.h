@@ -20,8 +20,8 @@
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/DebugInfo/CodeView/MemoryTypeTableBuilder.h"
 #include "llvm/DebugInfo/CodeView/TypeIndex.h"
+#include "llvm/DebugInfo/CodeView/TypeTableBuilder.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/MC/MCStreamer.h"
@@ -36,7 +36,8 @@ struct ClassInfo;
 /// \brief Collects and handles line tables information in a CodeView format.
 class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   MCStreamer &OS;
-  codeview::MemoryTypeTableBuilder TypeTable;
+  llvm::BumpPtrAllocator Allocator;
+  codeview::TypeTableBuilder TypeTable;
 
   /// Represents the most general definition range.
   struct LocalVarDefRange {
@@ -196,6 +197,8 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
 
   void emitTypeInformation();
 
+  void emitCompilerInformation();
+
   void emitInlineeLinesSubsection();
 
   void emitDebugInfoForFunction(const Function *GV, FunctionInfo &FI);
@@ -224,7 +227,7 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
 
   void collectVariableInfo(const DISubprogram *SP);
 
-  void collectVariableInfoFromMMITable(DenseSet<InlinedVariable> &Processed);
+  void collectVariableInfoFromMFTable(DenseSet<InlinedVariable> &Processed);
 
   /// Records information about a local variable in the appropriate scope. In
   /// particular, locals from inlined code live inside the inlining site.
@@ -258,6 +261,7 @@ class LLVM_LIBRARY_VISIBILITY CodeViewDebug : public DebugHandlerBase {
   codeview::TypeIndex lowerTypeMemberPointer(const DIDerivedType *Ty);
   codeview::TypeIndex lowerTypeModifier(const DIDerivedType *Ty);
   codeview::TypeIndex lowerTypeFunction(const DISubroutineType *Ty);
+  codeview::TypeIndex lowerTypeVFTableShape(const DIDerivedType *Ty);
   codeview::TypeIndex lowerTypeMemberFunction(const DISubroutineType *Ty,
                                               const DIType *ClassTy,
                                               int ThisAdjustment);

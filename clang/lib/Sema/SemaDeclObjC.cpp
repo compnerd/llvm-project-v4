@@ -209,11 +209,11 @@ bool Sema::CheckARCMethodDecl(ObjCMethodDecl *method) {
     if (!Context.hasSameType(method->getReturnType(), Context.VoidTy)) {
       SourceRange ResultTypeRange = method->getReturnTypeSourceRange();
       if (ResultTypeRange.isInvalid())
-        Diag(method->getLocation(), diag::error_dealloc_bad_result_type)
+        Diag(method->getLocation(), diag::err_dealloc_bad_result_type)
             << method->getReturnType()
             << FixItHint::CreateInsertion(method->getSelectorLoc(0), "(void)");
       else
-        Diag(method->getLocation(), diag::error_dealloc_bad_result_type)
+        Diag(method->getLocation(), diag::err_dealloc_bad_result_type)
             << method->getReturnType()
             << FixItHint::CreateReplacement(ResultTypeRange, "void");
       return true;
@@ -258,7 +258,8 @@ static void DiagnoseObjCImplementedDeprecations(Sema &S,
       S.Diag(ND->getLocation(), diag::note_method_declared_at)
         << ND->getDeclName();
     else
-      S.Diag(ND->getLocation(), diag::note_previous_decl) << "class";
+      S.Diag(ND->getLocation(), diag::note_previous_decl)
+          << (isa<ObjCCategoryDecl>(ND) ? "category" : "class");
   }
 }
 
@@ -983,6 +984,7 @@ ActOnStartClassInterface(Scope *S, SourceLocation AtInterfaceLoc,
   if (AttrList)
     ProcessDeclAttributeList(TUScope, IDecl, AttrList);
   ProcessAPINotes(IDecl);
+  AddPragmaAttributes(TUScope, IDecl);
 
   if (PrevIDecl) {
     // Class already seen. Was it a definition?
@@ -1178,7 +1180,8 @@ Sema::ActOnStartProtocolInterface(SourceLocation AtProtoInterfaceLoc,
   if (AttrList)
     ProcessDeclAttributeList(TUScope, PDecl, AttrList);
   ProcessAPINotes(PDecl);
-  
+  AddPragmaAttributes(TUScope, PDecl);
+
   // Merge attributes from previous declarations.
   if (PrevDecl)
     mergeDeclAttributes(PDecl, PrevDecl);
@@ -1710,14 +1713,15 @@ Sema::ActOnForwardProtocolDeclaration(SourceLocation AtProtocolLoc,
     if (attrList)
       ProcessDeclAttributeList(TUScope, PDecl, attrList);
     ProcessAPINotes(PDecl);
-    
+    AddPragmaAttributes(TUScope, PDecl);
+
     if (PrevDecl)
       mergeDeclAttributes(PDecl, PrevDecl);
 
     DeclsInGroup.push_back(PDecl);
   }
 
-  return BuildDeclaratorGroup(DeclsInGroup, false);
+  return BuildDeclaratorGroup(DeclsInGroup);
 }
 
 Decl *Sema::
@@ -1729,7 +1733,8 @@ ActOnStartCategoryInterface(SourceLocation AtInterfaceLoc,
                             Decl * const *ProtoRefs,
                             unsigned NumProtoRefs,
                             const SourceLocation *ProtoLocs,
-                            SourceLocation EndProtoLoc) {
+                            SourceLocation EndProtoLoc,
+                            AttributeList *AttrList) {
   ObjCCategoryDecl *CDecl;
   ObjCInterfaceDecl *IDecl = getObjCInterfaceDecl(ClassName, ClassLoc, true);
 
@@ -1806,6 +1811,10 @@ ActOnStartCategoryInterface(SourceLocation AtInterfaceLoc,
                                             NumProtoRefs, Context); 
   }
 
+  if (AttrList)
+    ProcessDeclAttributeList(TUScope, CDecl, AttrList);
+  AddPragmaAttributes(TUScope, CDecl);
+
   CheckObjCDeclScope(CDecl);
   return ActOnObjCContainerStartDefinition(CDecl);
 }
@@ -1870,9 +1879,10 @@ Decl *Sema::ActOnStartCategoryImplementation(
       CatIDecl->setImplementation(CDecl);
       // Warn on implementating category of deprecated class under 
       // -Wdeprecated-implementations flag.
-      DiagnoseObjCImplementedDeprecations(*this, 
-                                          dyn_cast<NamedDecl>(IDecl), 
-                                          CDecl->getLocation(), 2);
+      DiagnoseObjCImplementedDeprecations(
+          *this,
+          CatIDecl->isDeprecated() ? CatIDecl : dyn_cast<NamedDecl>(IDecl),
+          CDecl->getLocation(), 2);
     }
   }
 
@@ -1953,6 +1963,7 @@ Decl *Sema::ActOnStartClassImplementation(
                                       ClassName, /*typeParamList=*/nullptr,
                                       /*PrevDecl=*/nullptr, ClassLoc,
                                       true);
+    AddPragmaAttributes(TUScope, IDecl);
     IDecl->startDefinition();
     if (SDecl) {
       IDecl->setSuperClass(Context.getTrivialTypeSourceInfo(
@@ -2024,7 +2035,7 @@ Sema::ActOnFinishObjCImplementation(Decl *ObjCImpDecl, ArrayRef<Decl *> Decls) {
 
   DeclsInGroup.push_back(ObjCImpDecl);
 
-  return BuildDeclaratorGroup(DeclsInGroup, false);
+  return BuildDeclaratorGroup(DeclsInGroup);
 }
 
 void Sema::CheckImplementationIvars(ObjCImplementationDecl *ImpDecl,
@@ -2365,7 +2376,7 @@ static bool CheckMethodOverrideParam(Sema &S,
   }
   if (S.Context.hasSameUnqualifiedType(ImplTy, IfaceTy))
     return true;
-  
+
   if (!Warn)
     return false;
   unsigned DiagID = 
@@ -3049,7 +3060,7 @@ Sema::ActOnForwardClassDeclaration(SourceLocation AtClassLoc,
     DeclsInGroup.push_back(IDecl);
   }
 
-  return BuildDeclaratorGroup(DeclsInGroup, false);
+  return BuildDeclaratorGroup(DeclsInGroup);
 }
 
 static bool tryMatchRecordTypes(ASTContext &Context,
@@ -3230,7 +3241,7 @@ void Sema::addMethodToGlobalList(ObjCMethodList *List,
   ObjCMethodList *ListWithSameDeclaration = nullptr;
   for (; List; Previous = List, List = List->getNext()) {
     // If we are building a module, keep all of the methods.
-    if (getLangOpts().CompilingModule)
+    if (getLangOpts().isCompilingModule())
       continue;
 
     bool SameDeclaration = MatchTwoMethodDeclarations(Method,
@@ -3898,8 +3909,7 @@ Decl *Sema::ActOnAtEnd(Scope *S, SourceRange AtEnd, ArrayRef<Decl *> allMethods,
         ImplMethodsVsClassMethods(S, CatImplClass, Cat);
       }
     }
-  } else if (const ObjCInterfaceDecl *IntfDecl =
-             dyn_cast<ObjCInterfaceDecl>(ClassDecl)) {
+  } else if (const auto *IntfDecl = dyn_cast<ObjCInterfaceDecl>(ClassDecl)) {
     if (const ObjCInterfaceDecl *Super = IntfDecl->getSuperClass()) {
       if (!IntfDecl->hasAttr<ObjCSubclassingRestrictedAttr>() &&
           Super->hasAttr<ObjCSubclassingRestrictedAttr>()) {
@@ -4307,6 +4317,49 @@ static void mergeInterfaceMethodToImpl(Sema &S,
   }
 }
 
+/// Verify that the method parameters/return value have types that are supported
+/// by the x86 target.
+static void checkObjCMethodX86VectorTypes(Sema &SemaRef,
+                                          const ObjCMethodDecl *Method) {
+  assert(SemaRef.getASTContext().getTargetInfo().getTriple().getArch() ==
+             llvm::Triple::x86 &&
+         "x86-specific check invoked for a different target");
+  SourceLocation Loc;
+  QualType T;
+  for (const ParmVarDecl *P : Method->parameters()) {
+    if (P->getType()->isVectorType()) {
+      Loc = P->getLocStart();
+      T = P->getType();
+      break;
+    }
+  }
+  if (Loc.isInvalid()) {
+    if (Method->getReturnType()->isVectorType()) {
+      Loc = Method->getReturnTypeSourceRange().getBegin();
+      T = Method->getReturnType();
+    } else
+      return;
+  }
+
+  // Vector parameters/return values are not supported by objc_msgSend on x86 in
+  // iOS < 9 and macOS < 10.11.
+  const auto &Triple = SemaRef.getASTContext().getTargetInfo().getTriple();
+  VersionTuple AcceptedInVersion;
+  if (Triple.getOS() == llvm::Triple::IOS)
+    AcceptedInVersion = VersionTuple(/*Major=*/9);
+  else if (Triple.isMacOSX())
+    AcceptedInVersion = VersionTuple(/*Major=*/10, /*Minor=*/11);
+  else
+    return;
+  if (SemaRef.getASTContext().getTargetInfo().getPlatformMinVersion() >=
+      AcceptedInVersion)
+    return;
+  SemaRef.Diag(Loc, diag::err_objc_method_unsupported_param_ret_type)
+      << T << (Method->getReturnType()->isVectorType() ? /*return value*/ 1
+                                                       : /*parameter*/ 0)
+      << (Triple.isMacOSX() ? "macOS 10.11" : "iOS 9");
+}
+
 Decl *Sema::ActOnMethodDeclaration(
     Scope *S,
     SourceLocation MethodLoc, SourceLocation EndLoc,
@@ -4322,7 +4375,7 @@ Decl *Sema::ActOnMethodDeclaration(
     bool isVariadic, bool MethodDefinition) {
   // Make sure we can establish a context for the method.
   if (!CurContext->isObjCContainer()) {
-    Diag(MethodLoc, diag::error_missing_method_context);
+    Diag(MethodLoc, diag::err_missing_method_context);
     return nullptr;
   }
   ObjCContainerDecl *OCD = dyn_cast<ObjCContainerDecl>(CurContext);
@@ -4399,6 +4452,7 @@ Decl *Sema::ActOnMethodDeclaration(
     // Apply the attributes to the parameter.
     ProcessDeclAttributeList(TUScope, Param, ArgInfo[i].ArgAttrs);
     ProcessAPINotes(Param);
+    AddPragmaAttributes(TUScope, Param);
 
     if (Param->hasAttr<BlocksAttr>()) {
       Diag(Param->getLocation(), diag::err_block_on_nonlocal);
@@ -4430,6 +4484,7 @@ Decl *Sema::ActOnMethodDeclaration(
   if (AttrList)
     ProcessDeclAttributeList(TUScope, ObjCMethod, AttrList);
   ProcessAPINotes(ObjCMethod);
+  AddPragmaAttributes(TUScope, ObjCMethod);
 
   // Add the method now.
   const ObjCMethodDecl *PrevMethod = nullptr;
@@ -4527,6 +4582,10 @@ Decl *Sema::ActOnMethodDeclaration(
         !ObjCMethod->getReturnType()->isObjCIndependentClassType())
       ObjCMethod->SetRelatedResultType();
   }
+
+  if (MethodDefinition &&
+      Context.getTargetInfo().getTriple().getArch() == llvm::Triple::x86)
+    checkObjCMethodX86VectorTypes(*this, ObjCMethod);
 
   ActOnDocumentableDecl(ObjCMethod);
 

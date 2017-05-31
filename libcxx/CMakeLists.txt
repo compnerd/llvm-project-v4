@@ -19,23 +19,17 @@ set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH}
   )
 
-# Find the LLVM sources and simulate LLVM CMake options.
-include(HandleOutOfTreeLLVM)
 
-if (LIBCXX_STANDALONE_BUILD)
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(libcxx CXX C)
 
   set(PACKAGE_NAME libcxx)
-  set(PACKAGE_VERSION 4.0.0svn)
+  set(PACKAGE_VERSION 4.0.0)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvm-bugs@lists.llvm.org")
-endif()
 
-if (LIBCXX_STANDALONE_BUILD AND NOT LLVM_FOUND)
-  message(WARNING "UNSUPPORTED LIBCXX CONFIGURATION DETECTED: "
-                  "llvm-config not found and LLVM_PATH not defined.\n"
-                  "Reconfigure with -DLLVM_CONFIG_PATH=path/to/llvm-config "
-                  "or -DLLVM_PATH=path/to/llvm-source-root.")
+  # Find the LLVM sources and simulate LLVM CMake options.
+  include(HandleOutOfTreeLLVM)
 endif()
 
 # Require out of source build.
@@ -58,8 +52,23 @@ option(LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY "Build libc++experimental.a" ON)
 option(LIBCXX_ENABLE_FILESYSTEM
         "Build filesystem as part of libc++experimental.a" ${LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY})
 option(LIBCXX_INCLUDE_TESTS "Build the libc++ tests." ${LLVM_INCLUDE_TESTS})
+
+# Benchmark options -----------------------------------------------------------
 option(LIBCXX_INCLUDE_BENCHMARKS "Build the libc++ benchmarks and their dependancies" ON)
-option(LIBCXX_BUILD_BENCHMARK_NATIVE_STDLIB "Build the benchmarks against the native STL" OFF)
+set(LIBCXX_BENCHMARK_NATIVE_STDLIB "" CACHE STRING
+        "Build the benchmarks against the specified native STL.
+         The value must be one of libc++/libstdc++")
+set(LIBCXX_BENCHMARK_NATIVE_GCC_TOOLCHAIN "" CACHE STRING
+    "Use alternate GCC toolchain when building the native benchmarks")
+
+if (LIBCXX_BENCHMARK_NATIVE_STDLIB)
+  if (NOT (LIBCXX_BENCHMARK_NATIVE_STDLIB STREQUAL "libc++"
+        OR LIBCXX_BENCHMARK_NATIVE_STDLIB STREQUAL "libstdc++"))
+    message(FATAL_ERROR "Invalid value for LIBCXX_BENCHMARK_NATIVE_STDLIB: "
+            "'${LIBCXX_BENCHMARK_NATIVE_STDLIB}'")
+  endif()
+endif()
+
 option(LIBCXX_INCLUDE_DOCS "Build the libc++ documentation." ${LLVM_INCLUDE_DOCS})
 set(LIBCXX_LIBDIR_SUFFIX "${LLVM_LIBDIR_SUFFIX}" CACHE STRING
     "Define suffix of library directory name (32/64)")
@@ -78,20 +87,41 @@ if (NOT LIBCXX_ENABLE_SHARED AND NOT LIBCXX_ENABLE_STATIC)
 endif()
 
 # ABI Library options ---------------------------------------------------------
-set(LIBCXX_CXX_ABI "${LIBCXX_CXX_ABI}" CACHE STRING
-    "Specify C++ ABI library to use." FORCE)
-set(CXXABIS none libcxxabi libcxxrt libstdc++ libsupc++)
+set(LIBCXX_CXX_ABI "default" CACHE STRING
+    "Specify C++ ABI library to use.")
+set(CXXABIS none default libcxxabi libcxxrt libstdc++ libsupc++)
 set_property(CACHE LIBCXX_CXX_ABI PROPERTY STRINGS ;${CXXABIS})
 
+# FIXME: This is a temporary hack to force LLVM buildbots to store
+# the fixed cache entry instead of the previous cache entry. This is needed
+# because some LLVM buildbots don't clear their cache. It will be removed
+# once all LLVM bots have been run.
+if (LIBCXX_CXX_ABI STREQUAL "")
+  set(LIBCXX_CXX_ABI "default" CACHE STRING
+      "Specify the C++ ABI library to use." FORCE)
+endif()
+
 # Setup the default options if LIBCXX_CXX_ABI is not specified.
-if (NOT LIBCXX_CXX_ABI)
+if (LIBCXX_CXX_ABI STREQUAL "default")
+  find_path(
+    LIBCXX_LIBCXXABI_INCLUDES_INTERNAL
+    cxxabi.h
+    PATHS ${LLVM_MAIN_SRC_DIR}/projects/libcxxabi/include
+          ${LLVM_MAIN_SRC_DIR}/runtimes/libcxxabi/include
+    NO_DEFAULT_PATH
+  )
   if (NOT DEFINED LIBCXX_STANDALONE_BUILD AND
-      IS_DIRECTORY "${CMAKE_SOURCE_DIR}/projects/libcxxabi")
+      IS_DIRECTORY "${LIBCXX_LIBCXXABI_INCLUDES_INTERNAL}")
     set(LIBCXX_CXX_ABI_LIBNAME "libcxxabi")
-    set(LIBCXX_CXX_ABI_INCLUDE_PATHS "${CMAKE_SOURCE_DIR}/projects/libcxxabi/include")
+    set(LIBCXX_CXX_ABI_INCLUDE_PATHS "${LIBCXX_LIBCXXABI_INCLUDES_INTERNAL}")
     set(LIBCXX_CXX_ABI_INTREE 1)
   else()
-    set(LIBCXX_CXX_ABI_LIBNAME "none")
+    if (WIN32 AND NOT MINGW)
+      # FIXME: Figure out how to configure the ABI library on Windows.
+      set(LIBCXX_CXX_ABI_LIBNAME "none")
+    else()
+      set(LIBCXX_CXX_ABI_LIBNAME "default")
+    endif()
   endif()
 else()
   set(LIBCXX_CXX_ABI_LIBNAME "${LIBCXX_CXX_ABI}")
@@ -109,6 +139,7 @@ option(LIBCXX_ENABLE_STATIC_ABI_LIBRARY "Statically link the ABI library" OFF)
 set(ENABLE_LINKER_SCRIPT_DEFAULT_VALUE OFF)
 if (LLVM_HAVE_LINK_VERSION_SCRIPT AND NOT LIBCXX_ENABLE_STATIC_ABI_LIBRARY
       AND NOT LIBCXX_CXX_ABI_LIBNAME STREQUAL "none"
+      AND NOT LIBCXX_CXX_ABI_LIBNAME STREQUAL "default"
       AND PYTHONINTERP_FOUND
       AND LIBCXX_ENABLE_SHARED)
     set(ENABLE_LINKER_SCRIPT_DEFAULT_VALUE ON)
@@ -143,6 +174,9 @@ option(LIBCXX_HAS_PTHREAD_API "Ignore auto-detection and force use of pthread AP
 option(LIBCXX_HAS_EXTERNAL_THREAD_API
   "Build libc++ with an externalized threading API.
    This option may only be set to ON when LIBCXX_ENABLE_THREADS=ON." OFF)
+option(LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY
+    "Build libc++ with an externalized threading library.
+     This option may only be set to ON when LIBCXX_ENABLE_THREADS=ON" OFF)
 
 # Misc options ----------------------------------------------------------------
 # FIXME: Turn -pedantic back ON. It is currently off because it warns
@@ -195,14 +229,33 @@ if(LIBCXX_ENABLE_THREADS AND NOT LIBCXX_ENABLE_MONOTONIC_CLOCK)
                       " when LIBCXX_ENABLE_THREADS is also set to OFF.")
 endif()
 
-if(LIBCXX_HAS_PTHREAD_API AND NOT LIBCXX_ENABLE_THREADS)
-  message(FATAL_ERROR "LIBCXX_HAS_PTHREAD_API can only be set to ON"
-                      " when LIBCXX_ENABLE_THREADS is also set to ON.")
+if(NOT LIBCXX_ENABLE_THREADS)
+  if(LIBCXX_HAS_PTHREAD_API)
+    message(FATAL_ERROR "LIBCXX_HAS_PTHREAD_API can only be set to ON"
+                        " when LIBCXX_ENABLE_THREADS is also set to ON.")
+  endif()
+  if(LIBCXX_HAS_EXTERNAL_THREAD_API)
+    message(FATAL_ERROR "LIBCXX_HAS_EXTERNAL_THREAD_API can only be set to ON"
+                        " when LIBCXX_ENABLE_THREADS is also set to ON.")
+  endif()
+  if (LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY)
+    message(FATAL_ERROR "LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY can only be set "
+                        "to ON when LIBCXX_ENABLE_THREADS is also set to ON.")
+  endif()
+
 endif()
 
-if(LIBCXX_HAS_EXTERNAL_THREAD_API AND NOT LIBCXX_ENABLE_THREADS)
-  message(FATAL_ERROR "LIBCXX_HAS_EXTERNAL_THREAD_API can only be set to ON"
-                      " when LIBCXX_ENABLE_THREADS is also set to ON.")
+if (LIBCXX_HAS_EXTERNAL_THREAD_API)
+  if (LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY)
+    message(FATAL_ERROR "The options LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY and "
+                        "LIBCXX_HAS_EXTERNAL_THREAD_API cannot both be ON at "
+                        "the same time")
+  endif()
+  if (LIBCXX_HAS_PTHREAD_API)
+    message(FATAL_ERROR "The options LIBCXX_HAS_EXTERNAL_THREAD_API"
+                        "and LIBCXX_HAS_PTHREAD_API cannot be both"
+                        "set to ON at the same time.")
+  endif()
 endif()
 
 # Ensure LLVM_USE_SANITIZER is not specified when LIBCXX_GENERATE_COVERAGE
@@ -227,6 +280,9 @@ if (LIBCXX_ENABLE_STATIC_ABI_LIBRARY)
     message(FATAL_ERROR "LIBCXX_ENABLE_STATIC_ABI_LIBRARY is not supported on OS X")
   else()
     message(WARNING "LIBCXX_ENABLE_STATIC_ABI_LIBRARY is an experimental option")
+  endif()
+  if (LIBCXX_ENABLE_STATIC AND NOT PYTHONINTERP_FOUND)
+    message(FATAL_ERROR "LIBCXX_ENABLE_STATIC_ABI_LIBRARY requires python but it was not found.")
   endif()
 endif()
 
@@ -289,6 +345,9 @@ add_target_flags_if(LIBCXX_BUILD_32_BITS "-m32")
 add_target_flags_if(LIBCXX_TARGET_TRIPLE "-target ${LIBCXX_TARGET_TRIPLE}")
 add_target_flags_if(LIBCXX_SYSROOT "--sysroot=${LIBCXX_SYSROOT}")
 add_target_flags_if(LIBCXX_GCC_TOOLCHAIN "-gcc-toolchain ${LIBCXX_GCC_TOOLCHAIN}")
+if (LIBCXX_TARGET_TRIPLE)
+  set(TARGET_TRIPLE "${LIBCXX_TARGET_TRIPLE}")
+endif()
 
 # Configure compiler.
 include(config-ix)
@@ -325,10 +384,17 @@ remove_flags(-Wno-pedantic -pedantic-errors -pedantic)
 
 # Required flags ==============================================================
 set(LIBCXX_STANDARD_VER c++11 CACHE INTERNAL "internal option to change build dialect")
+if (LIBCXX_HAS_MUSL_LIBC)
+  # musl's pthread implementations uses volatile types in their structs which is
+  # not a constexpr in C++11 but is in C++14, so we use C++14 with musl.
+  set(LIBCXX_STANDARD_VER c++14 CACHE INTERNAL "internal option to change build dialect")
+endif()
 add_compile_flags_if_supported(-std=${LIBCXX_STANDARD_VER})
 mangle_name("LIBCXX_SUPPORTS_STD_EQ_${LIBCXX_STANDARD_VER}_FLAG" SUPPORTS_DIALECT_NAME)
-if (NOT MSVC AND NOT ${SUPPORTS_DIALECT_NAME})
-  message(FATAL_ERROR "C++11 or greater is required but the compiler does not support ${LIBCXX_STANDARD_VER}")
+if(NOT ${SUPPORTS_DIALECT_NAME})
+  if(NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC" AND NOT "${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
+    message(FATAL_ERROR "C++11 or greater is required but the compiler does not support ${LIBCXX_STANDARD_VER}")
+  endif()
 endif()
 
 # On all systems the system c++ standard library headers need to be excluded.
@@ -336,6 +402,11 @@ endif()
 # Thus, we do nothing and hope we don't accidentally include any of the C++
 # headers
 add_compile_flags_if_supported(-nostdinc++)
+
+# Hide all inline function definitions which have not explicitly been marked
+# visible. This prevents new definitions for inline functions from appearing in
+# the dylib when get ODR used by another function.
+add_compile_flags_if_supported(-fvisibility-inlines-hidden)
 
 # Let the library headers know they are currently being used to build the
 # library.
@@ -390,7 +461,7 @@ if (NOT LIBCXX_ENABLE_RTTI)
 endif()
 
 # Threading flags =============================================================
-if (LIBCXX_HAS_EXTERNAL_THREAD_API AND LIBCXX_ENABLE_SHARED)
+if (LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY AND LIBCXX_ENABLE_SHARED)
   # Need to allow unresolved symbols if this is to work with shared library builds
   if (APPLE)
     add_link_flags("-undefined dynamic_lookup")
@@ -407,9 +478,6 @@ if (LIBCXX_ENABLE_ASSERTIONS)
   # MSVC doesn't like _DEBUG on release builds. See PR 4379.
   define_if_not(MSVC -D_DEBUG)
 endif()
-
-# Feature flags ===============================================================
-define_if(MSVC -D_CRT_SECURE_NO_WARNINGS)
 
 # Modules flags ===============================================================
 # FIXME The libc++ sources are fundamentally non-modular. They need special
@@ -472,6 +540,7 @@ config_define_if_not(LIBCXX_ENABLE_THREAD_UNSAFE_C_FUNCTIONS _LIBCPP_HAS_NO_THRE
 
 config_define_if(LIBCXX_HAS_PTHREAD_API _LIBCPP_HAS_THREAD_API_PTHREAD)
 config_define_if(LIBCXX_HAS_EXTERNAL_THREAD_API _LIBCPP_HAS_THREAD_API_EXTERNAL)
+config_define_if(LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY _LIBCPP_HAS_THREAD_LIBRARY_EXTERNAL)
 config_define_if(LIBCXX_HAS_MUSL_LIBC _LIBCPP_HAS_MUSL_LIBC)
 
 # By default libc++ on Windows expects to use a shared library, which requires
@@ -479,17 +548,21 @@ config_define_if(LIBCXX_HAS_MUSL_LIBC _LIBCPP_HAS_MUSL_LIBC)
 # static library only we modify the headers to disable DLL import/export.
 if (DEFINED WIN32 AND LIBCXX_ENABLE_STATIC AND NOT LIBCXX_ENABLE_SHARED)
   message(STATUS "Generating custom __config for non-DLL Windows build")
-  config_define(ON _LIBCPP_DISABLE_DLL_IMPORT_EXPORT)
+  config_define(ON _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS)
 endif()
 
 if (LIBCXX_NEEDS_SITE_CONFIG)
-  configure_file(
-    include/__config_site.in
-    ${LIBCXX_BINARY_DIR}/__config_site
-    @ONLY)
+  configure_file("include/__config_site.in"
+                 "${LIBCXX_BINARY_DIR}/__config_site"
+                 @ONLY)
+
   # Provide the config definitions by included the generated __config_site
   # file at compile time.
-  add_compile_flags("-include ${LIBCXX_BINARY_DIR}/__config_site")
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC" OR "${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
+    add_compile_flags("/FI\"${LIBCXX_BINARY_DIR}/__config_site\"")
+  else()
+    add_compile_flags("-include ${LIBCXX_BINARY_DIR}/__config_site")
+  endif()
 endif()
 
 #===============================================================================
@@ -499,11 +572,13 @@ include_directories(include)
 add_subdirectory(include)
 add_subdirectory(lib)
 
+
 if (LIBCXX_INCLUDE_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 if (LIBCXX_INCLUDE_TESTS)
   add_subdirectory(test)
+  add_subdirectory(lib/abi)
 endif()
 if (LIBCXX_INCLUDE_DOCS)
   add_subdirectory(docs)

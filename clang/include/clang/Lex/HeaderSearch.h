@@ -147,7 +147,7 @@ class HeaderSearch {
   };
 
   /// \brief Header-search options used to initialize this header search.
-  IntrusiveRefCntPtr<HeaderSearchOptions> HSOpts;
+  std::shared_ptr<HeaderSearchOptions> HSOpts;
 
   DiagnosticsEngine &Diags;
   FileManager &FileMgr;
@@ -248,7 +248,7 @@ class HeaderSearch {
   friend class DirectoryLookup;
   
 public:
-  HeaderSearch(IntrusiveRefCntPtr<HeaderSearchOptions> HSOpts,
+  HeaderSearch(std::shared_ptr<HeaderSearchOptions> HSOpts,
                SourceManager &SourceMgr, DiagnosticsEngine &Diags,
                const LangOptions &LangOpts, const TargetInfo *Target);
   ~HeaderSearch();
@@ -375,13 +375,16 @@ public:
   /// \param SuggestedModule If non-null, and the file found is semantically
   /// part of a known module, this will be set to the module that should
   /// be imported instead of preprocessing/parsing the file found.
+  ///
+  /// \param IsMapped If non-null, and the search involved header maps, set to
+  /// true.
   const FileEntry *LookupFile(
       StringRef Filename, SourceLocation IncludeLoc, bool isAngled,
       const DirectoryLookup *FromDir, const DirectoryLookup *&CurDir,
       ArrayRef<std::pair<const FileEntry *, const DirectoryEntry *>> Includers,
       SmallVectorImpl<char> *SearchPath, SmallVectorImpl<char> *RelativePath,
       Module *RequestingModule, ModuleMap::KnownHeader *SuggestedModule,
-      bool SkipCache = false, bool BuildSystemModule = false);
+      bool *IsMapped, bool SkipCache = false, bool BuildSystemModule = false);
 
   /// \brief Look up a subframework for the specified \#include file.
   ///
@@ -526,8 +529,10 @@ public:
   /// \brief Retrieve the module that corresponds to the given file, if any.
   ///
   /// \param File The header that we wish to map to a module.
-  ModuleMap::KnownHeader findModuleForHeader(const FileEntry *File) const;
-  
+  /// \param AllowTextual Whether we want to find textual headers too.
+  ModuleMap::KnownHeader findModuleForHeader(const FileEntry *File,
+                                             bool AllowTextual = false) const;
+
   /// \brief Read the contents of the given module map file.
   ///
   /// \param File The module map file.

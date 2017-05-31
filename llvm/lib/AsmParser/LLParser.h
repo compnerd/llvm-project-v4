@@ -193,6 +193,10 @@ namespace llvm {
         case lltok::kw_ninf: FMF.setNoInfs();          Lex.Lex(); continue;
         case lltok::kw_nsz:  FMF.setNoSignedZeros();   Lex.Lex(); continue;
         case lltok::kw_arcp: FMF.setAllowReciprocal(); Lex.Lex(); continue;
+        case lltok::kw_contract:
+          FMF.setAllowContract(true);
+          Lex.Lex();
+          continue;
         default: return FMF;
         }
       return FMF;
@@ -411,7 +415,8 @@ namespace llvm {
     bool ParseValID(ValID &ID, PerFunctionState *PFS = nullptr);
     bool ParseGlobalValue(Type *Ty, Constant *&V);
     bool ParseGlobalTypeAndValue(Constant *&V);
-    bool ParseGlobalValueVector(SmallVectorImpl<Constant *> &Elts);
+    bool ParseGlobalValueVector(SmallVectorImpl<Constant *> &Elts,
+                                Optional<unsigned> *InRangeOp = nullptr);
     bool parseOptionalComdat(StringRef GlobalName, Comdat *&C);
     bool ParseMetadataAsValue(Value *&V, PerFunctionState &PFS);
     bool ParseValueAsMetadata(Metadata *&MD, const Twine &TypeMsg,

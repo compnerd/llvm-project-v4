@@ -1331,6 +1331,10 @@ bool JumpThreadingPass::ProcessBranchOnXOR(BinaryOperator *BO) {
   if (!isa<PHINode>(BB->front()))
     return false;
 
+  // If this BB is a landing pad, we won't be able to split the edge into it.
+  if (BB->isEHPad())
+    return false;
+
   // If we have a xor as the branch input to this block, and we know that the
   // LHS or RHS of the xor in any predecessor is true/false, then we can clone
   // the condition into the predecessor and fix that value to true, saving some
@@ -1599,7 +1603,7 @@ bool JumpThreadingPass::ThreadEdge(BasicBlock *BB,
 }
 
 /// Create a new basic block that will be the predecessor of BB and successor of
-/// all blocks in Preds. When profile data is availble, update the frequency of
+/// all blocks in Preds. When profile data is available, update the frequency of
 /// this new block.
 BasicBlock *JumpThreadingPass::SplitBlockPreds(BasicBlock *BB,
                                                ArrayRef<BasicBlock *> Preds,

@@ -52,6 +52,7 @@
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Coroutines.h"
+#include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <algorithm>
@@ -96,6 +97,10 @@ NoOutput("disable-output",
 
 static cl::opt<bool>
 OutputAssembly("S", cl::desc("Write output as LLVM assembly"));
+
+static cl::opt<bool>
+    OutputThinLTOBC("thinlto-bc",
+                    cl::desc("Write output as ThinLTO-ready bitcode"));
 
 static cl::opt<bool>
 NoVerify("disable-verify", cl::desc("Do not run the verifier"), cl::Hidden);
@@ -265,7 +270,7 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   } else if (OptLevel > 1) {
     Builder.Inliner = createFunctionInliningPass(OptLevel, SizeLevel);
   } else {
-    Builder.Inliner = createAlwaysInlinerPass();
+    Builder.Inliner = createAlwaysInlinerLegacyPass();
   }
   Builder.DisableUnitAtATime = !UnitAtATime;
   Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
@@ -390,6 +395,7 @@ int main(int argc, char **argv) {
   initializePreISelIntrinsicLoweringLegacyPassPass(Registry);
   initializeGlobalMergePass(Registry);
   initializeInterleavedAccessPass(Registry);
+  initializeCountingFunctionInserterPass(Registry);
   initializeUnreachableBlockElimLegacyPassPass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
@@ -422,7 +428,8 @@ int main(int argc, char **argv) {
       errs() << EC.message() << '\n';
       return 1;
     }
-    Context.setDiagnosticsOutputFile(new yaml::Output(YamlFile->os()));
+    Context.setDiagnosticsOutputFile(
+        llvm::make_unique<yaml::Output>(YamlFile->os()));
   }
 
   // Load the input module...
@@ -701,7 +708,9 @@ int main(int argc, char **argv) {
       if (EmitModuleHash)
         report_fatal_error("Text output is incompatible with -module-hash");
       Passes.add(createPrintModulePass(*OS, "", PreserveAssemblyUseListOrder));
-    } else
+    } else if (OutputThinLTOBC)
+      Passes.add(createWriteThinLTOBitcodePass(*OS));
+    else
       Passes.add(createBitcodeWriterPass(*OS, PreserveBitcodeUseListOrder,
                                          EmitSummaryIndex, EmitModuleHash));
   }

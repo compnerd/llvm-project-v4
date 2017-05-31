@@ -54,6 +54,7 @@ class MacroInfo;
 class OpaqueValueExpr;
 class OpenCLOptions;
 class ASTReader;
+class MemoryBufferCache;
 class Module;
 class ModuleFileExtension;
 class ModuleFileExtensionWriter;
@@ -106,23 +107,23 @@ private:
   /// \brief The bitstream writer used to emit this precompiled header.
   llvm::BitstreamWriter &Stream;
 
-  /// \brief The buffer associated with the bitstream.
+  /// The buffer associated with the bitstream.
   const SmallVectorImpl<char> &Buffer;
 
   /// \brief The PCM manager which manages memory buffers for pcm files.
-  PCMCache *BufferMgr;
+  MemoryBufferCache &PCMCache;
 
   /// \brief The ASTContext we're writing.
-  ASTContext *Context;
+  ASTContext *Context = nullptr;
 
   /// \brief The preprocessor we're writing.
-  Preprocessor *PP;
+  Preprocessor *PP = nullptr;
 
   /// \brief The reader of existing AST files, if we're chaining.
-  ASTReader *Chain;
+  ASTReader *Chain = nullptr;
 
   /// \brief The module we're currently writing, if any.
-  Module *WritingModule;
+  Module *WritingModule = nullptr;
 
   /// \brief The base directory for any relative paths we emit.
   std::string BaseDirectory;
@@ -135,14 +136,14 @@ private:
 
   /// \brief Indicates when the AST writing is actively performing
   /// serialization, rather than just queueing updates.
-  bool WritingAST;
+  bool WritingAST = false;
 
   /// \brief Indicates that we are done serializing the collection of decls
   /// and types to emit.
-  bool DoneWritingDeclsAndTypes;
+  bool DoneWritingDeclsAndTypes = false;
 
   /// \brief Indicates that the AST contained compiler errors.
-  bool ASTHasCompilerErrors;
+  bool ASTHasCompilerErrors = false;
 
   /// \brief Mapping from input file entries to the index into the
   /// offset table where information about that input file is stored.
@@ -176,10 +177,10 @@ private:
   std::queue<DeclOrType> DeclTypesToEmit;
 
   /// \brief The first ID number we can use for our own declarations.
-  serialization::DeclID FirstDeclID;
+  serialization::DeclID FirstDeclID = serialization::NUM_PREDEF_DECL_IDS;
 
   /// \brief The decl ID that will be assigned to the next new decl.
-  serialization::DeclID NextDeclID;
+  serialization::DeclID NextDeclID = FirstDeclID;
 
   /// \brief Map that provides the ID numbers of each declaration within
   /// the output stream, as well as those deserialized from a chained PCH.
@@ -211,10 +212,10 @@ private:
   void associateDeclWithFile(const Decl *D, serialization::DeclID);
 
   /// \brief The first ID number we can use for our own types.
-  serialization::TypeID FirstTypeID;
+  serialization::TypeID FirstTypeID = serialization::NUM_PREDEF_TYPE_IDS;
 
   /// \brief The type ID that will be assigned to the next new type.
-  serialization::TypeID NextTypeID;
+  serialization::TypeID NextTypeID = FirstTypeID;
 
   /// \brief Map that provides the ID numbers of each type within the
   /// output stream, plus those deserialized from a chained PCH.
@@ -232,10 +233,10 @@ private:
   std::vector<uint32_t> TypeOffsets;
 
   /// \brief The first ID number we can use for our own identifiers.
-  serialization::IdentID FirstIdentID;
+  serialization::IdentID FirstIdentID = serialization::NUM_PREDEF_IDENT_IDS;
 
   /// \brief The identifier ID that will be assigned to the next new identifier.
-  serialization::IdentID NextIdentID;
+  serialization::IdentID NextIdentID = FirstIdentID;
 
   /// \brief Map that provides the ID numbers of each identifier in
   /// the output stream.
@@ -246,10 +247,10 @@ private:
   llvm::MapVector<const IdentifierInfo *, serialization::IdentID> IdentifierIDs;
 
   /// \brief The first ID number we can use for our own macros.
-  serialization::MacroID FirstMacroID;
+  serialization::MacroID FirstMacroID = serialization::NUM_PREDEF_MACRO_IDS;
 
   /// \brief The identifier ID that will be assigned to the next new identifier.
-  serialization::MacroID NextMacroID;
+  serialization::MacroID NextMacroID = FirstMacroID;
 
   /// \brief Map that provides the ID numbers of each macro.
   llvm::DenseMap<MacroInfo *, serialization::MacroID> MacroIDs;
@@ -281,16 +282,18 @@ private:
   std::vector<uint32_t> IdentifierOffsets;
 
   /// \brief The first ID number we can use for our own submodules.
-  serialization::SubmoduleID FirstSubmoduleID;
-  
+  serialization::SubmoduleID FirstSubmoduleID =
+      serialization::NUM_PREDEF_SUBMODULE_IDS;
+
   /// \brief The submodule ID that will be assigned to the next new submodule.
-  serialization::SubmoduleID NextSubmoduleID;
+  serialization::SubmoduleID NextSubmoduleID = FirstSubmoduleID;
 
   /// \brief The first ID number we can use for our own selectors.
-  serialization::SelectorID FirstSelectorID;
+  serialization::SelectorID FirstSelectorID =
+      serialization::NUM_PREDEF_SELECTOR_IDS;
 
   /// \brief The selector ID that will be assigned to the next new selector.
-  serialization::SelectorID NextSelectorID;
+  serialization::SelectorID NextSelectorID = FirstSelectorID;
 
   /// \brief Map that provides the ID numbers of each Selector.
   llvm::MapVector<Selector, serialization::SelectorID> SelectorIDs;
@@ -400,18 +403,18 @@ private:
   llvm::DenseMap<SwitchCase *, unsigned> SwitchCaseIDs;
 
   /// \brief The number of statements written to the AST file.
-  unsigned NumStatements;
+  unsigned NumStatements = 0;
 
   /// \brief The number of macros written to the AST file.
-  unsigned NumMacros;
+  unsigned NumMacros = 0;
 
   /// \brief The number of lexical declcontexts written to the AST
   /// file.
-  unsigned NumLexicalDeclContexts;
+  unsigned NumLexicalDeclContexts = 0;
 
   /// \brief The number of visible declcontexts written to the AST
   /// file.
-  unsigned NumVisibleDeclContexts;
+  unsigned NumVisibleDeclContexts = 0;
 
   /// \brief A mapping from each known submodule to its ID number, which will
   /// be a positive integer.
@@ -420,9 +423,6 @@ private:
   /// \brief A list of the module file extension writers.
   std::vector<std::unique_ptr<ModuleFileExtensionWriter>>
     ModuleFileExtensionWriters;
-
-  /// \brief Bit position for start of UNHASHED_CONTROL_BLOCK.
-  size_t StartOfUnhashedControl;
 
   /// \brief Retrieve or create a submodule ID for this module.
   unsigned getSubmoduleID(Module *Mod);
@@ -433,10 +433,14 @@ private:
   void WriteBlockInfoBlock();
   void WriteControlBlock(Preprocessor &PP, ASTContext &Context,
                          StringRef isysroot, const std::string &OutputFile);
-  ASTFileSignature WriteUnhashedControlBlock(Preprocessor &PP,
+
+  /// Write out the signature and diagnostic options, and return the signature.
+  ASTFileSignature writeUnhashedControlBlock(Preprocessor &PP,
                                              ASTContext &Context);
-  /// \brief Calculate hash of the pcm content and write it to SIGNATURE record.
-  ASTFileSignature WriteHash(size_t BlockStartPos);
+
+  /// Calculate hash of the pcm content.
+  static ASTFileSignature createSignature(StringRef Bytes);
+
   void WriteInputFiles(SourceManager &SourceMgr, HeaderSearchOptions &HSOpts,
                        bool Modules);
   void WriteSourceManagerBlock(SourceManager &SourceMgr,
@@ -449,8 +453,8 @@ private:
   void WritePragmaDiagnosticMappings(const DiagnosticsEngine &Diag,
                                      bool isModule);
 
-  unsigned TypeExtQualAbbrev;
-  unsigned TypeFunctionProtoAbbrev;
+  unsigned TypeExtQualAbbrev = 0;
+  unsigned TypeFunctionProtoAbbrev = 0;
   void WriteTypeAbbrevs();
   void WriteType(QualType T);
 
@@ -472,30 +476,34 @@ private:
   void WriteDeclContextVisibleUpdate(const DeclContext *DC);
   void WriteFPPragmaOptions(const FPOptions &Opts);
   void WriteOpenCLExtensions(Sema &SemaRef);
+  void WriteOpenCLExtensionTypes(Sema &SemaRef);
+  void WriteOpenCLExtensionDecls(Sema &SemaRef);
+  void WriteCUDAPragmas(Sema &SemaRef);
   void WriteObjCCategories();
   void WriteLateParsedTemplates(Sema &SemaRef);
   void WriteOptimizePragmaOptions(Sema &SemaRef);
   void WriteMSStructPragmaOptions(Sema &SemaRef);
   void WriteMSPointersToMembersPragmaOptions(Sema &SemaRef);
+  void WritePackPragmaOptions(Sema &SemaRef);
   void WriteModuleFileExtension(Sema &SemaRef,
                                 ModuleFileExtensionWriter &Writer);
 
-  unsigned DeclParmVarAbbrev;
-  unsigned DeclContextLexicalAbbrev;
-  unsigned DeclContextVisibleLookupAbbrev;
-  unsigned UpdateVisibleAbbrev;
-  unsigned DeclRecordAbbrev;
-  unsigned DeclTypedefAbbrev;
-  unsigned DeclVarAbbrev;
-  unsigned DeclFieldAbbrev;
-  unsigned DeclEnumAbbrev;
-  unsigned DeclObjCIvarAbbrev;
-  unsigned DeclCXXMethodAbbrev;
+  unsigned DeclParmVarAbbrev = 0;
+  unsigned DeclContextLexicalAbbrev = 0;
+  unsigned DeclContextVisibleLookupAbbrev = 0;
+  unsigned UpdateVisibleAbbrev = 0;
+  unsigned DeclRecordAbbrev = 0;
+  unsigned DeclTypedefAbbrev = 0;
+  unsigned DeclVarAbbrev = 0;
+  unsigned DeclFieldAbbrev = 0;
+  unsigned DeclEnumAbbrev = 0;
+  unsigned DeclObjCIvarAbbrev = 0;
+  unsigned DeclCXXMethodAbbrev = 0;
 
-  unsigned DeclRefExprAbbrev;
-  unsigned CharacterLiteralAbbrev;
-  unsigned IntegerLiteralAbbrev;
-  unsigned ExprImplicitCastAbbrev;
+  unsigned DeclRefExprAbbrev = 0;
+  unsigned CharacterLiteralAbbrev = 0;
+  unsigned IntegerLiteralAbbrev = 0;
+  unsigned ExprImplicitCastAbbrev = 0;
 
   void WriteDeclAbbrevs();
   void WriteDecl(ASTContext &Context, Decl *D);
@@ -508,8 +516,8 @@ public:
   /// \brief Create a new precompiled header writer that outputs to
   /// the given bitstream.
   ASTWriter(llvm::BitstreamWriter &Stream, SmallVectorImpl<char> &Buffer,
-            PCMCache *BufferMgr,
-            ArrayRef<llvm::IntrusiveRefCntPtr<ModuleFileExtension>> Extensions,
+            MemoryBufferCache &PCMCache,
+            ArrayRef<std::shared_ptr<ModuleFileExtension>> Extensions,
             bool IncludeTimestamps = true);
   ~ASTWriter() override;
 
@@ -932,7 +940,6 @@ public:
 class PCHGenerator : public SemaConsumer {
   const Preprocessor &PP;
   std::string OutputFile;
-  clang::Module *Module;
   std::string isysroot;
   Sema *SemaPtr;
   std::shared_ptr<PCHBuffer> Buffer;
@@ -946,13 +953,10 @@ protected:
   SmallVectorImpl<char> &getPCH() const { return Buffer->Data; }
 
 public:
-  PCHGenerator(
-    const Preprocessor &PP, StringRef OutputFile,
-    clang::Module *Module, StringRef isysroot,
-    std::shared_ptr<PCHBuffer> Buffer, PCMCache *BufferMgr,
-    ArrayRef<llvm::IntrusiveRefCntPtr<ModuleFileExtension>> Extensions,
-    bool AllowASTWithErrors = false,
-    bool IncludeTimestamps = true);
+  PCHGenerator(const Preprocessor &PP, StringRef OutputFile, StringRef isysroot,
+               std::shared_ptr<PCHBuffer> Buffer,
+               ArrayRef<std::shared_ptr<ModuleFileExtension>> Extensions,
+               bool AllowASTWithErrors = false, bool IncludeTimestamps = true);
   ~PCHGenerator() override;
   void InitializeSema(Sema &S) override { SemaPtr = &S; }
   void HandleTranslationUnit(ASTContext &Ctx) override;

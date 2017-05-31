@@ -591,7 +591,7 @@ private:
   void FlushPendingOffset();
   void FlushUnwindOpcodes(bool NoHandlerData);
 
-  void SwitchToEHSection(const char *Prefix, unsigned Type, unsigned Flags,
+  void SwitchToEHSection(StringRef Prefix, unsigned Type, unsigned Flags,
                          SectionKind Kind, const MCSymbol &Fn);
   void SwitchToExTabSection(const MCSymbol &FnStart);
   void SwitchToExIdxSection(const MCSymbol &FnStart);
@@ -1074,7 +1074,7 @@ void ARMELFStreamer::reset() {
   getAssembler().setELFHeaderEFlags(ELF::EF_ARM_EABI_VER5);
 }
 
-inline void ARMELFStreamer::SwitchToEHSection(const char *Prefix,
+inline void ARMELFStreamer::SwitchToEHSection(StringRef Prefix,
                                               unsigned Type,
                                               unsigned Flags,
                                               SectionKind Kind,
@@ -1093,9 +1093,8 @@ inline void ARMELFStreamer::SwitchToEHSection(const char *Prefix,
   const MCSymbolELF *Group = FnSection.getGroup();
   if (Group)
     Flags |= ELF::SHF_GROUP;
-  MCSectionELF *EHSection =
-      getContext().getELFSection(EHSecName, Type, Flags, 0, Group,
-                                 FnSection.getUniqueID(), nullptr, &FnSection);
+  MCSectionELF *EHSection = getContext().getELFSection(
+      EHSecName, Type, Flags, 0, Group, FnSection.getUniqueID(), &FnSection);
 
   assert(EHSection && "Failed to get the required EH section");
 

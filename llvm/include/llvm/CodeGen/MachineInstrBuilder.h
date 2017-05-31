@@ -192,6 +192,10 @@ public:
     return *this;
   }
 
+  const MachineInstrBuilder &add(const MachineOperand &MO) const {
+    return addOperand(MO);
+  }
+
   const MachineInstrBuilder &addMetadata(const MDNode *MD) const {
     MI->addOperand(*MF, MachineOperand::CreateMetadata(MD));
     assert((MI->isDebugValue() ? static_cast<bool>(MI->getDebugVariable())
@@ -207,6 +211,11 @@ public:
 
   const MachineInstrBuilder &addIntrinsicID(Intrinsic::ID ID) const {
     MI->addOperand(*MF, MachineOperand::CreateIntrinsicID(ID));
+    return *this;
+  }
+
+  const MachineInstrBuilder &addPredicate(CmpInst::Predicate Pred) const {
+    MI->addOperand(*MF, MachineOperand::CreatePredicate(Pred));
     return *this;
   }
 
@@ -389,6 +398,11 @@ MachineInstrBuilder BuildMI(MachineBasicBlock &BB,
                             unsigned Reg, unsigned Offset,
                             const MDNode *Variable, const MDNode *Expr);
 
+/// Clone a DBG_VALUE whose value has been spilled to FrameIndex.
+MachineInstr *buildDbgValueForSpill(MachineBasicBlock &BB,
+                                    MachineBasicBlock::iterator I,
+                                    const MachineInstr &Orig, int FrameIndex);
+
 inline unsigned getDefRegState(bool B) {
   return B ? RegState::Define : 0;
 }
@@ -455,7 +469,8 @@ public:
   /// Create an MIBundleBuilder representing an existing instruction or bundle
   /// that has MI as its head.
   explicit MIBundleBuilder(MachineInstr *MI)
-      : MBB(*MI->getParent()), Begin(MI), End(getBundleEnd(*MI)) {}
+      : MBB(*MI->getParent()), Begin(MI),
+        End(getBundleEnd(MI->getIterator())) {}
 
   /// Return a reference to the basic block containing this bundle.
   MachineBasicBlock &getMBB() const { return MBB; }

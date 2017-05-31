@@ -450,15 +450,18 @@ static bool canHideTag(NamedDecl *D) {
   //   Given a set of declarations in a single declarative region [...]
   //   exactly one declaration shall declare a class name or enumeration name
   //   that is not a typedef name and the other declarations shall all refer to
-  //   the same variable or enumerator, or all refer to functions and function
-  //   templates; in this case the class name or enumeration name is hidden.
+  //   the same variable, non-static data member, or enumerator, or all refer
+  //   to functions and function templates; in this case the class name or
+  //   enumeration name is hidden.
   // C++ [basic.scope.hiding]p2:
   //   A class name or enumeration name can be hidden by the name of a
   //   variable, data member, function, or enumerator declared in the same
   //   scope.
+  // An UnresolvedUsingValueDecl always instantiates to one of these.
   D = D->getUnderlyingDecl();
   return isa<VarDecl>(D) || isa<EnumConstantDecl>(D) || isa<FunctionDecl>(D) ||
-         isa<FunctionTemplateDecl>(D) || isa<FieldDecl>(D);
+         isa<FunctionTemplateDecl>(D) || isa<FieldDecl>(D) ||
+         isa<UnresolvedUsingValueDecl>(D);
 }
 
 /// Resolves the result kind of this lookup.
@@ -1293,7 +1296,7 @@ bool Sema::CppLookupName(LookupResult &R, Scope *S) {
         // If we have a context, and it's not a context stashed in the
         // template parameter scope for an out-of-line definition, also
         // look into that context.
-        if (!(Found && S && S->isTemplateParamScope())) {
+        if (!(Found && S->isTemplateParamScope())) {
           assert(Ctx->isFileContext() &&
               "We should have been looking only at file context here already.");
 
@@ -1538,8 +1541,8 @@ bool LookupResult::isVisibleSlow(Sema &SemaRef, NamedDecl *D) {
   // If this declaration is not at namespace scope nor module-private,
   // then it is visible if its lexical parent has a visible definition.
   DeclContext *DC = D->getLexicalDeclContext();
-  if (!D->isModulePrivate() &&
-      DC && !DC->isFileContext() && !isa<LinkageSpecDecl>(DC)) {
+  if (!D->isModulePrivate() && DC && !DC->isFileContext() &&
+      !isa<LinkageSpecDecl>(DC) && !isa<ExportDecl>(DC)) {
     // For a parameter, check whether our current template declaration's
     // lexical context is visible, not whether there's some other visible
     // definition of it, because parameters aren't "within" the definition.
@@ -2828,6 +2831,9 @@ Sema::SpecialMemberOverloadResult *Sema::LookupSpecialMember(CXXRecordDecl *RD,
     assert((SM != CXXDefaultConstructor && SM != CXXDestructor) &&
            "parameter-less special members can't have qualified arguments");
 
+  // FIXME: Get the caller to pass in a location for the lookup.
+  SourceLocation LookupLoc = RD->getLocation();
+
   llvm::FoldingSetNodeID ID;
   ID.AddPointer(RD);
   ID.AddInteger(SM);
@@ -2909,7 +2915,7 @@ Sema::SpecialMemberOverloadResult *Sema::LookupSpecialMember(CXXRecordDecl *RD,
       VK = VK_RValue;
   }
 
-  OpaqueValueExpr FakeArg(SourceLocation(), ArgType, VK);
+  OpaqueValueExpr FakeArg(LookupLoc, ArgType, VK);
 
   if (SM != CXXDefaultConstructor) {
     NumArgs = 1;
@@ -2923,13 +2929,13 @@ Sema::SpecialMemberOverloadResult *Sema::LookupSpecialMember(CXXRecordDecl *RD,
   if (VolatileThis)
     ThisTy.addVolatile();
   Expr::Classification Classification =
-    OpaqueValueExpr(SourceLocation(), ThisTy,
+    OpaqueValueExpr(LookupLoc, ThisTy,
                     RValueThis ? VK_RValue : VK_LValue).Classify(Context);
 
   // Now we perform lookup on the name we computed earlier and do overload
   // resolution. Lookup is only performed directly into the class since there
   // will always be a (possibly implicit) declaration to shadow any others.
-  OverloadCandidateSet OCS(RD->getLocation(), OverloadCandidateSet::CSK_Normal);
+  OverloadCandidateSet OCS(LookupLoc, OverloadCandidateSet::CSK_Normal);
   DeclContext::lookup_result R = RD->lookup(Name);
 
   if (R.empty()) {
@@ -2984,7 +2990,7 @@ Sema::SpecialMemberOverloadResult *Sema::LookupSpecialMember(CXXRecordDecl *RD,
   }
 
   OverloadCandidateSet::iterator Best;
-  switch (OCS.BestViableFunction(*this, SourceLocation(), Best)) {
+  switch (OCS.BestViableFunction(*this, LookupLoc, Best)) {
     case OR_Success:
       Result->setMethod(cast<CXXMethodDecl>(Best->Function));
       Result->setKind(SpecialMemberOverloadResult::Success);
@@ -3442,7 +3448,8 @@ static void LookupVisibleDecls(DeclContext *Ctx, LookupResult &Result,
                                bool QualifiedNameLookup,
                                bool InBaseClass,
                                VisibleDeclConsumer &Consumer,
-                               VisibleDeclsRecord &Visited) {
+                               VisibleDeclsRecord &Visited,
+                               bool IncludeDependentBases = false) {
   if (!Ctx)
     return;
 
@@ -3498,7 +3505,8 @@ static void LookupVisibleDecls(DeclContext *Ctx, LookupResult &Result,
     ShadowContextRAII Shadow(Visited);
     for (auto I : Ctx->using_directives()) {
       LookupVisibleDecls(I->getNominatedNamespace(), Result,
-                         QualifiedNameLookup, InBaseClass, Consumer, Visited);
+                         QualifiedNameLookup, InBaseClass, Consumer, Visited,
+                         IncludeDependentBases);
     }
   }
 
@@ -3510,14 +3518,28 @@ static void LookupVisibleDecls(DeclContext *Ctx, LookupResult &Result,
     for (const auto &B : Record->bases()) {
       QualType BaseType = B.getType();
 
-      // Don't look into dependent bases, because name lookup can't look
-      // there anyway.
-      if (BaseType->isDependentType())
-        continue;
-
-      const RecordType *Record = BaseType->getAs<RecordType>();
-      if (!Record)
-        continue;
+      RecordDecl *RD;
+      if (BaseType->isDependentType()) {
+        if (!IncludeDependentBases) {
+          // Don't look into dependent bases, because name lookup can't look
+          // there anyway.
+          continue;
+        }
+        const auto *TST = BaseType->getAs<TemplateSpecializationType>();
+        if (!TST)
+          continue;
+        TemplateName TN = TST->getTemplateName();
+        const auto *TD =
+            dyn_cast_or_null<ClassTemplateDecl>(TN.getAsTemplateDecl());
+        if (!TD)
+          continue;
+        RD = TD->getTemplatedDecl();
+      } else {
+        const auto *Record = BaseType->getAs<RecordType>();
+        if (!Record)
+          continue;
+        RD = Record->getDecl();
+      }
 
       // FIXME: It would be nice to be able to determine whether referencing
       // a particular member would be ambiguous. For example, given
@@ -3540,8 +3562,8 @@ static void LookupVisibleDecls(DeclContext *Ctx, LookupResult &Result,
 
       // Find results in this base class (and its bases).
       ShadowContextRAII Shadow(Visited);
-      LookupVisibleDecls(Record->getDecl(), Result, QualifiedNameLookup,
-                         true, Consumer, Visited);
+      LookupVisibleDecls(RD, Result, QualifiedNameLookup, true, Consumer,
+                         Visited, IncludeDependentBases);
     }
   }
 
@@ -3710,7 +3732,8 @@ void Sema::LookupVisibleDecls(Scope *S, LookupNameKind Kind,
 
 void Sema::LookupVisibleDecls(DeclContext *Ctx, LookupNameKind Kind,
                               VisibleDeclConsumer &Consumer,
-                              bool IncludeGlobalScope) {
+                              bool IncludeGlobalScope,
+                              bool IncludeDependentBases) {
   LookupResult Result(*this, DeclarationName(), SourceLocation(), Kind);
   Result.setAllowHidden(Consumer.includeHiddenDecls());
   VisibleDeclsRecord Visited;
@@ -3718,7 +3741,8 @@ void Sema::LookupVisibleDecls(DeclContext *Ctx, LookupNameKind Kind,
     Visited.visitedContext(Context.getTranslationUnitDecl());
   ShadowContextRAII Shadow(Visited);
   ::LookupVisibleDecls(Ctx, Result, /*QualifiedNameLookup=*/true,
-                       /*InBaseClass=*/false, Consumer, Visited);
+                       /*InBaseClass=*/false, Consumer, Visited,
+                       IncludeDependentBases);
 }
 
 /// LookupOrCreateLabel - Do a name lookup of a label with the specified name.
@@ -4958,8 +4982,6 @@ static NamedDecl *getDefinitionToImport(NamedDecl *D) {
 
 void Sema::diagnoseMissingImport(SourceLocation Loc, NamedDecl *Decl,
                                  MissingImportKind MIK, bool Recover) {
-  assert(!isVisible(Decl) && "missing import for non-hidden decl?");
-
   // Suggest importing a module providing the definition of this entity, if
   // possible.
   NamedDecl *Def = getDefinitionToImport(Decl);
@@ -5088,6 +5110,10 @@ void Sema::diagnoseTypo(const TypoCorrection &Correction,
   if (PrevNote.getDiagID() && ChosenDecl)
     Diag(ChosenDecl->getLocation(), PrevNote)
       << CorrectedQuotedStr << (ErrorRecovery ? FixItHint() : FixTypo);
+
+  // Add any extra diagnostics.
+  for (const PartialDiagnostic &PD : Correction.getExtraDiagnostics())
+    Diag(Correction.getCorrectionRange().getBegin(), PD);
 }
 
 TypoExpr *Sema::createDelayedTypo(std::unique_ptr<TypoCorrectionConsumer> TCC,

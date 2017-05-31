@@ -37,9 +37,7 @@ public:
 
   bool runOnMachineFunction(MachineFunction &Fn) override;
 
-  const char *getPassName() const override {
-    return AARCH64_EXPAND_PSEUDO_NAME;
-  }
+  StringRef getPassName() const override { return AARCH64_EXPAND_PSEUDO_NAME; }
 
 private:
   bool expandMBB(MachineBasicBlock &MBB);
@@ -899,9 +897,14 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
   case AArch64::MOVi64imm:
     return expandMOVImm(MBB, MBBI, 64);
   case AArch64::RET_ReallyLR: {
+    // Hiding the LR use with RET_ReallyLR may lead to extra kills in the
+    // function and missing live-ins. We are fine in practice because callee
+    // saved register handling ensures the register value is restored before
+    // RET, but we need the undef flag here to appease the MachineVerifier
+    // liveness checks.
     MachineInstrBuilder MIB =
         BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::RET))
-          .addReg(AArch64::LR);
+          .addReg(AArch64::LR, RegState::Undef);
     transferImpOps(MI, MIB, MIB);
     MI.eraseFromParent();
     return true;
@@ -928,6 +931,7 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
                           AArch64::XZR, NextMBBI);
   case AArch64::CMP_SWAP_128:
     return expandCMP_SWAP_128(MBB, MBBI, NextMBBI);
+
   }
   return false;
 }

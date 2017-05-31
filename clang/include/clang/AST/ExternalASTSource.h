@@ -14,9 +14,9 @@
 #ifndef LLVM_CLANG_AST_EXTERNALASTSOURCE_H
 #define LLVM_CLANG_AST_EXTERNALASTSOURCE_H
 
+#include "clang/Basic/Module.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/DeclBase.h"
-#include "clang/Basic/Module.h"
 #include "llvm/ADT/DenseMap.h"
 
 namespace clang {
@@ -150,7 +150,7 @@ public:
     StringRef PCHModuleName;
     StringRef Path;
     StringRef ASTFile;
-    ASTFileSignature Signature = {{0}};
+    ASTFileSignature Signature;
     const Module *ClangModule = nullptr;
 
   public:

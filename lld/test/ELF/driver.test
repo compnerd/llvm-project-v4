@@ -15,9 +15,12 @@
 
 # RUN: ld.lld --help 2>&1 | FileCheck -check-prefix=HELP %s
 # HELP: USAGE:
+# HELP: : supported targets:{{.*}} elf
 
-# RUN: not ld.lld --version 2>&1 | FileCheck -check-prefix=VERSION %s
-# VERSION: LLD
+# RUN: ld.lld --version 2>&1 | FileCheck -check-prefix=VERSION %s
+# VERSION: LLD {{.*}} (compatible with GNU linkers)
+
+# RUN: not ld.lld -v 2>&1 | FileCheck -check-prefix=VERSION %s
 
 ## Attempt to link DSO with -r
 # RUN: ld.lld -shared %t -o %t.so

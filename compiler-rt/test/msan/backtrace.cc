@@ -1,7 +1,5 @@
 // RUN: %clangxx_msan -O0 %s -o %t && %run %t
 
-// XFAIL: target-is-mips64el
-
 #include <assert.h>
 #include <execinfo.h>
 #include <stdio.h>
@@ -17,7 +15,7 @@ void f() {
     if (!buf[i])
       exit(1);
   char **s = backtrace_symbols(buf, sz);
-  assert(s > 0);
+  assert(s != 0);
   for (int i = 0; i < sz; ++i)
     printf("%d\n", (int)strlen(s[i]));
 }

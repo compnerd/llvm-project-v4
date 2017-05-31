@@ -55,7 +55,7 @@ const char *DemangleCXXABI(const char *name) {
   // own demangler (libc++abi's implementation could be adapted so that
   // it does not allocate). For now, we just call it anyway, and we leak
   // the returned value.
-  if (__cxxabiv1::__cxa_demangle)
+  if (&__cxxabiv1::__cxa_demangle)
     if (const char *demangled_name =
           __cxxabiv1::__cxa_demangle(name, 0, 0, 0))
       return demangled_name;
@@ -496,7 +496,9 @@ static void ChooseSymbolizerTools(IntrusiveList<SymbolizerTool> *list,
     VReport(2, "Symbolizer is disabled.\n");
     return;
   }
-  if (SymbolizerTool *tool = InternalSymbolizer::get(allocator)) {
+  if (IsReportingOOM()) {
+    VReport(2, "Cannot use internal symbolizer: out of memory\n");
+  } else if (SymbolizerTool *tool = InternalSymbolizer::get(allocator)) {
     VReport(2, "Using internal symbolizer.\n");
     list->push_back(tool);
     return;

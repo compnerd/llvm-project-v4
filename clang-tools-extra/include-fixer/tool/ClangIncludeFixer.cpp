@@ -179,30 +179,36 @@ createSymbolIndexManager(StringRef FilePath) {
             find_all_symbols::SymbolInfo::SymbolKind::Unknown,
             CommaSplits[I].trim(), 1, {}, /*NumOccurrences=*/E - I));
     }
-    SymbolIndexMgr->addSymbolIndex(
-        llvm::make_unique<include_fixer::InMemorySymbolIndex>(Symbols));
+    SymbolIndexMgr->addSymbolIndex([=]() {
+      return llvm::make_unique<include_fixer::InMemorySymbolIndex>(Symbols);
+    });
     break;
   }
   case yaml: {
-    llvm::ErrorOr<std::unique_ptr<include_fixer::YamlSymbolIndex>> DB(nullptr);
-    if (!Input.empty()) {
-      DB = include_fixer::YamlSymbolIndex::createFromFile(Input);
-    } else {
-      // If we don't have any input file, look in the directory of the first
-      // file and its parents.
-      SmallString<128> AbsolutePath(tooling::getAbsolutePath(FilePath));
-      StringRef Directory = llvm::sys::path::parent_path(AbsolutePath);
-      DB = include_fixer::YamlSymbolIndex::createFromDirectory(
-          Directory, "find_all_symbols_db.yaml");
-    }
+    auto CreateYamlIdx = [=]() -> std::unique_ptr<include_fixer::SymbolIndex> {
+      llvm::ErrorOr<std::unique_ptr<include_fixer::YamlSymbolIndex>> DB(
+          nullptr);
+      if (!Input.empty()) {
+        DB = include_fixer::YamlSymbolIndex::createFromFile(Input);
+      } else {
+        // If we don't have any input file, look in the directory of the
+        // first
+        // file and its parents.
+        SmallString<128> AbsolutePath(tooling::getAbsolutePath(FilePath));
+        StringRef Directory = llvm::sys::path::parent_path(AbsolutePath);
+        DB = include_fixer::YamlSymbolIndex::createFromDirectory(
+            Directory, "find_all_symbols_db.yaml");
+      }
 
-    if (!DB) {
-      llvm::errs() << "Couldn't find YAML db: " << DB.getError().message()
-                   << '\n';
-      return nullptr;
-    }
+      if (!DB) {
+        llvm::errs() << "Couldn't find YAML db: " << DB.getError().message()
+                     << '\n';
+        return nullptr;
+      }
+      return std::move(*DB);
+    };
 
-    SymbolIndexMgr->addSymbolIndex(std::move(*DB));
+    SymbolIndexMgr->addSymbolIndex(std::move(CreateYamlIdx));
     break;
   }
   }
@@ -326,7 +332,8 @@ int includeFixerMain(int argc, const char **argv) {
 
   // Query symbol mode.
   if (!QuerySymbol.empty()) {
-    auto MatchedSymbols = SymbolIndexMgr->search(QuerySymbol);
+    auto MatchedSymbols = SymbolIndexMgr->search(
+        QuerySymbol, /*IsNestedSearch=*/true, SourceFilePath);
     for (auto &Symbol : MatchedSymbols) {
       std::string HeaderPath = Symbol.getFilePath().str();
       Symbol.SetFilePath(((HeaderPath[0] == '"' || HeaderPath[0] == '<')
@@ -351,8 +358,12 @@ int includeFixerMain(int argc, const char **argv) {
                                                    Style, MinimizeIncludePaths);
 
   if (tool.run(&Factory) != 0) {
-    llvm::errs()
-        << "Clang died with a fatal error! (incorrect include paths?)\n";
+    // We suppress all Clang diagnostics (because they would be wrong,
+    // include-fixer does custom recovery) but still want to give some feedback
+    // in case there was a compiler error we couldn't recover from. The most
+    // common case for this is a #include in the file that couldn't be found.
+    llvm::errs() << "Fatal compiler error occurred while parsing file!"
+                    " (incorrect include paths?)\n";
     return 1;
   }
 
@@ -416,7 +427,7 @@ int includeFixerMain(int argc, const char **argv) {
 
   // Write replacements to disk.
   Rewriter Rewrites(SM, LangOptions());
-  for (const auto Replacement : FixerReplacements) {
+  for (const auto &Replacement : FixerReplacements) {
     if (!tooling::applyAllReplacements(Replacement, Rewrites)) {
       llvm::errs() << "Failed to apply replacements.\n";
       return 1;

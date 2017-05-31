@@ -380,7 +380,8 @@ private:
   SourceRange Range;
 
   SourceLocation StorageClassSpecLoc, ThreadStorageClassSpecLoc;
-  SourceLocation TSWLoc, TSCLoc, TSSLoc, TSTLoc, AltiVecLoc;
+  SourceRange TSWRange;
+  SourceLocation TSCLoc, TSSLoc, TSTLoc, AltiVecLoc;
   /// TSTNameLoc - If TypeSpecType is any of class, enum, struct, union,
   /// typename, then this is the location of the named type (if present);
   /// otherwise, it is the same as TSTLoc. Hence, the pair TSTLoc and
@@ -503,7 +504,8 @@ public:
   SourceLocation getLocStart() const LLVM_READONLY { return Range.getBegin(); }
   SourceLocation getLocEnd() const LLVM_READONLY { return Range.getEnd(); }
 
-  SourceLocation getTypeSpecWidthLoc() const { return TSWLoc; }
+  SourceLocation getTypeSpecWidthLoc() const { return TSWRange.getBegin(); }
+  SourceRange getTypeSpecWidthRange() const { return TSWRange; }
   SourceLocation getTypeSpecComplexLoc() const { return TSCLoc; }
   SourceLocation getTypeSpecSignLoc() const { return TSSLoc; }
   SourceLocation getTypeSpecTypeLoc() const { return TSTLoc; }
@@ -857,11 +859,19 @@ public:
 
   const IdentifierInfo *getGetterName() const { return GetterName; }
   IdentifierInfo *getGetterName() { return GetterName; }
-  void setGetterName(IdentifierInfo *name) { GetterName = name; }
+  SourceLocation getGetterNameLoc() const { return GetterNameLoc; }
+  void setGetterName(IdentifierInfo *name, SourceLocation loc) {
+    GetterName = name;
+    GetterNameLoc = loc;
+  }
 
   const IdentifierInfo *getSetterName() const { return SetterName; }
   IdentifierInfo *getSetterName() { return SetterName; }
-  void setSetterName(IdentifierInfo *name) { SetterName = name; }
+  SourceLocation getSetterNameLoc() const { return SetterNameLoc; }
+  void setSetterName(IdentifierInfo *name, SourceLocation loc) {
+    SetterName = name;
+    SetterNameLoc = loc;
+  }
 
 private:
   // FIXME: These two are unrelated and mutually exclusive. So perhaps
@@ -878,6 +888,9 @@ private:
 
   IdentifierInfo *GetterName;    // getter name or NULL if no getter
   IdentifierInfo *SetterName;    // setter name or NULL if no setter
+  SourceLocation GetterNameLoc; // location of the getter attribute's value
+  SourceLocation SetterNameLoc; // location of the setter attribute's value
+
 };
 
 /// \brief Represents a C++ unqualified-id that has been parsed. 
@@ -1186,14 +1199,14 @@ struct DeclaratorChunk {
     /// declaration of a member function), it will be stored here as a
     /// sequence of tokens to be parsed once the class definition is
     /// complete. Non-NULL indicates that there is a default argument.
-    CachedTokens *DefaultArgTokens;
+    std::unique_ptr<CachedTokens> DefaultArgTokens;
 
     ParamInfo() = default;
     ParamInfo(IdentifierInfo *ident, SourceLocation iloc,
               Decl *param,
-              CachedTokens *DefArgTokens = nullptr)
+              std::unique_ptr<CachedTokens> DefArgTokens = nullptr)
       : Ident(ident), IdentLoc(iloc), Param(param),
-        DefaultArgTokens(DefArgTokens) {}
+        DefaultArgTokens(std::move(DefArgTokens)) {}
   };
 
   struct TypeAndRange {
@@ -1246,9 +1259,10 @@ struct DeclaratorChunk {
     /// declarator.
     unsigned NumParams;
 
-    /// NumExceptions - This is the number of types in the dynamic-exception-
-    /// decl, if the function has one.
-    unsigned NumExceptions;
+    /// NumExceptionsOrDecls - This is the number of types in the
+    /// dynamic-exception-decl, if the function has one. In C, this is the
+    /// number of declarations in the function prototype.
+    unsigned NumExceptionsOrDecls;
 
     /// \brief The location of the ref-qualifier, if any.
     ///
@@ -1298,6 +1312,11 @@ struct DeclaratorChunk {
       /// \brief Pointer to the cached tokens for an exception-specification
       /// that has not yet been parsed.
       CachedTokens *ExceptionSpecTokens;
+
+      /// Pointer to a new[]'d array of declarations that need to be available
+      /// for lookup inside the function body, if one exists. Does not exist in
+      /// C++.
+      NamedDecl **DeclsInPrototype;
     };
 
     /// \brief If HasTrailingReturnType is true, this is the trailing return
@@ -1308,10 +1327,8 @@ struct DeclaratorChunk {
     ///
     /// This is used in various places for error recovery.
     void freeParams() {
-      for (unsigned I = 0; I < NumParams; ++I) {
-        delete Params[I].DefaultArgTokens;
-        Params[I].DefaultArgTokens = nullptr;
-      }
+      for (unsigned I = 0; I < NumParams; ++I)
+        Params[I].DefaultArgTokens.reset();
       if (DeleteParams) {
         delete[] Params;
         DeleteParams = false;
@@ -1322,10 +1339,20 @@ struct DeclaratorChunk {
     void destroy() {
       if (DeleteParams)
         delete[] Params;
-      if (getExceptionSpecType() == EST_Dynamic)
+      switch (getExceptionSpecType()) {
+      default:
+        break;
+      case EST_Dynamic:
         delete[] Exceptions;
-      else if (getExceptionSpecType() == EST_Unparsed)
+        break;
+      case EST_Unparsed:
         delete ExceptionSpecTokens;
+        break;
+      case EST_None:
+        if (NumExceptionsOrDecls != 0)
+          delete[] DeclsInPrototype;
+        break;
+      }
     }
 
     /// isKNRPrototype - Return true if this is a K&R style identifier list,
@@ -1395,6 +1422,19 @@ struct DeclaratorChunk {
       return static_cast<ExceptionSpecificationType>(ExceptionSpecType);
     }
 
+    /// \brief Get the number of dynamic exception specifications.
+    unsigned getNumExceptions() const {
+      assert(ExceptionSpecType != EST_None);
+      return NumExceptionsOrDecls;
+    }
+
+    /// \brief Get the non-parameter decls defined within this function
+    /// prototype. Typically these are tag declarations.
+    ArrayRef<NamedDecl *> getDeclsInPrototype() const {
+      assert(ExceptionSpecType == EST_None);
+      return llvm::makeArrayRef(DeclsInPrototype, NumExceptionsOrDecls);
+    }
+
     /// \brief Determine whether this function declarator had a
     /// trailing-return-type.
     bool hasTrailingReturnType() const { return HasTrailingReturnType; }
@@ -1417,15 +1457,12 @@ struct DeclaratorChunk {
     unsigned TypeQuals : 5;
     // CXXScopeSpec has a constructor, so it can't be a direct member.
     // So we need some pointer-aligned storage and a bit of trickery.
-    union {
-      void *Aligner;
-      char Mem[sizeof(CXXScopeSpec)];
-    } ScopeMem;
+    alignas(CXXScopeSpec) char ScopeMem[sizeof(CXXScopeSpec)];
     CXXScopeSpec &Scope() {
-      return *reinterpret_cast<CXXScopeSpec*>(ScopeMem.Mem);
+      return *reinterpret_cast<CXXScopeSpec *>(ScopeMem);
     }
     const CXXScopeSpec &Scope() const {
-      return *reinterpret_cast<const CXXScopeSpec*>(ScopeMem.Mem);
+      return *reinterpret_cast<const CXXScopeSpec *>(ScopeMem);
     }
     void destroy() {
       Scope().~CXXScopeSpec();
@@ -1543,6 +1580,7 @@ struct DeclaratorChunk {
                                      unsigned NumExceptions,
                                      Expr *NoexceptExpr,
                                      CachedTokens *ExceptionSpecTokens,
+                                     ArrayRef<NamedDecl *> DeclsInPrototype,
                                      SourceLocation LocalRangeBegin,
                                      SourceLocation LocalRangeEnd,
                                      Declarator &TheDeclarator,
@@ -1580,7 +1618,7 @@ struct DeclaratorChunk {
     I.EndLoc        = Loc;
     I.Mem.TypeQuals = TypeQuals;
     I.Mem.AttrList  = nullptr;
-    new (I.Mem.ScopeMem.Mem) CXXScopeSpec(SS);
+    new (I.Mem.ScopeMem) CXXScopeSpec(SS);
     return I;
   }
 

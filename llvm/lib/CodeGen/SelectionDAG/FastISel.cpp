@@ -455,17 +455,6 @@ bool FastISel::selectBinaryOp(const User *I, unsigned ISDOpcode) {
     return true;
   }
 
-  // Check if the second operand is a constant float.
-  if (const auto *CF = dyn_cast<ConstantFP>(I->getOperand(1))) {
-    unsigned ResultReg = fastEmit_rf(VT.getSimpleVT(), VT.getSimpleVT(),
-                                     ISDOpcode, Op0, Op0IsKill, CF);
-    if (ResultReg) {
-      // We successfully emitted code for the given LLVM Instruction.
-      updateValueMap(I, ResultReg);
-      return true;
-    }
-  }
-
   unsigned Op1 = getRegForValue(I->getOperand(1));
   if (!Op1) // Unhandled operand. Halt "fast" selection and bail.
     return false;
@@ -499,7 +488,7 @@ bool FastISel::selectGetElementPtr(const User *I) {
   for (gep_type_iterator GTI = gep_type_begin(I), E = gep_type_end(I);
        GTI != E; ++GTI) {
     const Value *Idx = GTI.getOperand();
-    if (auto *StTy = dyn_cast<StructType>(*GTI)) {
+    if (StructType *StTy = GTI.getStructTypeOrNull()) {
       uint64_t Field = cast<ConstantInt>(Idx)->getZExtValue();
       if (Field) {
         // N = N + Offset
@@ -581,7 +570,7 @@ bool FastISel::addStackMapLiveVars(SmallVectorImpl<MachineOperand> &Ops,
       Ops.push_back(MachineOperand::CreateImm(StackMaps::ConstantOp));
       Ops.push_back(MachineOperand::CreateImm(0));
     } else if (auto *AI = dyn_cast<AllocaInst>(Val)) {
-      // Values coming from a stack location also require a sepcial encoding,
+      // Values coming from a stack location also require a special encoding,
       // but that is added later on by the target specific frame index
       // elimination implementation.
       auto SI = FuncInfo.StaticAllocaMap.find(AI);
@@ -707,7 +696,7 @@ bool FastISel::lowerCallOperands(const CallInst *CI, unsigned ArgIdx,
 
 FastISel::CallLoweringInfo &FastISel::CallLoweringInfo::setCallee(
     const DataLayout &DL, MCContext &Ctx, CallingConv::ID CC, Type *ResultTy,
-    const char *Target, ArgListTy &&ArgsList, unsigned FixedArgs) {
+    StringRef Target, ArgListTy &&ArgsList, unsigned FixedArgs) {
   SmallString<32> MangledName;
   Mangler::getNameWithPrefix(MangledName, Target, DL);
   MCSymbol *Sym = Ctx.getOrCreateSymbol(MangledName);
@@ -1077,7 +1066,7 @@ bool FastISel::selectCall(const User *I) {
   }
 
   MachineModuleInfo &MMI = FuncInfo.MF->getMMI();
-  ComputeUsesVAFloatArgument(*Call, &MMI);
+  computeUsesVAFloatArgument(*Call, MMI);
 
   // Handle intrinsic function calls.
   if (const auto *II = dyn_cast<IntrinsicInst>(Call))
@@ -1154,9 +1143,11 @@ bool FastISel::selectIntrinsicCall(const IntrinsicInst *II) {
              "Expected inlined-at fields to agree");
       if (Op->isReg()) {
         Op->setIsDebug(true);
+        // A dbg.declare describes the address of a source variable, so lower it
+        // into an indirect DBG_VALUE.
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
-                TII.get(TargetOpcode::DBG_VALUE), false, Op->getReg(), 0,
-                DI->getVariable(), DI->getExpression());
+                TII.get(TargetOpcode::DBG_VALUE), /*IsIndirect*/ true,
+                Op->getReg(), 0, DI->getVariable(), DI->getExpression());
       } else
         BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
                 TII.get(TargetOpcode::DBG_VALUE))
@@ -1227,6 +1218,7 @@ bool FastISel::selectIntrinsicCall(const IntrinsicInst *II) {
     updateValueMap(II, ResultReg);
     return true;
   }
+  case Intrinsic::invariant_group_barrier:
   case Intrinsic::expect: {
     unsigned ResultReg = getRegForValue(II->getArgOperand(0));
     if (!ResultReg)
@@ -1433,7 +1425,7 @@ void FastISel::fastEmitBranch(MachineBasicBlock *MSucc,
     // fall-through case, which needs no instructions.
   } else {
     // The unconditional branch case.
-    TII.InsertBranch(*FuncInfo.MBB, MSucc, nullptr,
+    TII.insertBranch(*FuncInfo.MBB, MSucc, nullptr,
                      SmallVector<MachineOperand, 0>(), DbgLoc);
   }
   if (FuncInfo.BPI) {
@@ -1709,18 +1701,6 @@ unsigned FastISel::fastEmit_f(MVT, MVT, unsigned,
 
 unsigned FastISel::fastEmit_ri(MVT, MVT, unsigned, unsigned /*Op0*/,
                                bool /*Op0IsKill*/, uint64_t /*Imm*/) {
-  return 0;
-}
-
-unsigned FastISel::fastEmit_rf(MVT, MVT, unsigned, unsigned /*Op0*/,
-                               bool /*Op0IsKill*/,
-                               const ConstantFP * /*FPImm*/) {
-  return 0;
-}
-
-unsigned FastISel::fastEmit_rri(MVT, MVT, unsigned, unsigned /*Op0*/,
-                                bool /*Op0IsKill*/, unsigned /*Op1*/,
-                                bool /*Op1IsKill*/, uint64_t /*Imm*/) {
   return 0;
 }
 
@@ -2170,6 +2150,8 @@ FastISel::createMachineMemOperandFor(const Instruction *I) const {
 
   bool IsNonTemporal = I->getMetadata(LLVMContext::MD_nontemporal) != nullptr;
   bool IsInvariant = I->getMetadata(LLVMContext::MD_invariant_load) != nullptr;
+  bool IsDereferenceable =
+      I->getMetadata(LLVMContext::MD_dereferenceable) != nullptr;
   const MDNode *Ranges = I->getMetadata(LLVMContext::MD_range);
 
   AAMDNodes AAInfo;
@@ -2184,6 +2166,8 @@ FastISel::createMachineMemOperandFor(const Instruction *I) const {
     Flags |= MachineMemOperand::MOVolatile;
   if (IsNonTemporal)
     Flags |= MachineMemOperand::MONonTemporal;
+  if (IsDereferenceable)
+    Flags |= MachineMemOperand::MODereferenceable;
   if (IsInvariant)
     Flags |= MachineMemOperand::MOInvariant;
 

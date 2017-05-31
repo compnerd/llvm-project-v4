@@ -13,15 +13,17 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
   # Rely on llvm-config.
   set(CONFIG_OUTPUT)
-  find_program(LLVM_CONFIG "llvm-config")
+  if(NOT LLVM_CONFIG_PATH)
+    find_program(LLVM_CONFIG_PATH "llvm-config")
+  endif()
   if (DEFINED LLVM_PATH)
     set(LLVM_INCLUDE_DIR ${LLVM_INCLUDE_DIR} CACHE PATH "Path to llvm/include")
     set(LLVM_PATH ${LLVM_PATH} CACHE PATH "Path to LLVM source tree")
     set(LLVM_MAIN_SRC_DIR ${LLVM_PATH})
     set(LLVM_CMAKE_PATH "${LLVM_PATH}/cmake/modules")
-  elseif (LLVM_CONFIG)
-    message(STATUS "Found LLVM_CONFIG as ${LLVM_CONFIG}")
-    set(CONFIG_COMMAND ${LLVM_CONFIG} "--includedir" "--prefix" "--src-root")
+  elseif(LLVM_CONFIG_PATH)
+    message(STATUS "Found LLVM_CONFIG_PATH as ${LLVM_CONFIG_PATH}")
+    set(CONFIG_COMMAND ${LLVM_CONFIG_PATH} "--includedir" "--prefix" "--src-root")
     execute_process(COMMAND ${CONFIG_COMMAND}
                     RESULT_VARIABLE HAD_ERROR
                     OUTPUT_VARIABLE CONFIG_OUTPUT)
@@ -41,8 +43,19 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(LLVM_INCLUDE_DIR ${INCLUDE_DIR} CACHE PATH "Path to llvm/include")
     set(LLVM_BINARY_DIR ${LLVM_OBJ_ROOT} CACHE PATH "Path to LLVM build tree")
     set(LLVM_MAIN_SRC_DIR ${MAIN_SRC_DIR} CACHE PATH "Path to LLVM source tree")
-    set(LLVM_CMAKE_PATH "${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX}/cmake/llvm")
     set(LLVM_LIT_PATH "${LLVM_PATH}/utils/lit/lit.py")
+
+    # --cmakedir is supported since llvm r291218 (4.0 release)
+    execute_process(
+      COMMAND ${LLVM_CONFIG_PATH} --cmakedir
+      RESULT_VARIABLE HAD_ERROR
+      OUTPUT_VARIABLE CONFIG_OUTPUT)
+    if(NOT HAD_ERROR)
+      string(STRIP "${CONFIG_OUTPUT}" LLVM_CMAKE_PATH)
+    else()
+      set(LLVM_CMAKE_PATH
+          "${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX}/cmake/llvm")
+    endif()
   else()
     message(FATAL_ERROR "llvm-config not found and LLVM_MAIN_SRC_DIR not defined. "
                         "Reconfigure with -DLLVM_CONFIG=path/to/llvm-config "
@@ -58,7 +71,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   endif()
 
   set(PACKAGE_NAME libunwind)
-  set(PACKAGE_VERSION 4.0.0svn)
+  set(PACKAGE_VERSION 4.0.0)
   set(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
   set(PACKAGE_BUGREPORT "llvm-bugs@lists.llvm.org")
 

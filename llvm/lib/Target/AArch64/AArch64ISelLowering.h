@@ -187,9 +187,9 @@ enum NodeType : unsigned {
   SMULL,
   UMULL,
 
-  // Reciprocal estimates.
-  FRECPE,
-  FRSQRTE,
+  // Reciprocal estimates and steps.
+  FRECPE, FRECPS,
+  FRSQRTE, FRSQRTS,
 
   // NEON Load/Store with post-increment base updates
   LD2post = ISD::FIRST_TARGET_MEMORY_OPCODE,
@@ -219,6 +219,21 @@ enum NodeType : unsigned {
 
 } // end namespace AArch64ISD
 
+namespace {
+
+// Any instruction that defines a 32-bit result zeros out the high half of the
+// register. Truncate can be lowered to EXTRACT_SUBREG. CopyFromReg may
+// be copying from a truncate. But any other 32-bit operation will zero-extend
+// up to 64 bits.
+// FIXME: X86 also checks for CMOV here. Do we need something similar?
+static inline bool isDef32(const SDNode &N) {
+  unsigned Opc = N.getOpcode();
+  return Opc != ISD::TRUNCATE && Opc != TargetOpcode::EXTRACT_SUBREG &&
+         Opc != ISD::CopyFromReg;
+}
+
+} // end anonymous namespace
+
 class AArch64Subtarget;
 class AArch64TargetMachine;
 
@@ -238,6 +253,9 @@ public:
   void computeKnownBitsForTargetNode(const SDValue Op, APInt &KnownZero,
                                      APInt &KnownOne, const SelectionDAG &DAG,
                                      unsigned Depth = 0) const override;
+
+  bool targetShrinkDemandedConstant(SDValue Op, const APInt &Demanded,
+                                    TargetLoweringOpt &TLO) const override;
 
   MVT getScalarShiftAmountTy(const DataLayout &DL, EVT) const override;
 
@@ -298,8 +316,6 @@ public:
   bool isZExtFree(EVT VT1, EVT VT2) const override;
   bool isZExtFree(SDValue Val, EVT VT2) const override;
 
-  bool hasPairedLoad(Type *LoadedType,
-                     unsigned &RequiredAligment) const override;
   bool hasPairedLoad(EVT LoadedType, unsigned &RequiredAligment) const override;
 
   unsigned getMaxSupportedInterleaveFactor() const override { return 4; }
@@ -399,6 +415,13 @@ public:
     return true;
   }
 
+  bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const override;
+
+  bool hasAndNotCompare(SDValue) const override {
+    // 'bics'
+    return true;
+  }
+
   bool hasBitPreservingFPLogic(EVT VT) const override {
     // FIXME: Is this always true? It should be true for vectors at least.
     return VT == MVT::f32 || VT == MVT::f64;
@@ -416,6 +439,9 @@ public:
   bool supportSwiftError() const override {
     return true;
   }
+
+  /// Returns the size of the platform's va_list object.
+  unsigned getVaListSizeInBits(const DataLayout &DL) const override;
 
 private:
   bool isExtFreeImpl(const Instruction *Ext) const override;
@@ -521,11 +547,11 @@ private:
 
   SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
                         std::vector<SDNode *> *Created) const override;
-  SDValue getRsqrtEstimate(SDValue Operand, DAGCombinerInfo &DCI,
-                           unsigned &RefinementSteps,
-                           bool &UseOneConstNR) const override;
-  SDValue getRecipEstimate(SDValue Operand, DAGCombinerInfo &DCI,
-                           unsigned &RefinementSteps) const override;
+  SDValue getSqrtEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
+                          int &ExtraSteps, bool &UseOneConst,
+                          bool Reciprocal) const override;
+  SDValue getRecipEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
+                           int &ExtraSteps) const override;
   unsigned combineRepeatedFPDivisors() const override;
 
   ConstraintType getConstraintType(StringRef Constraint) const override;

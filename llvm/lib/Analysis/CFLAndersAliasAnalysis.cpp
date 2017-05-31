@@ -107,12 +107,10 @@ enum class MatchState : uint8_t {
 };
 
 typedef std::bitset<7> StateSet;
-// N.B. These are unsigned instead of StateSets because some MSVC versions
-// apparently lack constexpr bitset ctors.
-LLVM_CONSTEXPR unsigned ReadOnlyStateMask =
+const unsigned ReadOnlyStateMask =
     (1U << static_cast<uint8_t>(MatchState::FlowFromReadOnly)) |
     (1U << static_cast<uint8_t>(MatchState::FlowFromMemAliasReadOnly));
-LLVM_CONSTEXPR unsigned WriteOnlyStateMask =
+const unsigned WriteOnlyStateMask =
     (1U << static_cast<uint8_t>(MatchState::FlowToWriteOnly)) |
     (1U << static_cast<uint8_t>(MatchState::FlowToMemAliasWriteOnly));
 
@@ -309,7 +307,7 @@ class CFLAndersAAResult::FunctionInfo {
 
 public:
   FunctionInfo(const Function &, const SmallVectorImpl<Value *> &,
-               const ReachabilitySet &, AliasAttrMap);
+               const ReachabilitySet &, const AliasAttrMap &);
 
   bool mayAlias(const Value *, uint64_t, const Value *, uint64_t) const;
   const AliasSummary &getAliasSummary() const { return Summary; }
@@ -472,7 +470,7 @@ static void populateExternalAttributes(
 
 CFLAndersAAResult::FunctionInfo::FunctionInfo(
     const Function &Fn, const SmallVectorImpl<Value *> &RetVals,
-    const ReachabilitySet &ReachSet, AliasAttrMap AMap) {
+    const ReachabilitySet &ReachSet, const AliasAttrMap &AMap) {
   populateAttrMap(AttrMap, AMap);
   populateExternalAttributes(Summary.RetParamAttributes, Fn, RetVals, AMap);
   populateAliasMap(AliasMap, ReachSet);
@@ -867,7 +865,7 @@ AliasResult CFLAndersAAResult::alias(const MemoryLocation &LocA,
   return QueryResult;
 }
 
-char CFLAndersAA::PassID;
+AnalysisKey CFLAndersAA::Key;
 
 CFLAndersAAResult CFLAndersAA::run(Function &F, FunctionAnalysisManager &AM) {
   return CFLAndersAAResult(AM.getResult<TargetLibraryAnalysis>(F));

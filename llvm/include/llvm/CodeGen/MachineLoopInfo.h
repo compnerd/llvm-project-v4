@@ -60,6 +60,13 @@ public:
   /// multiple exiting blocks are present.
   MachineBasicBlock *findLoopControlBlock();
 
+  /// Return the debug location of the start of this loop.
+  /// This looks for a BB terminating instruction with a known debug
+  /// location by looking at the preheader and header blocks. If it
+  /// cannot find a terminating instruction with location information,
+  /// it returns an unknown location.
+  DebugLoc getStartLoc() const;
+
   void dump() const;
 
 private:
@@ -162,31 +169,21 @@ public:
 
 // Allow clients to walk the list of nested loops...
 template <> struct GraphTraits<const MachineLoop*> {
-  typedef const MachineLoop NodeType;
   typedef const MachineLoop *NodeRef;
   typedef MachineLoopInfo::iterator ChildIteratorType;
 
-  static NodeType *getEntryNode(const MachineLoop *L) { return L; }
-  static inline ChildIteratorType child_begin(NodeType *N) {
-    return N->begin();
-  }
-  static inline ChildIteratorType child_end(NodeType *N) {
-    return N->end();
-  }
+  static NodeRef getEntryNode(const MachineLoop *L) { return L; }
+  static ChildIteratorType child_begin(NodeRef N) { return N->begin(); }
+  static ChildIteratorType child_end(NodeRef N) { return N->end(); }
 };
 
 template <> struct GraphTraits<MachineLoop*> {
-  typedef MachineLoop NodeType;
   typedef MachineLoop *NodeRef;
   typedef MachineLoopInfo::iterator ChildIteratorType;
 
-  static NodeType *getEntryNode(MachineLoop *L) { return L; }
-  static inline ChildIteratorType child_begin(NodeType *N) {
-    return N->begin();
-  }
-  static inline ChildIteratorType child_end(NodeType *N) {
-    return N->end();
-  }
+  static NodeRef getEntryNode(MachineLoop *L) { return L; }
+  static ChildIteratorType child_begin(NodeRef N) { return N->begin(); }
+  static ChildIteratorType child_end(NodeRef N) { return N->end(); }
 };
 
 } // End llvm namespace

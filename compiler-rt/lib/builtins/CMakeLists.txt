@@ -132,6 +132,7 @@ set(GENERIC_SOURCES
   negvdi2.c
   negvsi2.c
   negvti2.c
+  os_version_check.c
   paritydi2.c
   paritysi2.c
   parityti2.c
@@ -164,7 +165,11 @@ set(GENERIC_SOURCES
   umodsi3.c
   umodti3.c)
 
-if(COMPILER_RT_HAS_ATOMIC_KEYWORD)
+option(COMPILER_RT_EXCLUDE_ATOMIC_BUILTIN
+  "Skip the atomic builtin (this may be needed if system headers are unavailable)"
+  Off)
+
+if(COMPILER_RT_HAS_ATOMIC_KEYWORD AND NOT COMPILER_RT_EXCLUDE_ATOMIC_BUILTIN)
   set(GENERIC_SOURCES
     ${GENERIC_SOURCES}
     atomic.c)
@@ -367,7 +372,31 @@ set(arm_Thumb1_SOURCES
   ${arm_Thumb1_VFPv2_SOURCES}
   ${arm_Thumb1_icache_SOURCES})
 
-if(NOT WIN32)
+if(MINGW)
+  set(arm_SOURCES
+      arm/aeabi_idivmod.S
+      arm/aeabi_ldivmod.S
+      arm/aeabi_uidivmod.S
+      arm/aeabi_uldivmod.S
+      divmoddi4.c
+      divmodsi4.c
+      divdi3.c
+      divsi3.c
+      fixdfdi.c
+      fixsfdi.c
+      fixunsdfdi.c
+      fixunssfdi.c
+      floatdidf.c
+      floatdisf.c
+      floatundidf.c
+      floatundisf.c
+      mingw_fixfloat.c
+      moddi3.c
+      udivmoddi4.c
+      udivmodsi4.c
+      udivsi3.c
+      umoddi3.c)
+elseif(NOT WIN32)
   # TODO the EABI sources should only be added to EABI targets
   set(arm_SOURCES
     ${arm_SOURCES}
@@ -387,8 +416,10 @@ set(aarch64_SOURCES
   fixunstfti.c
   floatditf.c
   floatsitf.c
+  floattitf.c
   floatunditf.c
   floatunsitf.c
+  floatuntitf.c
   multc3.c
   trunctfdf2.c
   trunctfsf2.c
@@ -421,7 +452,24 @@ if (APPLE)
   add_subdirectory(macho_embedded)
   darwin_add_builtin_libraries(${BUILTIN_SUPPORTED_OS})
 else ()
-  append_string_if(COMPILER_RT_HAS_STD_C99_FLAG -std=gnu99 maybe_stdc99)
+  set(BUILTIN_CFLAGS "")
+
+  append_list_if(COMPILER_RT_HAS_STD_C11_FLAG -std=c11 BUILTIN_CFLAGS)
+
+  # These flags would normally be added to CMAKE_C_FLAGS by the llvm
+  # cmake step. Add them manually if this is a standalone build.
+  if(COMPILER_RT_STANDALONE_BUILD)
+    append_list_if(COMPILER_RT_HAS_FPIC_FLAG -fPIC BUILTIN_CFLAGS)
+    append_list_if(COMPILER_RT_HAS_FNO_BUILTIN_FLAG -fno-builtin BUILTIN_CFLAGS)
+    append_list_if(COMPILER_RT_HAS_VISIBILITY_HIDDEN_FLAG -fvisibility=hidden BUILTIN_CFLAGS)
+    if(NOT COMPILER_RT_DEBUG)
+      append_list_if(COMPILER_RT_HAS_OMIT_FRAME_POINTER_FLAG -fomit-frame-pointer BUILTIN_CFLAGS)
+    endif()
+  endif()
+
+  set(BUILTIN_DEFS "")
+
+  append_list_if(COMPILER_RT_HAS_VISIBILITY_HIDDEN_FLAG VISIBILITY_HIDDEN BUILTIN_DEFS)
 
   foreach (arch ${BUILTIN_SUPPORTED_ARCH})
     if (CAN_TARGET_${arch})
@@ -436,11 +484,18 @@ else ()
         endif ()
       endforeach ()
 
+      # Needed for clear_cache on debug mode, due to r7's usage in inline asm.
+      # Release mode already sets it via -O2/3, Debug mode doesn't.
+      if (${arch} STREQUAL "armhf")
+        list(APPEND BUILTIN_CFLAGS -fomit-frame-pointer)
+      endif()
+
       add_compiler_rt_runtime(clang_rt.builtins
                               STATIC
                               ARCHS ${arch}
                               SOURCES ${${arch}_SOURCES}
-                              CFLAGS ${maybe_stdc99}
+                              DEFS ${BUILTIN_DEFS}
+                              CFLAGS ${BUILTIN_CFLAGS}
                               PARENT_TARGET builtins)
     endif ()
   endforeach ()

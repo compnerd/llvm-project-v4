@@ -397,7 +397,7 @@ int main(int argc_, const char **argv_) {
 
   // Handle CL and _CL_ which permits additional command line options to be
   // prepended or appended.
-  if (Tokenizer == &llvm::cl::TokenizeWindowsCommandLine) {
+  if (ClangCLMode) {
     // Arguments in "CL" are prepended.
     llvm::Optional<std::string> OptCL = llvm::sys::Process::GetEnv("CL");
     if (OptCL.hasValue()) {
@@ -464,8 +464,9 @@ int main(int argc_, const char **argv_) {
     Res = TheDriver.ExecuteCompilation(*C, FailingCommands);
 
   // Force a crash to test the diagnostics.
-  if (::getenv("FORCE_CLANG_DIAGNOSTICS_CRASH")) {
-    Diags.Report(diag::err_drv_force_crash) << "FORCE_CLANG_DIAGNOSTICS_CRASH";
+  if (TheDriver.GenReproducer) {
+    Diags.Report(diag::err_drv_force_crash)
+        << !::getenv("FORCE_CLANG_DIAGNOSTICS_CRASH");
 
     // Pretend that every command failed.
     FailingCommands.clear();

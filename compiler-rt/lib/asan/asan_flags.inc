@@ -23,6 +23,12 @@ ASAN_FLAG(int, quarantine_size_mb, -1,
           "Size (in Mb) of quarantine used to detect use-after-free "
           "errors. Lower value may reduce memory usage but increase the "
           "chance of false negatives.")
+ASAN_FLAG(int, thread_local_quarantine_size_kb, -1,
+          "Size (in Kb) of thread local quarantine used to detect "
+          "use-after-free errors. Lower value may reduce memory usage but "
+          "increase the chance of false negatives. It is not advised to go "
+          "lower than 64Kb, otherwise frequent transfers to global quarantine "
+          "might affect performance.")
 ASAN_FLAG(int, redzone, 16,
           "Minimal size (in bytes) of redzones around heap objects. "
           "Requirement: redzone >= 16, is a power of two.")
@@ -46,8 +52,6 @@ ASAN_FLAG(bool, replace_intrin, true,
           "If set, uses custom wrappers for memset/memcpy/memmove intrinsics.")
 ASAN_FLAG(bool, detect_stack_use_after_return, false,
           "Enables stack-use-after-return checking at run-time.")
-ASAN_FLAG(bool, detect_stack_use_after_scope, true,
-          "Enables stack-use-after-scope checking at run-time.")
 ASAN_FLAG(int, min_uar_stack_size_log, 16, // We can't do smaller anyway.
           "Minimum fake stack size log.")
 ASAN_FLAG(int, max_uar_stack_size_log,
@@ -59,8 +63,14 @@ ASAN_FLAG(
     int, max_malloc_fill_size, 0x1000,  // By default, fill only the first 4K.
     "ASan allocator flag. max_malloc_fill_size is the maximal amount of "
     "bytes that will be filled with malloc_fill_byte on malloc.")
+ASAN_FLAG(
+    int, max_free_fill_size, 0,
+    "ASan allocator flag. max_free_fill_size is the maximal amount of "
+    "bytes that will be filled with free_fill_byte during free.")
 ASAN_FLAG(int, malloc_fill_byte, 0xbe,
           "Value used to fill the newly allocated memory.")
+ASAN_FLAG(int, free_fill_byte, 0x55,
+          "Value used to fill deallocated memory.")
 ASAN_FLAG(bool, allow_user_poisoning, true,
           "If set, user may manually mark memory regions as poisoned or "
           "unpoisoned.")
@@ -104,7 +114,7 @@ ASAN_FLAG(bool, poison_array_cookie, true,
 // https://github.com/google/sanitizers/issues/309
 // TODO(glider,timurrrr): Fix known issues and enable this back.
 ASAN_FLAG(bool, alloc_dealloc_mismatch,
-          (SANITIZER_MAC == 0) && (SANITIZER_WINDOWS == 0),
+          !SANITIZER_MAC && !SANITIZER_WINDOWS && !SANITIZER_ANDROID,
           "Report errors on malloc/delete, new/free, new/delete[], etc.")
 
 ASAN_FLAG(bool, new_delete_type_mismatch, true,

@@ -28,7 +28,9 @@ ScaledNumber<uint64_t> BlockMass::toScaled() const {
   return ScaledNumber<uint64_t>(getMass() + 1, -64);
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void BlockMass::dump() const { print(dbgs()); }
+#endif
 
 static char getHexDigit(int N) {
   assert(N < 16);
@@ -628,15 +630,12 @@ namespace llvm {
 template <> struct GraphTraits<IrreducibleGraph> {
   typedef bfi_detail::IrreducibleGraph GraphT;
 
-  typedef const GraphT::IrrNode NodeType;
   typedef const GraphT::IrrNode *NodeRef;
   typedef GraphT::IrrNode::iterator ChildIteratorType;
 
-  static const NodeType *getEntryNode(const GraphT &G) {
-    return G.StartIrr;
-  }
-  static ChildIteratorType child_begin(NodeType *N) { return N->succ_begin(); }
-  static ChildIteratorType child_end(NodeType *N) { return N->succ_end(); }
+  static NodeRef getEntryNode(const GraphT &G) { return G.StartIrr; }
+  static ChildIteratorType child_begin(NodeRef N) { return N->succ_begin(); }
+  static ChildIteratorType child_end(NodeRef N) { return N->succ_end(); }
 };
 } // end namespace llvm
 

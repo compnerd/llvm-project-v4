@@ -28,13 +28,14 @@ if(NOT LIBCXX_INSTALL_LIBRARY)
   set(exclude_from_all EXCLUDE_FROM_ALL)
 endif()
 
-#if LIBCXX_CXX_ABI_LIBRARY_PATH is defined we want to add it to the search path.
-add_link_flags_if(LIBCXX_CXX_ABI_LIBRARY_PATH "-L${LIBCXX_CXX_ABI_LIBRARY_PATH}")
+# If LIBCXX_CXX_ABI_LIBRARY_PATH is defined we want to add it to the search path.
+add_link_flags_if(LIBCXX_CXX_ABI_LIBRARY_PATH
+                  "${CMAKE_LIBRARY_PATH_FLAG}${LIBCXX_CXX_ABI_LIBRARY_PATH}")
 
 add_library_flags_if(LIBCXX_COVERAGE_LIBRARY "${LIBCXX_COVERAGE_LIBRARY}")
 
 if (APPLE AND (LIBCXX_CXX_ABI_LIBNAME STREQUAL "libcxxabi" OR
-               LIBCXX_CXX_ABI_LIBNAME STREQUAL "none"))
+               LIBCXX_CXX_ABI_LIBNAME STREQUAL "default"))
   set(LIBCXX_OSX_REEXPORT_SYSTEM_ABI_LIBRARY ON)
 endif()
 
@@ -161,6 +162,28 @@ split_list(LIBCXX_LINK_FLAGS)
 
 # Add a object library that contains the compiled source files.
 add_library(cxx_objects OBJECT ${exclude_from_all} ${LIBCXX_SOURCES} ${LIBCXX_HEADERS})
+if(WIN32 AND NOT MINGW)
+  target_compile_definitions(cxx_objects
+                             PRIVATE
+                               # Ignore the -MSC_VER mismatch, as we may build
+                               # with a different compatibility version.
+                               _ALLOW_MSC_VER_MISMATCH
+                               # Don't check the msvcprt iterator debug levels
+                               # as we will define the iterator types; libc++
+                               # uses a different macro to identify the debug
+                               # level.
+                               _ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH
+                               # We are building the c++ runtime, don't pull in
+                               # msvcprt.
+                               _CRTBLD
+                               # Don't warn on the use of "deprecated"
+                               # "insecure" functions which are standards
+                               # specified.
+                               _CRT_SECURE_NO_WARNINGS
+                               # Use the ISO conforming behaviour for conversion
+                               # in printf, scanf.
+                               _CRT_STDIO_ISO_WIDE_SPECIFIERS)
+endif()
 
 set_target_properties(cxx_objects
   PROPERTIES
@@ -181,6 +204,13 @@ if (LIBCXX_ENABLE_SHARED)
       SOVERSION     "${LIBCXX_ABI_VERSION}"
   )
   list(APPEND LIBCXX_TARGETS "cxx_shared")
+  if(WIN32 AND NOT MINGW AND NOT "${CMAKE_HOST_SYSTEM_NAME}" STREQUAL "Windows")
+    # Since we most likely do not have a mt.exe replacement, disable the
+    # manifest bundling.  This allows a normal cmake invocation to pass which
+    # will attempt to use the manifest tool to generate the bundled manifest
+    set_target_properties(cxx_shared PROPERTIES
+                          APPEND_STRING PROPERTY LINK_FLAGS " /MANIFEST:NO")
+  endif()
 endif()
 
 # Build the static library.
@@ -193,6 +223,29 @@ if (LIBCXX_ENABLE_STATIC)
       OUTPUT_NAME   "c++"
   )
   list(APPEND LIBCXX_TARGETS "cxx_static")
+  # Attempt to merge the libc++.a archive and the ABI library archive into one.
+  if (LIBCXX_ENABLE_STATIC_ABI_LIBRARY)
+    set(MERGE_ARCHIVES_SEARCH_PATHS "")
+    if (LIBCXX_CXX_ABI_LIBRARY_PATH)
+      set(MERGE_ARCHIVES_SEARCH_PATHS "-L${LIBCXX_CXX_ABI_LIBRARY_PATH}")
+    endif()
+    if (TARGET ${LIBCXX_CXX_ABI_LIBRARY})
+      set(MERGE_ARCHIVES_ABI_TARGET "$<TARGET_LINKER_FILE:${LIBCXX_CXX_ABI_LIBRARY}>")
+    else()
+      set(MERGE_ARCHIVES_ABI_TARGET
+          "${CMAKE_STATIC_LIBRARY_PREFIX}${LIBCXX_CXX_ABI_LIBRARY}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    endif()
+    add_custom_command(TARGET cxx_static POST_BUILD
+    COMMAND
+      ${PYTHON_EXECUTABLE} ${LIBCXX_SOURCE_DIR}/utils/merge_archives.py
+    ARGS
+      -o $<TARGET_LINKER_FILE:cxx_static>
+      "$<TARGET_LINKER_FILE:cxx_static>"
+      "${MERGE_ARCHIVES_ABI_TARGET}"
+      "${MERGE_ARCHIVES_SEARCH_PATHS}"
+    WORKING_DIRECTORY ${LIBCXX_BUILD_DIR}
+    )
+  endif()
 endif()
 
 # Add a meta-target for both libraries.
@@ -222,7 +275,7 @@ if (LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY)
   )
 endif()
 
-if (LIBCXX_HAS_EXTERNAL_THREAD_API)
+if (LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY)
   file(GLOB LIBCXX_EXTERNAL_THREADING_SUPPORT_SOURCES ../test/support/external_threads.cpp)
 
   if (LIBCXX_ENABLE_SHARED)

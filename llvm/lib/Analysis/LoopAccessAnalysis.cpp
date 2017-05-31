@@ -13,18 +13,60 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/LoopAccessAnalysis.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/EquivalenceClasses.h"
+#include "llvm/ADT/PointerIntPair.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/AliasSetTracker.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/LoopPassManager.h"
+#include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/OptimizationDiagnosticInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpander.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/VectorUtils.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/IR/ValueHandle.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <iterator>
+#include <utility>
+#include <vector>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "loop-accesses"
@@ -467,6 +509,7 @@ void RuntimePointerChecking::print(raw_ostream &OS, unsigned Depth) const {
 }
 
 namespace {
+
 /// \brief Analyses memory accesses in a loop.
 ///
 /// Checks whether run time pointer checks are needed and builds sets for data
@@ -890,7 +933,7 @@ static bool isNoWrapAddRec(Value *Ptr, const SCEVAddRecExpr *AR,
 /// \brief Check whether the access through \p Ptr has a constant stride.
 int64_t llvm::getPtrStride(PredicatedScalarEvolution &PSE, Value *Ptr,
                            const Loop *Lp, const ValueToValueMap &StridesMap,
-                           bool Assume) {
+                           bool Assume, bool ShouldCheckWrap) {
   Type *Ty = Ptr->getType();
   assert(Ty->isPointerTy() && "Unexpected non-ptr");
 
@@ -929,9 +972,9 @@ int64_t llvm::getPtrStride(PredicatedScalarEvolution &PSE, Value *Ptr,
   // to access the pointer value "0" which is undefined behavior in address
   // space 0, therefore we can also vectorize this case.
   bool IsInBoundsGEP = isInBoundsGep(Ptr);
-  bool IsNoWrapAddRec =
-      PSE.hasNoOverflow(Ptr, SCEVWrapPredicate::IncrementNUSW) ||
-      isNoWrapAddRec(Ptr, AR, PSE, Lp);
+  bool IsNoWrapAddRec = !ShouldCheckWrap ||
+    PSE.hasNoOverflow(Ptr, SCEVWrapPredicate::IncrementNUSW) ||
+    isNoWrapAddRec(Ptr, AR, PSE, Lp);
   bool IsInAddressSpaceZero = PtrTy->getAddressSpace() == 0;
   if (!IsNoWrapAddRec && !IsInBoundsGEP && !IsInAddressSpaceZero) {
     if (Assume) {
@@ -1032,8 +1075,8 @@ bool llvm::isConsecutiveAccess(Value *A, Value *B, const DataLayout &DL,
     return false;
 
   // Make sure that A and B have the same type if required.
-  if(CheckType && PtrA->getType() != PtrB->getType())
-      return false;
+  if (CheckType && PtrA->getType() != PtrB->getType())
+    return false;
 
   unsigned PtrBitWidth = DL.getPointerSizeInBits(ASA);
   Type *Ty = cast<PointerType>(PtrA->getType())->getElementType();
@@ -1806,6 +1849,7 @@ static Instruction *getFirstInst(Instruction *FirstInst, Value *V,
 }
 
 namespace {
+
 /// \brief IR Values for the lower and upper bounds of a pointer evolution.  We
 /// need to use value-handles because SCEV expansion can invalidate previously
 /// expanded values.  Thus expansion of a pointer can invalidate the bounds for
@@ -1814,6 +1858,7 @@ struct PointerBounds {
   TrackingVH<Value> Start;
   TrackingVH<Value> End;
 };
+
 } // end anonymous namespace
 
 /// \brief Expand code for the lower and upper bound of the pointer group \p CG
@@ -2073,41 +2118,17 @@ INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
 INITIALIZE_PASS_END(LoopAccessLegacyAnalysis, LAA_NAME, laa_name, false, true)
 
-char LoopAccessAnalysis::PassID;
+AnalysisKey LoopAccessAnalysis::Key;
 
-LoopAccessInfo LoopAccessAnalysis::run(Loop &L, LoopAnalysisManager &AM) {
-  const FunctionAnalysisManager &FAM =
-      AM.getResult<FunctionAnalysisManagerLoopProxy>(L).getManager();
-  Function &F = *L.getHeader()->getParent();
-  auto *SE = FAM.getCachedResult<ScalarEvolutionAnalysis>(F);
-  auto *TLI = FAM.getCachedResult<TargetLibraryAnalysis>(F);
-  auto *AA = FAM.getCachedResult<AAManager>(F);
-  auto *DT = FAM.getCachedResult<DominatorTreeAnalysis>(F);
-  auto *LI = FAM.getCachedResult<LoopAnalysis>(F);
-  if (!SE)
-    report_fatal_error(
-        "ScalarEvolution must have been cached at a higher level");
-  if (!AA)
-    report_fatal_error("AliasAnalysis must have been cached at a higher level");
-  if (!DT)
-    report_fatal_error("DominatorTree must have been cached at a higher level");
-  if (!LI)
-    report_fatal_error("LoopInfo must have been cached at a higher level");
-  return LoopAccessInfo(&L, SE, TLI, AA, DT, LI);
-}
-
-PreservedAnalyses LoopAccessInfoPrinterPass::run(Loop &L,
-                                                 LoopAnalysisManager &AM) {
-  Function &F = *L.getHeader()->getParent();
-  auto &LAI = AM.getResult<LoopAccessAnalysis>(L);
-  OS << "Loop access info in function '" << F.getName() << "':\n";
-  OS.indent(2) << L.getHeader()->getName() << ":\n";
-  LAI.print(OS, 4);
-  return PreservedAnalyses::all();
+LoopAccessInfo LoopAccessAnalysis::run(Loop &L, LoopAnalysisManager &AM,
+                                       LoopStandardAnalysisResults &AR) {
+  return LoopAccessInfo(&L, &AR.SE, &AR.TLI, &AR.AA, &AR.DT, &AR.LI);
 }
 
 namespace llvm {
+
   Pass *createLAAPass() {
     return new LoopAccessLegacyAnalysis();
   }
-}
+
+} // end namespace llvm

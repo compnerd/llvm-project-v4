@@ -226,7 +226,7 @@ namespace clang {
 
       /// \brief The block containing the detailed preprocessing record.
       PREPROCESSOR_DETAIL_BLOCK_ID,
-      
+
       /// \brief The block containing the submodule structure.
       SUBMODULE_BLOCK_ID,
 
@@ -254,8 +254,8 @@ namespace clang {
       /// \brief A block containing a module file extension.
       EXTENSION_BLOCK_ID,
 
-      /// \brief A block containing unhashed contents. It currently holds
-      /// Diagnostic Options and Signature.
+      /// A block containing unhashed contents. It currently holds Diagnostic
+      /// Options and Signature.
       UNHASHED_CONTROL_BLOCK_ID,
     };
 
@@ -320,16 +320,19 @@ namespace clang {
       PREPROCESSOR_OPTIONS,
     };
 
-    /// \brief Record code for the unhashed control block.
+    /// Record codes for the unhashed control block.
     enum UnhashedControlBlockRecordTypes {
-      /// \brief Record code for the diagnostic options table.
-      DIAGNOSTIC_OPTIONS = 1,
+      /// Record code for the signature that identifiers this AST file.
+      SIGNATURE = 1,
 
-      /// \brief Record code for the signature that identifiers this AST file.
-      SIGNATURE,
+      /// Record code for the diagnostic options table.
+      DIAGNOSTIC_OPTIONS,
+
+      /// Record code for \#pragma diagnostic mappings.
+      DIAG_PRAGMA_MAPPINGS,
     };
 
-        /// \brief Record code for extension blocks.
+    /// \brief Record code for extension blocks.
     enum ExtensionBlockRecordTypes {
       /// Metadata describing this particular extension.
       EXTENSION_METADATA = 1,
@@ -351,7 +354,7 @@ namespace clang {
       ///
       /// The TYPE_OFFSET constant describes the record that occurs
       /// within the AST block. The record itself is an array of offsets that
-      /// point into the declarations and types block (identified by 
+      /// point into the declarations and types block (identified by
       /// DECLTYPES_BLOCK_ID). The index into the array is based on the ID
       /// of a type. For a given type ID @c T, the lower three bits of
       /// @c T are its qualifiers (const, volatile, restrict), as in
@@ -453,10 +456,10 @@ namespace clang {
 
       /// \brief Record code for the set of ext_vector type names.
       EXT_VECTOR_DECLS = 16,
-      
+
       /// \brief Record code for the array of unused file scoped decls.
       UNUSED_FILESCOPED_DECLS = 17,
-      
+
       /// \brief Record code for the table of offsets to entries in the
       /// preprocessing record.
       PPD_ENTITIES_OFFSETS = 18,
@@ -472,7 +475,7 @@ namespace clang {
       /// \brief Record code for an update to the TU's lexically contained
       /// declarations.
       TU_UPDATE_LEXICAL = 22,
-      
+
       // ID 23 used to be for a list of local redeclarations.
 
       /// \brief Record code for declarations that Sema keeps references of.
@@ -497,15 +500,14 @@ namespace clang {
 
       // ID 30 used to be a decl update record. These are now in the DECLTYPES
       // block.
-      
+
       // ID 31 used to be a list of offsets to DECL_CXX_BASE_SPECIFIERS records.
 
-      /// \brief Record code for \#pragma diagnostic mappings.
-      DIAG_PRAGMA_MAPPINGS = 32,
+      // ID 32 used to be the code for \#pragma diagnostic mappings.
 
       /// \brief Record code for special CUDA declarations.
       CUDA_SPECIAL_DECL_REFS = 33,
-      
+
       /// \brief Record code for header search information.
       HEADER_SEARCH_TABLE = 34,
 
@@ -523,7 +525,7 @@ namespace clang {
       KNOWN_NAMESPACES = 38,
 
       /// \brief Record code for the remapping information used to relate
-      /// loaded modules to the various offsets and IDs(e.g., source location 
+      /// loaded modules to the various offsets and IDs(e.g., source location
       /// offests, declaration and type IDs) that are used in that module to
       /// refer to other modules.
       MODULE_OFFSET_MAP = 39,
@@ -532,20 +534,20 @@ namespace clang {
       /// which stores information about \#line directives.
       SOURCE_MANAGER_LINE_TABLE = 40,
 
-      /// \brief Record code for map of Objective-C class definition IDs to the 
+      /// \brief Record code for map of Objective-C class definition IDs to the
       /// ObjC categories in a module that are attached to that class.
       OBJC_CATEGORIES_MAP = 41,
 
       /// \brief Record code for a file sorted array of DeclIDs in a module.
       FILE_SORTED_DECLS = 42,
-      
+
       /// \brief Record code for an array of all of the (sub)modules that were
       /// imported by the AST file.
       IMPORTED_MODULES = 43,
-      
+
       // ID 44 used to be a table of merged canonical declarations.
       // ID 45 used to be a list of declaration IDs of local redeclarations.
-      
+
       /// \brief Record code for the array of Objective-C categories (including
       /// extensions).
       ///
@@ -587,7 +589,20 @@ namespace clang {
       MSSTRUCT_PRAGMA_OPTIONS = 55,
 
       /// \brief Record code for \#pragma ms_struct options.
-      POINTERS_TO_MEMBERS_PRAGMA_OPTIONS = 56
+      POINTERS_TO_MEMBERS_PRAGMA_OPTIONS = 56,
+
+      /// \brief Number of unmatched #pragma clang cuda_force_host_device begin
+      /// directives we've seen.
+      CUDA_PRAGMA_FORCE_HOST_DEVICE_DEPTH = 57,
+
+      /// \brief Record code for types associated with OpenCL extensions.
+      OPENCL_EXTENSION_TYPES = 58,
+
+      /// \brief Record code for declarations associated with OpenCL extensions.
+      OPENCL_EXTENSION_DECLS = 59,
+
+      /// \brief Record code for \#pragma pack options.
+      PACK_PRAGMA_OPTIONS = 61,
     };
 
     /// \brief Record types used within a source manager block.
@@ -911,7 +926,9 @@ namespace clang {
       /// \brief A PipeType record.
       TYPE_PIPE                  = 43,
       /// \brief An ObjCTypeParamType record.
-      TYPE_OBJC_TYPE_PARAM       = 44
+      TYPE_OBJC_TYPE_PARAM       = 44,
+      /// \brief A DependentSizedExtVectorType record.
+      TYPE_DEPENDENT_SIZED_EXT_VECTOR = 46
     };
 
     /// \brief The type IDs for special types constructed by semantic
@@ -1100,6 +1117,8 @@ namespace clang {
       DECL_NAMESPACE_ALIAS,
       /// \brief A UsingDecl record.
       DECL_USING,
+      /// \brief A UsingPackDecl record.
+      DECL_USING_PACK,
       /// \brief A UsingShadowDecl record.
       DECL_USING_SHADOW,
       /// \brief A ConstructorUsingShadowDecl record.
@@ -1112,6 +1131,8 @@ namespace clang {
       DECL_UNRESOLVED_USING_TYPENAME,
       /// \brief A LinkageSpecDecl record.
       DECL_LINKAGE_SPEC,
+      /// \brief An ExportDecl record.
+      DECL_EXPORT,
       /// \brief A CXXRecordDecl record.
       DECL_CXX_RECORD,
       /// \brief A CXXMethodDecl record.
@@ -1293,10 +1314,14 @@ namespace clang {
       EXPR_DESIGNATED_INIT,
       /// \brief A DesignatedInitUpdateExpr record.
       EXPR_DESIGNATED_INIT_UPDATE,
-      /// \brief An ImplicitValueInitExpr record.
-      EXPR_IMPLICIT_VALUE_INIT,
       /// \brief An NoInitExpr record.
       EXPR_NO_INIT,
+      /// \brief An ArrayInitLoopExpr record.
+      EXPR_ARRAY_INIT_LOOP,
+      /// \brief An ArrayInitIndexExpr record.
+      EXPR_ARRAY_INIT_INDEX,
+      /// \brief An ImplicitValueInitExpr record.
+      EXPR_IMPLICIT_VALUE_INIT,
       /// \brief A VAArgExpr record.
       EXPR_VA_ARG,
       /// \brief An AddrLabelExpr record.
@@ -1499,6 +1524,14 @@ namespace clang {
       STMT_OMP_TARGET_PARALLEL_FOR_SIMD_DIRECTIVE,
       STMT_OMP_TARGET_SIMD_DIRECTIVE,
       STMT_OMP_TEAMS_DISTRIBUTE_DIRECTIVE,
+      STMT_OMP_TEAMS_DISTRIBUTE_SIMD_DIRECTIVE,
+      STMT_OMP_TEAMS_DISTRIBUTE_PARALLEL_FOR_SIMD_DIRECTIVE,
+      STMT_OMP_TEAMS_DISTRIBUTE_PARALLEL_FOR_DIRECTIVE,
+      STMT_OMP_TARGET_TEAMS_DIRECTIVE,
+      STMT_OMP_TARGET_TEAMS_DISTRIBUTE_DIRECTIVE,
+      STMT_OMP_TARGET_TEAMS_DISTRIBUTE_PARALLEL_FOR_DIRECTIVE,
+      STMT_OMP_TARGET_TEAMS_DISTRIBUTE_PARALLEL_FOR_SIMD_DIRECTIVE,
+      STMT_OMP_TARGET_TEAMS_DISTRIBUTE_SIMD_DIRECTIVE,
       EXPR_OMP_ARRAY_SECTION,
 
       // ARC

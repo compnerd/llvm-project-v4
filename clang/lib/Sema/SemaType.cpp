@@ -106,6 +106,7 @@ static void diagnoseBadTypeAttribute(Sema &S, const AttributeList &attr,
     case AttributeList::AT_FastCall: \
     case AttributeList::AT_StdCall: \
     case AttributeList::AT_ThisCall: \
+    case AttributeList::AT_RegCall: \
     case AttributeList::AT_Pascal: \
     case AttributeList::AT_SwiftCall: \
     case AttributeList::AT_VectorCall: \
@@ -717,6 +718,7 @@ static void maybeSynthesizeBlockSignature(TypeProcessingState &state,
       /*NumExceptions=*/0,
       /*NoexceptExpr=*/nullptr,
       /*ExceptionSpecTokens=*/nullptr,
+      /*DeclsInPrototype=*/None,
       loc, loc, declarator));
 
   // For consistency, make sure the state still has us as processing
@@ -1127,7 +1129,7 @@ TypeResult Sema::actOnObjCTypeArgsAndProtocolQualifiers(
       ActualTypeArgInfos.clear();
       break;
     }
-    
+
     assert(TypeArgInfo && "No type source info?");
     ActualTypeArgInfos.push_back(TypeArgInfo);
   }
@@ -1144,7 +1146,7 @@ TypeResult Sema::actOnObjCTypeArgsAndProtocolQualifiers(
 
   if (Result == T)
     return BaseType;
-    
+
   // Create source information for this type.
   TypeSourceInfo *ResultTInfo = Context.CreateTypeSourceInfo(Result);
   TypeLoc ResultTL = ResultTInfo->getTypeLoc();
@@ -1194,19 +1196,19 @@ TypeResult Sema::actOnObjCTypeArgsAndProtocolQualifiers(
   return CreateParsedType(Result, ResultTInfo);
 }
 
-static StringRef getImageAccessAttrStr(AttributeList *attrs) {
-  if (attrs) {
-
-    AttributeList *Next;
+static OpenCLAccessAttr::Spelling getImageAccess(const AttributeList *Attrs) {
+  if (Attrs) {
+    const AttributeList *Next = Attrs;
     do {
-      AttributeList &Attr = *attrs;
+      const AttributeList &Attr = *Next;
       Next = Attr.getNext();
       if (Attr.getKind() == AttributeList::AT_OpenCLAccess) {
-        return Attr.getName()->getName();
+        return static_cast<OpenCLAccessAttr::Spelling>(
+            Attr.getSemanticSpelling());
       }
     } while (Next);
   }
-  return "";
+  return OpenCLAccessAttr::Keyword_read_only;
 }
 
 /// \brief Convert the specified declspec to the appropriate type
@@ -1385,14 +1387,6 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
       Result = Context.LongDoubleTy;
     else
       Result = Context.DoubleTy;
-
-    if (S.getLangOpts().OpenCL &&
-        !((S.getLangOpts().OpenCLVersion >= 120) ||
-          S.getOpenCLOptions().cl_khr_fp64)) {
-      S.Diag(DS.getTypeSpecTypeLoc(), diag::err_type_requires_extension)
-          << Result << "cl_khr_fp64";
-      declarator.setInvalidType(true);
-    }
     break;
   case DeclSpec::TST_float128:
     if (!S.Context.getTargetInfo().hasFloat128Type())
@@ -1444,48 +1438,6 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
     Result = S.GetTypeFromParser(DS.getRepAsType());
     if (Result.isNull()) {
       declarator.setInvalidType(true);
-    } else if (S.getLangOpts().OpenCL) {
-      if (Result->getAs<AtomicType>()) {
-        StringRef TypeName = Result.getBaseTypeIdentifier()->getName();
-        bool NoExtTypes =
-            llvm::StringSwitch<bool>(TypeName)
-                .Cases("atomic_int", "atomic_uint", "atomic_float",
-                       "atomic_flag", true)
-                .Default(false);
-        if (!S.getOpenCLOptions().cl_khr_int64_base_atomics && !NoExtTypes) {
-          S.Diag(DS.getTypeSpecTypeLoc(), diag::err_type_requires_extension)
-              << Result << "cl_khr_int64_base_atomics";
-          declarator.setInvalidType(true);
-        }
-        if (!S.getOpenCLOptions().cl_khr_int64_extended_atomics &&
-            !NoExtTypes) {
-          S.Diag(DS.getTypeSpecTypeLoc(), diag::err_type_requires_extension)
-              << Result << "cl_khr_int64_extended_atomics";
-          declarator.setInvalidType(true);
-        }
-        if (!S.getOpenCLOptions().cl_khr_fp64 &&
-            !TypeName.compare("atomic_double")) {
-          S.Diag(DS.getTypeSpecTypeLoc(), diag::err_type_requires_extension)
-              << Result << "cl_khr_fp64";
-          declarator.setInvalidType(true);
-        }
-      } else if (!S.getOpenCLOptions().cl_khr_gl_msaa_sharing &&
-                 (Result->isOCLImage2dArrayMSAADepthROType() ||
-                  Result->isOCLImage2dArrayMSAADepthWOType() ||
-                  Result->isOCLImage2dArrayMSAADepthRWType() ||
-                  Result->isOCLImage2dArrayMSAAROType() ||
-                  Result->isOCLImage2dArrayMSAARWType() ||
-                  Result->isOCLImage2dArrayMSAAWOType() ||
-                  Result->isOCLImage2dMSAADepthROType() ||
-                  Result->isOCLImage2dMSAADepthRWType() ||
-                  Result->isOCLImage2dMSAADepthWOType() ||
-                  Result->isOCLImage2dMSAAROType() ||
-                  Result->isOCLImage2dMSAARWType() ||
-                  Result->isOCLImage2dMSAAWOType())) {
-        S.Diag(DS.getTypeSpecTypeLoc(), diag::err_type_requires_extension)
-            << Result << "cl_khr_gl_msaa_sharing";
-        declarator.setInvalidType(true);
-      }
     }
 
     // TypeQuals handled by caller.
@@ -1597,11 +1549,14 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
 
 #define GENERIC_IMAGE_TYPE(ImgType, Id) \
   case DeclSpec::TST_##ImgType##_t: \
-    Result = llvm::StringSwitch<QualType>( \
-                 getImageAccessAttrStr(DS.getAttributes().getList())) \
-                 .Cases("write_only", "__write_only", Context.Id##WOTy) \
-                 .Cases("read_write", "__read_write", Context.Id##RWTy) \
-                 .Default(Context.Id##ROTy); \
+    switch (getImageAccess(DS.getAttributes().getList())) { \
+    case OpenCLAccessAttr::Keyword_write_only: \
+      Result = Context.Id##WOTy; break; \
+    case OpenCLAccessAttr::Keyword_read_write: \
+      Result = Context.Id##RWTy; break; \
+    case OpenCLAccessAttr::Keyword_read_only: \
+      Result = Context.Id##ROTy; break; \
+    } \
     break;
 #include "clang/Basic/OpenCLImageTypes.def"
 
@@ -1610,6 +1565,10 @@ static QualType ConvertDeclSpecToType(TypeProcessingState &state) {
     declarator.setInvalidType(true);
     break;
   }
+
+  if (S.getLangOpts().OpenCL &&
+      S.checkOpenCLDisabledTypeDeclSpec(DS, Result))
+    declarator.setInvalidType(true);
 
   // Handle complex types.
   if (DS.getTypeSpecComplex() == DeclSpec::TSC_complex) {
@@ -2015,7 +1974,7 @@ QualType Sema::BuildReferenceType(QualType T, bool SpelledAsLValue,
   return Context.getRValueReferenceType(T);
 }
 
-/// \brief Build a Pipe type.
+/// \brief Build a Read-only Pipe type.
 ///
 /// \param T The type to which we'll be building a Pipe.
 ///
@@ -2023,11 +1982,20 @@ QualType Sema::BuildReferenceType(QualType T, bool SpelledAsLValue,
 ///
 /// \returns A suitable pipe type, if there are no errors. Otherwise, returns a
 /// NULL type.
-QualType Sema::BuildPipeType(QualType T, SourceLocation Loc) {
-  assert(!T->isObjCObjectType() && "Should build ObjCObjectPointerType");
+QualType Sema::BuildReadPipeType(QualType T, SourceLocation Loc) {
+  return Context.getReadPipeType(T);
+}
 
-  // Build the pipe type.
-  return Context.getPipeType(T);
+/// \brief Build a Write-only Pipe type.
+///
+/// \param T The type to which we'll be building a Pipe.
+///
+/// \param Loc We do not use it for now.
+///
+/// \returns A suitable pipe type, if there are no errors. Otherwise, returns a
+/// NULL type.
+QualType Sema::BuildWritePipeType(QualType T, SourceLocation Loc) {
+  return Context.getWritePipeType(T);
 }
 
 /// Check whether the specified array size makes the array type a VLA.  If so,
@@ -2227,6 +2195,10 @@ QualType Sema::BuildArrayType(QualType T, ArrayType::ArraySizeModifier ASM,
     Diag(Loc, diag::err_opencl_vla);
     return QualType();
   }
+  // CUDA device code doesn't support VLAs.
+  if (getLangOpts().CUDA && T->isVariableArrayType())
+    CUDADiagIfDeviceCode(Loc, diag::err_cuda_vla) << CurrentCUDATarget();
+
   // If this is not C99, extwarn about VLA's and C99 array size modifiers.
   if (!getLangOpts().C99) {
     if (T->isVariableArrayType()) {
@@ -2828,7 +2800,8 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       Error = 7; // Exception declaration
       break;
     case Declarator::TemplateParamContext:
-      Error = 8; // Template parameter
+      if (!SemaRef.getLangOpts().CPlusPlus1z)
+        Error = 8; // Template parameter
       break;
     case Declarator::BlockLiteralContext:
       Error = 9; // Block literal
@@ -3167,7 +3140,7 @@ getCCForDeclaratorChunk(Sema &S, Declarator &D,
       if (Attr->getKind() == AttributeList::AT_OpenCLKernel) {
         llvm::Triple::ArchType arch = S.Context.getTargetInfo().getTriple().getArch();
         if (arch == llvm::Triple::spir || arch == llvm::Triple::spir64 ||
-            arch == llvm::Triple::amdgcn) {
+            arch == llvm::Triple::amdgcn || arch == llvm::Triple::r600) {
           CC = CC_OpenCLKernel;
         }
         break;
@@ -4192,7 +4165,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       // FIXME: This really should be in BuildFunctionType.
       if (T->isHalfType()) {
         if (S.getLangOpts().OpenCL) {
-          if (!S.getOpenCLOptions().cl_khr_fp16) {
+          if (!S.getOpenCLOptions().isEnabled("cl_khr_fp16")) {
             S.Diag(D.getIdentifierLoc(), diag::err_opencl_invalid_return)
                 << T << 0 /*pointer hint*/;
             D.setInvalidType(true);
@@ -4204,13 +4177,26 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         }
       }
 
+      if (LangOpts.OpenCL) {
         // OpenCL v2.0 s6.12.5 - A block cannot be the return value of a
         // function.
-      if (LangOpts.OpenCL && (T->isBlockPointerType() || T->isImageType() ||
-                              T->isSamplerT() || T->isPipeType())) {
-        S.Diag(D.getIdentifierLoc(), diag::err_opencl_invalid_return)
-            << T << 1 /*hint off*/;
-        D.setInvalidType(true);
+        if (T->isBlockPointerType() || T->isImageType() || T->isSamplerT() ||
+            T->isPipeType()) {
+          S.Diag(D.getIdentifierLoc(), diag::err_opencl_invalid_return)
+              << T << 1 /*hint off*/;
+          D.setInvalidType(true);
+        }
+        // OpenCL doesn't support variadic functions and blocks
+        // (s6.9.e and s6.12.5 OpenCL v2.0) except for printf.
+        // We also allow here any toolchain reserved identifiers.
+        if (FTI.isVariadic &&
+            !(D.getIdentifier() &&
+              ((D.getIdentifier()->getName() == "printf" &&
+                LangOpts.OpenCLVersion >= 120) ||
+               D.getIdentifier()->getName().startswith("__")))) {
+          S.Diag(D.getIdentifierLoc(), diag::err_opencl_variadic_function);
+          D.setInvalidType(true);
+        }
       }
 
       // Methods cannot return interface types. All ObjC objects are
@@ -4303,7 +4289,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
 
       // Exception specs are not allowed in typedefs. Complain, but add it
       // anyway.
-      if (IsTypedefName && FTI.getExceptionSpecType())
+      if (IsTypedefName && FTI.getExceptionSpecType() && !LangOpts.CPlusPlus1z)
         S.Diag(FTI.getExceptionSpecLocBeg(),
                diag::err_exception_spec_in_typedef)
             << (D.getContext() == Declarator::AliasDeclContext ||
@@ -4313,6 +4299,19 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
       // an attempt to initialize a variable, not a function declaration.
       if (FTI.isAmbiguous)
         warnAboutAmbiguousFunction(S, D, DeclType, T);
+
+      // GNU warning -Wstrict-prototypes
+      //   Warn if a function declaration is without a prototype.
+      //   This warning is issued for all kinds of unprototyped function
+      //   declarations (i.e. function type typedef, function pointer etc.)
+      //   C99 6.7.5.3p14:
+      //   The empty list in a function declarator that is not part of a
+      //   definition of that function specifies that no information
+      //   about the number or types of the parameters is supplied.
+      if (D.getFunctionDefinitionKind() == FDK_Declaration &&
+          FTI.NumParams == 0 && !LangOpts.CPlusPlus)
+        S.Diag(DeclType.Loc, diag::warn_strict_prototypes)
+            << 0 << FixItHint::CreateInsertion(FTI.getRParenLoc(), "void");
 
       FunctionType::ExtInfo EI(getCCForDeclaratorChunk(S, D, FTI, chunkIndex));
 
@@ -4399,7 +4398,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
             // Disallow half FP parameters.
             // FIXME: This really should be in BuildFunctionType.
             if (S.getLangOpts().OpenCL) {
-              if (!S.getOpenCLOptions().cl_khr_fp16) {
+              if (!S.getOpenCLOptions().isEnabled("cl_khr_fp16")) {
                 S.Diag(Param->getLocation(),
                   diag::err_opencl_half_param) << ParamTy;
                 D.setInvalidType();
@@ -4450,7 +4449,7 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
         if (FTI.getExceptionSpecType() == EST_Dynamic) {
           // FIXME: It's rather inefficient to have to split into two vectors
           // here.
-          unsigned N = FTI.NumExceptions;
+          unsigned N = FTI.getNumExceptions();
           DynamicExceptions.reserve(N);
           DynamicExceptionRanges.reserve(N);
           for (unsigned I = 0; I != N; ++I) {
@@ -4534,7 +4533,9 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
     }
 
     case DeclaratorChunk::Pipe: {
-      T = S.BuildPipeType(T, DeclType.Loc );
+      T = S.BuildReadPipeType(T, DeclType.Loc);
+      processTypeAttrs(state, T, TAL_DeclSpec,
+                       D.getDeclSpec().getAttributes().getList());
       break;
     }
     }
@@ -4898,6 +4899,8 @@ static AttributeList::Kind getAttrListKind(AttributedType::Kind kind) {
     return AttributeList::AT_StdCall;
   case AttributedType::attr_thiscall:
     return AttributeList::AT_ThisCall;
+  case AttributedType::attr_regcall:
+    return AttributeList::AT_RegCall;
   case AttributedType::attr_pascal:
     return AttributeList::AT_Pascal;
   case AttributedType::attr_swiftcall:
@@ -5068,11 +5071,9 @@ namespace {
         TL.getWrittenBuiltinSpecs() = DS.getWrittenBuiltinSpecs();
         // Try to have a meaningful source location.
         if (TL.getWrittenSignSpec() != TSS_unspecified)
-          // Sign spec loc overrides the others (e.g., 'unsigned long').
-          TL.setBuiltinLoc(DS.getTypeSpecSignLoc());
-        else if (TL.getWrittenWidthSpec() != TSW_unspecified)
-          // Width spec loc overrides type spec loc (e.g., 'short int').
-          TL.setBuiltinLoc(DS.getTypeSpecWidthLoc());
+          TL.expandBuiltinRange(DS.getTypeSpecSignLoc());
+        if (TL.getWrittenWidthSpec() != TSW_unspecified)
+          TL.expandBuiltinRange(DS.getTypeSpecWidthRange());
       }
     }
     void VisitElaboratedTypeLoc(ElaboratedTypeLoc TL) {
@@ -5252,7 +5253,7 @@ namespace {
         ParmVarDecl *Param = cast<ParmVarDecl>(FTI.Params[i].Param);
         TL.setParam(tpi++, Param);
       }
-      // FIXME: exception specs
+      TL.setExceptionSpecRange(FTI.getExceptionSpecRange());
     }
     void VisitParenTypeLoc(ParenTypeLoc TL) {
       assert(Chunk.Kind == DeclaratorChunk::Paren);
@@ -5697,7 +5698,7 @@ static bool handleObjCOwnershipTypeAttr(TypeProcessingState &state,
         if (Class->isArcWeakrefUnavailable()) {
           S.Diag(AttrLoc, diag::err_arc_unsupported_weak_class);
           S.Diag(ObjT->getInterfaceDecl()->getLocation(),
-                  diag::note_class_declared);
+                 diag::note_class_declared);
         }
       }
     }
@@ -6069,7 +6070,6 @@ bool Sema::checkNullabilityTypeSpecifier(QualType &type,
   // For the context-sensitive keywords/Objective-C property
   // attributes, require that the type be a single-level pointer.
   if (isContextSensitive) {
-    // Make sure that the pointee isn't itself a pointer type.
     const Type *pointeeType;
     if (desugared->isArrayType())
       pointeeType = desugared->getArrayElementTypeNoTypeQual();
@@ -6254,6 +6254,8 @@ static AttributedType::Kind getCCTypeAttrKind(AttributeList &Attr) {
     return AttributedType::attr_stdcall;
   case AttributeList::AT_ThisCall:
     return AttributedType::attr_thiscall;
+  case AttributeList::AT_RegCall:
+    return AttributedType::attr_regcall;
   case AttributeList::AT_Pascal:
     return AttributedType::attr_pascal;
   case AttributeList::AT_SwiftCall:
@@ -6707,6 +6709,11 @@ static void HandleOpenCLAccessAttr(QualType &CurType, const AttributeList &Attr,
 
     S.Diag(TypedefTy->getDecl()->getLocStart(),
        diag::note_opencl_typedef_access_qualifier) << PrevAccessQual;
+  } else if (CurType->isPipeType()) {
+    if (Attr.getSemanticSpelling() == OpenCLAccessAttr::Keyword_write_only) {
+      QualType ElemType = CurType->getAs<PipeType>()->getElementType();
+      CurType = S.Context.getWritePipeType(ElemType);
+    }
   }
 }
 

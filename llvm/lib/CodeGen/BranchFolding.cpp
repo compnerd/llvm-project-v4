@@ -32,6 +32,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -110,9 +111,12 @@ bool BranchFolderPass::runOnMachineFunction(MachineFunction &MF) {
 
 BranchFolder::BranchFolder(bool defaultEnableTailMerge, bool CommonHoist,
                            MBFIWrapper &FreqInfo,
-                           const MachineBranchProbabilityInfo &ProbInfo)
-    : EnableHoistCommonCode(CommonHoist), MBBFreqInfo(FreqInfo),
-      MBPI(ProbInfo) {
+                           const MachineBranchProbabilityInfo &ProbInfo,
+                           unsigned MinTailLength)
+    : EnableHoistCommonCode(CommonHoist), MinCommonTailLength(MinTailLength),
+      MBBFreqInfo(FreqInfo), MBPI(ProbInfo) {
+  if (MinCommonTailLength == 0)
+    MinCommonTailLength = TailMergeSize;
   switch (FlagEnableTailMerge) {
   case cl::BOU_UNSET: EnableTailMerge = defaultEnableTailMerge; break;
   case cl::BOU_TRUE: EnableTailMerge = true; break;
@@ -139,59 +143,6 @@ void BranchFolder::RemoveDeadBlock(MachineBasicBlock *MBB) {
   FuncletMembership.erase(MBB);
   if (MLI)
     MLI->removeBlock(MBB);
-}
-
-/// OptimizeImpDefsBlock - If a basic block is just a bunch of implicit_def
-/// followed by terminators, and if the implicitly defined registers are not
-/// used by the terminators, remove those implicit_def's. e.g.
-/// BB1:
-///   r0 = implicit_def
-///   r1 = implicit_def
-///   br
-/// This block can be optimized away later if the implicit instructions are
-/// removed.
-bool BranchFolder::OptimizeImpDefsBlock(MachineBasicBlock *MBB) {
-  SmallSet<unsigned, 4> ImpDefRegs;
-  MachineBasicBlock::iterator I = MBB->begin();
-  while (I != MBB->end()) {
-    if (!I->isImplicitDef())
-      break;
-    unsigned Reg = I->getOperand(0).getReg();
-    if (TargetRegisterInfo::isPhysicalRegister(Reg)) {
-      for (MCSubRegIterator SubRegs(Reg, TRI, /*IncludeSelf=*/true);
-           SubRegs.isValid(); ++SubRegs)
-        ImpDefRegs.insert(*SubRegs);
-    } else {
-      ImpDefRegs.insert(Reg);
-    }
-    ++I;
-  }
-  if (ImpDefRegs.empty())
-    return false;
-
-  MachineBasicBlock::iterator FirstTerm = I;
-  while (I != MBB->end()) {
-    if (!TII->isUnpredicatedTerminator(*I))
-      return false;
-    // See if it uses any of the implicitly defined registers.
-    for (const MachineOperand &MO : I->operands()) {
-      if (!MO.isReg() || !MO.isUse())
-        continue;
-      unsigned Reg = MO.getReg();
-      if (ImpDefRegs.count(Reg))
-        return false;
-    }
-    ++I;
-  }
-
-  I = MBB->begin();
-  while (I != FirstTerm) {
-    MachineInstr *ImpDefMI = &*I;
-    ++I;
-    MBB->erase(ImpDefMI);
-  }
-
-  return true;
 }
 
 /// OptimizeFunction - Perhaps branch folding, tail merging and other
@@ -224,7 +175,6 @@ bool BranchFolder::OptimizeFunction(MachineFunction &MF,
     SmallVector<MachineOperand, 4> Cond;
     if (!TII->analyzeBranch(MBB, TBB, FBB, Cond, true))
       MadeChange |= MBB.CorrectExtraCFGEdges(TBB, FBB, !Cond.empty());
-    MadeChange |= OptimizeImpDefsBlock(&MBB);
   }
 
   // Recalculate funclet membership.
@@ -399,37 +349,16 @@ static unsigned ComputeCommonTailLength(MachineBasicBlock *MBB1,
   return TailLen;
 }
 
-void BranchFolder::computeLiveIns(MachineBasicBlock &MBB) {
-  if (!UpdateLiveIns)
-    return;
-
-  LiveRegs.init(TRI);
-  LiveRegs.addLiveOutsNoPristines(MBB);
-  for (MachineInstr &MI : make_range(MBB.rbegin(), MBB.rend()))
-    LiveRegs.stepBackward(MI);
-
-  for (unsigned Reg : LiveRegs) {
-    // Skip the register if we are about to add one of its super registers.
-    bool ContainsSuperReg = false;
-    for (MCSuperRegIterator SReg(Reg, TRI); SReg.isValid(); ++SReg) {
-      if (LiveRegs.contains(*SReg)) {
-        ContainsSuperReg = true;
-        break;
-      }
-    }
-    if (ContainsSuperReg)
-      continue;
-    MBB.addLiveIn(Reg);
-  }
-}
-
 /// ReplaceTailWithBranchTo - Delete the instruction OldInst and everything
 /// after it, replacing it with an unconditional branch to NewDest.
 void BranchFolder::ReplaceTailWithBranchTo(MachineBasicBlock::iterator OldInst,
                                            MachineBasicBlock *NewDest) {
   TII->ReplaceTailWithBranchTo(OldInst, NewDest);
 
-  computeLiveIns(*NewDest);
+  if (UpdateLiveIns) {
+    NewDest->clearLiveIns();
+    computeLiveIns(LiveRegs, *TRI, *NewDest);
+  }
 
   ++NumTailMerge;
 }
@@ -460,14 +389,15 @@ MachineBasicBlock *BranchFolder::SplitMBBAt(MachineBasicBlock &CurMBB,
   NewMBB->splice(NewMBB->end(), &CurMBB, BBI1, CurMBB.end());
 
   // NewMBB belongs to the same loop as CurMBB.
-  if (MLI) 
+  if (MLI)
     if (MachineLoop *ML = MLI->getLoopFor(&CurMBB))
       ML->addBasicBlockToLoop(NewMBB, MLI->getBase());
 
   // NewMBB inherits CurMBB's block frequency.
   MBBFreqInfo.setBlockFreq(NewMBB, MBBFreqInfo.getBlockFreq(&CurMBB));
 
-  computeLiveIns(*NewMBB);
+  if (UpdateLiveIns)
+    computeLiveIns(LiveRegs, *TRI, *NewMBB);
 
   // Add the new block to the funclet.
   const auto &FuncletI = FuncletMembership.find(&CurMBB);
@@ -507,18 +437,18 @@ static void FixTail(MachineBasicBlock *CurMBB, MachineBasicBlock *SuccBB,
   MachineFunction::iterator I = std::next(MachineFunction::iterator(CurMBB));
   MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
   SmallVector<MachineOperand, 4> Cond;
-  DebugLoc dl;  // FIXME: this is nowhere
+  DebugLoc dl = CurMBB->findBranchDebugLoc();
   if (I != MF->end() && !TII->analyzeBranch(*CurMBB, TBB, FBB, Cond, true)) {
     MachineBasicBlock *NextBB = &*I;
     if (TBB == NextBB && !Cond.empty() && !FBB) {
-      if (!TII->ReverseBranchCondition(Cond)) {
-        TII->RemoveBranch(*CurMBB);
-        TII->InsertBranch(*CurMBB, SuccBB, nullptr, Cond, dl);
+      if (!TII->reverseBranchCondition(Cond)) {
+        TII->removeBranch(*CurMBB);
+        TII->insertBranch(*CurMBB, SuccBB, nullptr, Cond, dl);
         return;
       }
     }
   }
-  TII->InsertBranch(*CurMBB, SuccBB, nullptr,
+  TII->insertBranch(*CurMBB, SuccBB, nullptr,
                     SmallVector<MachineOperand, 0>(), dl);
 }
 
@@ -591,9 +521,21 @@ static unsigned CountTerminators(MachineBasicBlock *MBB,
 /// and decide if it would be profitable to merge those tails.  Return the
 /// length of the common tail and iterators to the first common instruction
 /// in each block.
+/// MBB1, MBB2      The blocks to check
+/// MinCommonTailLength  Minimum size of tail block to be merged.
+/// CommonTailLen   Out parameter to record the size of the shared tail between
+///                 MBB1 and MBB2
+/// I1, I2          Iterator references that will be changed to point to the first
+///                 instruction in the common tail shared by MBB1,MBB2
+/// SuccBB          A common successor of MBB1, MBB2 which are in a canonical form
+///                 relative to SuccBB
+/// PredBB          The layout predecessor of SuccBB, if any.
+/// FuncletMembership  map from block to funclet #.
+/// AfterPlacement  True if we are merging blocks after layout. Stricter
+///                 thresholds apply to prevent undoing tail-duplication.
 static bool
 ProfitableToMerge(MachineBasicBlock *MBB1, MachineBasicBlock *MBB2,
-                  unsigned minCommonTailLength, unsigned &CommonTailLen,
+                  unsigned MinCommonTailLength, unsigned &CommonTailLen,
                   MachineBasicBlock::iterator &I1,
                   MachineBasicBlock::iterator &I2, MachineBasicBlock *SuccBB,
                   MachineBasicBlock *PredBB,
@@ -651,7 +593,7 @@ ProfitableToMerge(MachineBasicBlock *MBB1, MachineBasicBlock *MBB2,
     ++EffectiveTailLen;
 
   // Check if the common tail is long enough to be worthwhile.
-  if (EffectiveTailLen >= minCommonTailLength)
+  if (EffectiveTailLen >= MinCommonTailLength)
     return true;
 
   // If we are optimizing for code size, 2 instructions in common is enough if
@@ -674,7 +616,7 @@ ProfitableToMerge(MachineBasicBlock *MBB1, MachineBasicBlock *MBB2,
 /// those blocks appear in MergePotentials (where they are not necessarily
 /// consecutive).
 unsigned BranchFolder::ComputeSameTails(unsigned CurHash,
-                                        unsigned minCommonTailLength,
+                                        unsigned MinCommonTailLength,
                                         MachineBasicBlock *SuccBB,
                                         MachineBasicBlock *PredBB) {
   unsigned maxCommonTailLength = 0U;
@@ -687,7 +629,7 @@ unsigned BranchFolder::ComputeSameTails(unsigned CurHash,
     for (MPIterator I = std::prev(CurMPIter); I->getHash() == CurHash; --I) {
       unsigned CommonTailLen;
       if (ProfitableToMerge(CurMPIter->getBlock(), I->getBlock(),
-                            minCommonTailLength,
+                            MinCommonTailLength,
                             CommonTailLen, TrialBBI1, TrialBBI2,
                             SuccBB, PredBB,
                             FuncletMembership,
@@ -758,8 +700,6 @@ bool BranchFolder::CreateCommonTailOnlyBlock(MachineBasicBlock *&PredBB,
     SameTails[commonTailIndex].getTailStartPos();
   MachineBasicBlock *MBB = SameTails[commonTailIndex].getBlock();
 
-  // If the common tail includes any debug info we will take it pretty
-  // randomly from one of the inputs.  Might be better to remove it?
   DEBUG(dbgs() << "\nSplitting BB#" << MBB->getNumber() << ", size "
                << maxCommonTailLength);
 
@@ -782,6 +722,45 @@ bool BranchFolder::CreateCommonTailOnlyBlock(MachineBasicBlock *&PredBB,
     PredBB = newMBB;
 
   return true;
+}
+
+/// MergeCommonTailDebugLocs - Create merged DebugLocs of identical instructions
+/// across SameTails and assign it to the instruction in common tail.
+void BranchFolder::MergeCommonTailDebugLocs(unsigned commonTailIndex) {
+  MachineBasicBlock *MBB = SameTails[commonTailIndex].getBlock();
+
+  std::vector<MachineBasicBlock::iterator> NextCommonInsts(SameTails.size());
+  for (unsigned int i = 0 ; i != SameTails.size() ; ++i) {
+    if (i != commonTailIndex)
+      NextCommonInsts[i] = SameTails[i].getTailStartPos();
+    else {
+      assert(SameTails[i].getTailStartPos() == MBB->begin() &&
+          "MBB is not a common tail only block");
+    }
+  }
+
+  for (auto &MI : *MBB) {
+    if (MI.isDebugValue())
+      continue;
+    DebugLoc DL = MI.getDebugLoc();
+    for (unsigned int i = 0 ; i < NextCommonInsts.size() ; i++) {
+      if (i == commonTailIndex)
+        continue;
+
+      auto &Pos = NextCommonInsts[i];
+      assert(Pos != SameTails[i].getBlock()->end() &&
+          "Reached BB end within common tail");
+      while (Pos->isDebugValue()) {
+        ++Pos;
+        assert(Pos != SameTails[i].getBlock()->end() &&
+            "Reached BB end within common tail");
+      }
+      assert(MI.isIdenticalTo(*Pos) && "Expected matching MIIs!");
+      DL = DILocation::getMergedLocation(DL, Pos->getDebugLoc());
+      NextCommonInsts[i] = ++Pos;
+    }
+    MI.setDebugLoc(DL);
+  }
 }
 
 static void
@@ -841,13 +820,12 @@ mergeOperations(MachineBasicBlock::iterator MBBIStartPos,
 // branch to Succ added (but the predecessor/successor lists need no
 // adjustment). The lone predecessor of Succ that falls through into Succ,
 // if any, is given in PredBB.
+// MinCommonTailLength - Except for the special cases below, tail-merge if
+// there are at least this many instructions in common.
 bool BranchFolder::TryTailMergeBlocks(MachineBasicBlock *SuccBB,
-                                      MachineBasicBlock *PredBB) {
+                                      MachineBasicBlock *PredBB,
+                                      unsigned MinCommonTailLength) {
   bool MadeChange = false;
-
-  // Except for the special cases below, tail-merge if there are at least
-  // this many instructions in common.
-  unsigned minCommonTailLength = TailMergeSize;
 
   DEBUG(dbgs() << "\nTryTailMergeBlocks: ";
         for (unsigned i = 0, e = MergePotentials.size(); i != e; ++i)
@@ -861,8 +839,8 @@ bool BranchFolder::TryTailMergeBlocks(MachineBasicBlock *SuccBB,
                    << PredBB->getNumber() << "\n";
         }
         dbgs() << "Looking for common tails of at least "
-               << minCommonTailLength << " instruction"
-               << (minCommonTailLength == 1 ? "" : "s") << '\n';
+               << MinCommonTailLength << " instruction"
+               << (MinCommonTailLength == 1 ? "" : "s") << '\n';
        );
 
   // Sort by hash value so that blocks with identical end sequences sort
@@ -876,10 +854,10 @@ bool BranchFolder::TryTailMergeBlocks(MachineBasicBlock *SuccBB,
     // Build SameTails, identifying the set of blocks with this hash code
     // and with the maximum number of instructions in common.
     unsigned maxCommonTailLength = ComputeSameTails(CurHash,
-                                                    minCommonTailLength,
+                                                    MinCommonTailLength,
                                                     SuccBB, PredBB);
 
-    // If we didn't find any pair that has at least minCommonTailLength
+    // If we didn't find any pair that has at least MinCommonTailLength
     // instructions in common, remove all blocks with this hash code and retry.
     if (SameTails.empty()) {
       RemoveBlocksWithHash(CurHash, SuccBB, PredBB);
@@ -937,6 +915,9 @@ bool BranchFolder::TryTailMergeBlocks(MachineBasicBlock *SuccBB,
     // Recompute common tail MBB's edge weights and block frequency.
     setCommonTailEdgeWeights(*MBB);
 
+    // Merge debug locations across identical instructions for common tail
+    MergeCommonTailDebugLocs(commonTailIndex);
+
     // MBB is common tail.  Adjust all other BB's to jump to this one.
     // Traversal must be forwards so erases work.
     DEBUG(dbgs() << "\nUsing common tail in BB#" << MBB->getNumber()
@@ -985,7 +966,7 @@ bool BranchFolder::TailMergeBlocks(MachineFunction &MF) {
 
     // See if we can do any tail merging on those.
     if (MergePotentials.size() >= 2)
-      MadeChange |= TryTailMergeBlocks(nullptr, nullptr);
+      MadeChange |= TryTailMergeBlocks(nullptr, nullptr, MinCommonTailLength);
   }
 
   // Look at blocks (IBB) with multiple predecessors (PBB).
@@ -1065,7 +1046,7 @@ bool BranchFolder::TailMergeBlocks(MachineFunction &MF) {
         // branch.
         SmallVector<MachineOperand, 4> NewCond(Cond);
         if (!Cond.empty() && TBB == IBB) {
-          if (TII->ReverseBranchCondition(NewCond))
+          if (TII->reverseBranchCondition(NewCond))
             continue;
           // This is the QBB case described above
           if (!FBB) {
@@ -1100,11 +1081,11 @@ bool BranchFolder::TailMergeBlocks(MachineFunction &MF) {
 
         // Remove the unconditional branch at the end, if any.
         if (TBB && (Cond.empty() || FBB)) {
-          DebugLoc dl;  // FIXME: this is nowhere
-          TII->RemoveBranch(*PBB);
+          DebugLoc dl = PBB->findBranchDebugLoc();
+          TII->removeBranch(*PBB);
           if (!Cond.empty())
             // reinsert conditional branch only, for now
-            TII->InsertBranch(*PBB, (TBB == IBB) ? FBB : TBB, nullptr,
+            TII->insertBranch(*PBB, (TBB == IBB) ? FBB : TBB, nullptr,
                               NewCond, dl);
         }
 
@@ -1119,7 +1100,7 @@ bool BranchFolder::TailMergeBlocks(MachineFunction &MF) {
         TriedMerging.insert(MergePotentials[i].getBlock());
 
     if (MergePotentials.size() >= 2)
-      MadeChange |= TryTailMergeBlocks(IBB, PredBB);
+      MadeChange |= TryTailMergeBlocks(IBB, PredBB, MinCommonTailLength);
 
     // Reinsert an unconditional branch if needed. The 1 below can occur as a
     // result of removing blocks in TryTailMergeBlocks.
@@ -1320,10 +1301,10 @@ ReoptimizeBlock:
     // a fall-through.
     if (PriorTBB && PriorTBB == PriorFBB) {
       DebugLoc dl = getBranchDebugLoc(PrevBB);
-      TII->RemoveBranch(PrevBB);
+      TII->removeBranch(PrevBB);
       PriorCond.clear();
       if (PriorTBB != MBB)
-        TII->InsertBranch(PrevBB, PriorTBB, nullptr, PriorCond, dl);
+        TII->insertBranch(PrevBB, PriorTBB, nullptr, PriorCond, dl);
       MadeChange = true;
       ++NumBranchOpts;
       goto ReoptimizeBlock;
@@ -1368,7 +1349,7 @@ ReoptimizeBlock:
     // If the previous branch *only* branches to *this* block (conditional or
     // not) remove the branch.
     if (PriorTBB == MBB && !PriorFBB) {
-      TII->RemoveBranch(PrevBB);
+      TII->removeBranch(PrevBB);
       MadeChange = true;
       ++NumBranchOpts;
       goto ReoptimizeBlock;
@@ -1378,8 +1359,8 @@ ReoptimizeBlock:
     // the condition is false, remove the uncond second branch.
     if (PriorFBB == MBB) {
       DebugLoc dl = getBranchDebugLoc(PrevBB);
-      TII->RemoveBranch(PrevBB);
-      TII->InsertBranch(PrevBB, PriorTBB, nullptr, PriorCond, dl);
+      TII->removeBranch(PrevBB);
+      TII->insertBranch(PrevBB, PriorTBB, nullptr, PriorCond, dl);
       MadeChange = true;
       ++NumBranchOpts;
       goto ReoptimizeBlock;
@@ -1390,10 +1371,10 @@ ReoptimizeBlock:
     // fall-through.
     if (PriorTBB == MBB) {
       SmallVector<MachineOperand, 4> NewPriorCond(PriorCond);
-      if (!TII->ReverseBranchCondition(NewPriorCond)) {
+      if (!TII->reverseBranchCondition(NewPriorCond)) {
         DebugLoc dl = getBranchDebugLoc(PrevBB);
-        TII->RemoveBranch(PrevBB);
-        TII->InsertBranch(PrevBB, PriorFBB, nullptr, NewPriorCond, dl);
+        TII->removeBranch(PrevBB);
+        TII->insertBranch(PrevBB, PriorFBB, nullptr, NewPriorCond, dl);
         MadeChange = true;
         ++NumBranchOpts;
         goto ReoptimizeBlock;
@@ -1425,13 +1406,13 @@ ReoptimizeBlock:
       if (DoTransform) {
         // Reverse the branch so we will fall through on the previous true cond.
         SmallVector<MachineOperand, 4> NewPriorCond(PriorCond);
-        if (!TII->ReverseBranchCondition(NewPriorCond)) {
+        if (!TII->reverseBranchCondition(NewPriorCond)) {
           DEBUG(dbgs() << "\nMoving MBB: " << *MBB
                        << "To make fallthrough to: " << *PriorTBB << "\n");
 
           DebugLoc dl = getBranchDebugLoc(PrevBB);
-          TII->RemoveBranch(PrevBB);
-          TII->InsertBranch(PrevBB, MBB, nullptr, NewPriorCond, dl);
+          TII->removeBranch(PrevBB);
+          TII->insertBranch(PrevBB, MBB, nullptr, NewPriorCond, dl);
 
           // Move this block to the end of the function.
           MBB->moveAfter(&MF.back());
@@ -1459,10 +1440,10 @@ ReoptimizeBlock:
     //    Loop: xxx; jncc Loop; jmp Out
     if (CurTBB && CurFBB && CurFBB == MBB && CurTBB != MBB) {
       SmallVector<MachineOperand, 4> NewCond(CurCond);
-      if (!TII->ReverseBranchCondition(NewCond)) {
+      if (!TII->reverseBranchCondition(NewCond)) {
         DebugLoc dl = getBranchDebugLoc(*MBB);
-        TII->RemoveBranch(*MBB);
-        TII->InsertBranch(*MBB, CurFBB, CurTBB, NewCond, dl);
+        TII->removeBranch(*MBB);
+        TII->insertBranch(*MBB, CurFBB, CurTBB, NewCond, dl);
         MadeChange = true;
         ++NumBranchOpts;
         goto ReoptimizeBlock;
@@ -1478,7 +1459,7 @@ ReoptimizeBlock:
       // This block may contain just an unconditional branch.  Because there can
       // be 'non-branch terminators' in the block, try removing the branch and
       // then seeing if the block is empty.
-      TII->RemoveBranch(*MBB);
+      TII->removeBranch(*MBB);
       // If the only things remaining in the block are debug info, remove these
       // as well, so this will behave the same as an empty block in non-debug
       // mode.
@@ -1509,8 +1490,8 @@ ReoptimizeBlock:
               PriorFBB = MBB;
             }
             DebugLoc pdl = getBranchDebugLoc(PrevBB);
-            TII->RemoveBranch(PrevBB);
-            TII->InsertBranch(PrevBB, PriorTBB, PriorFBB, PriorCond, pdl);
+            TII->removeBranch(PrevBB);
+            TII->insertBranch(PrevBB, PriorTBB, PriorFBB, PriorCond, pdl);
           }
 
           // Iterate through all the predecessors, revectoring each in-turn.
@@ -1535,9 +1516,9 @@ ReoptimizeBlock:
                   *PMBB, NewCurTBB, NewCurFBB, NewCurCond, true);
               if (!NewCurUnAnalyzable && NewCurTBB && NewCurTBB == NewCurFBB) {
                 DebugLoc pdl = getBranchDebugLoc(*PMBB);
-                TII->RemoveBranch(*PMBB);
+                TII->removeBranch(*PMBB);
                 NewCurCond.clear();
-                TII->InsertBranch(*PMBB, NewCurTBB, nullptr, NewCurCond, pdl);
+                TII->insertBranch(*PMBB, NewCurTBB, nullptr, NewCurCond, pdl);
                 MadeChange = true;
                 ++NumBranchOpts;
                 PMBB->CorrectExtraCFGEdges(NewCurTBB, nullptr, false);
@@ -1557,7 +1538,7 @@ ReoptimizeBlock:
       }
 
       // Add the branch back if the block is more than just an uncond branch.
-      TII->InsertBranch(*MBB, CurTBB, nullptr, CurCond, dl);
+      TII->insertBranch(*MBB, CurTBB, nullptr, CurCond, dl);
     }
   }
 
@@ -1594,7 +1575,7 @@ ReoptimizeBlock:
           if (CurFallsThru) {
             MachineBasicBlock *NextBB = &*std::next(MBB->getIterator());
             CurCond.clear();
-            TII->InsertBranch(*MBB, NextBB, nullptr, CurCond, DebugLoc());
+            TII->insertBranch(*MBB, NextBB, nullptr, CurCond, DebugLoc());
           }
           MBB->moveAfter(PredBB);
           MadeChange = true;
@@ -1624,10 +1605,22 @@ ReoptimizeBlock:
 
       // Okay, there is no really great place to put this block.  If, however,
       // the block before this one would be a fall-through if this block were
-      // removed, move this block to the end of the function.
+      // removed, move this block to the end of the function. There is no real
+      // advantage in "falling through" to an EH block, so we don't want to
+      // perform this transformation for that case.
+      //
+      // Also, Windows EH introduced the possibility of an arbitrary number of
+      // successors to a given block.  The analyzeBranch call does not consider
+      // exception handling and so we can get in a state where a block
+      // containing a call is followed by multiple EH blocks that would be
+      // rotated infinitely at the end of the function if the transformation
+      // below were performed for EH "FallThrough" blocks.  Therefore, even if
+      // that appears not to be happening anymore, we should assume that it is
+      // possible and not remove the "!FallThrough()->isEHPad" condition below.
       MachineBasicBlock *PrevTBB = nullptr, *PrevFBB = nullptr;
       SmallVector<MachineOperand, 4> PrevCond;
       if (FallThrough != MF.end() &&
+          !FallThrough->isEHPad() &&
           !TII->analyzeBranch(PrevBB, PrevTBB, PrevFBB, PrevCond, true) &&
           PrevBB.isSuccessor(&*FallThrough)) {
         MBB->moveAfter(&MF.back());
@@ -1721,10 +1714,8 @@ MachineBasicBlock::iterator findHoistingInsertPosAndDeps(MachineBasicBlock *MBB,
 
   // The terminator is probably a conditional branch, try not to separate the
   // branch from condition setting instruction.
-  MachineBasicBlock::iterator PI = Loc;
-  --PI;
-  while (PI != MBB->begin() && PI->isDebugValue())
-    --PI;
+  MachineBasicBlock::iterator PI =
+    skipDebugInstructionsBackward(std::prev(Loc), MBB->begin());
 
   bool IsDef = false;
   for (const MachineOperand &MO : PI->operands()) {
@@ -1818,18 +1809,11 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
   MachineBasicBlock::iterator FIE = FBB->end();
   while (TIB != TIE && FIB != FIE) {
     // Skip dbg_value instructions. These do not count.
-    if (TIB->isDebugValue()) {
-      while (TIB != TIE && TIB->isDebugValue())
-        ++TIB;
-      if (TIB == TIE)
-        break;
-    }
-    if (FIB->isDebugValue()) {
-      while (FIB != FIE && FIB->isDebugValue())
-        ++FIB;
-      if (FIB == FIE)
-        break;
-    }
+    TIB = skipDebugInstructionsForward(TIB, TIE);
+    FIB = skipDebugInstructionsForward(FIB, FIE);
+    if (TIB == TIE || FIB == FIE)
+      break;
+
     if (!TIB->isIdenticalTo(*FIB, MachineInstr::CheckKillDead))
       break;
 
@@ -1930,12 +1914,19 @@ bool BranchFolder::HoistCommonCodeInSuccs(MachineBasicBlock *MBB) {
   FBB->erase(FBB->begin(), FIB);
 
   // Update livein's.
+  bool AddedLiveIns = false;
   for (unsigned i = 0, e = LocalDefs.size(); i != e; ++i) {
     unsigned Def = LocalDefs[i];
     if (LocalDefsSet.count(Def)) {
       TBB->addLiveIn(Def);
       FBB->addLiveIn(Def);
+      AddedLiveIns = true;
     }
+  }
+
+  if (AddedLiveIns) {
+    TBB->sortUniqueLiveIns();
+    FBB->sortUniqueLiveIns();
   }
 
   ++NumHoist;

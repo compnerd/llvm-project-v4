@@ -86,16 +86,17 @@ static bool skipArgs(const char *Flag, bool HaveCrashVFS, int &SkipNum,
   IsInclude = FlagRef.startswith("-F") || FlagRef.startswith("-I");
   if (IsInclude)
     return HaveCrashVFS ? false : true;
-  if (FlagRef.startswith("-fmodules-cache-path=") ||
-      FlagRef.startswith("-fapinotes-cache-path="))
+  if (FlagRef.startswith("-fmodules-cache-path="))
+    return true;
+  if (FlagRef.startswith("-fapinotes-cache-path="))
     return true;
 
   SkipNum = 0;
   return false;
 }
 
-void Command::printArg(raw_ostream &OS, const char *Arg, bool Quote) {
-  const bool Escape = std::strpbrk(Arg, "\"\\$");
+void Command::printArg(raw_ostream &OS, StringRef Arg, bool Quote) {
+  const bool Escape = Arg.find_first_of("\"\\$") != StringRef::npos;
 
   if (!Quote && !Escape) {
     OS << Arg;
@@ -104,7 +105,7 @@ void Command::printArg(raw_ostream &OS, const char *Arg, bool Quote) {
 
   // Quote and escape. This isn't really complete, but good enough.
   OS << '"';
-  while (const char c = *Arg++) {
+  for (const char c : Arg) {
     if (c == '"' || c == '\\' || c == '$')
       OS << '\\';
     OS << c;
@@ -252,7 +253,7 @@ void Command::Print(raw_ostream &OS, const char *Terminator, bool Quote,
         // Replace the input file name with the crashinfo's file name.
         OS << ' ';
         StringRef ShortName = llvm::sys::path::filename(CrashInfo->Filename);
-        printArg(OS, ShortName.str().c_str(), Quote);
+        printArg(OS, ShortName.str(), Quote);
         continue;
       }
     }
@@ -265,7 +266,7 @@ void Command::Print(raw_ostream &OS, const char *Terminator, bool Quote,
     OS << ' ';
     printArg(OS, "-ivfsoverlay", Quote);
     OS << ' ';
-    printArg(OS, CrashInfo->VFSPath.str().c_str(), Quote);
+    printArg(OS, CrashInfo->VFSPath.str(), Quote);
 
     // The leftover modules from the crash are stored in
     //  <name>.cache/vfs/modules
@@ -280,7 +281,7 @@ void Command::Print(raw_ostream &OS, const char *Terminator, bool Quote,
     ModCachePath.append(RelModCacheDir.c_str());
 
     OS << ' ';
-    printArg(OS, ModCachePath.c_str(), Quote);
+    printArg(OS, ModCachePath, Quote);
   }
 
   if (ResponseFile != nullptr) {

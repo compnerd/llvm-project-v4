@@ -394,6 +394,7 @@ void ObjCARCContract::tryToContractReleaseIntoStoreStrong(Instruction *Release,
 
   DEBUG(llvm::dbgs() << "        New Store Strong: " << *StoreStrong << "\n");
 
+  if (&*Iter == Retain) ++Iter;
   if (&*Iter == Store) ++Iter;
   Store->eraseFromParent();
   Release->eraseFromParent();
@@ -423,7 +424,7 @@ bool ObjCARCContract::tryToPeepholeInstruction(
       if (!optimizeRetainCall(F, Inst))
         return false;
       // If we succeed in our optimization, fall through.
-      // FALLTHROUGH
+      LLVM_FALLTHROUGH;
     case ARCInstKind::RetainRV:
     case ARCInstKind::ClaimRV: {
       // If we're compiling for a target which needs a special inline-asm

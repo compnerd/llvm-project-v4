@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -analyze -analyzer-checker=core,deadcode.DeadStores,alpha.deadcode.UnreachableCode -verify -analyzer-opt-analyze-nested-blocks -Wno-unused-value %s
+// RUN: %clang_analyze_cc1 -analyzer-checker=core,deadcode.DeadStores,alpha.deadcode.UnreachableCode -verify -analyzer-opt-analyze-nested-blocks -Wno-unused-value %s
 
 extern void foo(int a);
 
@@ -161,9 +161,20 @@ void testInlined() {
 
 // Don't warn about unreachable VarDecl.
 void dostuff(int*A);
-void varDecl(int X) {
+void varDecl1(int X) {
   switch (X) {
     int A; // No warning here.
+  case 1:
+    dostuff(&A);
+    break;
+  case 2:
+    dostuff(&A);
+    break;
+  }
+}
+void varDecl2(int X) {
+  switch (X) {
+    int A=1; // expected-warning {{never executed}}
   case 1:
     dostuff(&A);
     break;

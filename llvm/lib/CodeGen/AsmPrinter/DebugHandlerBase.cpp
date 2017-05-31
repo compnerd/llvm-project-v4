@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
 
 using namespace llvm;
@@ -97,7 +98,7 @@ uint64_t DebugHandlerBase::getBaseTypeSize(const DITypeRef TyRef) {
 
   if (Tag != dwarf::DW_TAG_member && Tag != dwarf::DW_TAG_typedef &&
       Tag != dwarf::DW_TAG_const_type && Tag != dwarf::DW_TAG_volatile_type &&
-      Tag != dwarf::DW_TAG_restrict_type)
+      Tag != dwarf::DW_TAG_restrict_type && Tag != dwarf::DW_TAG_atomic_type)
     return DDTy->getSizeInBits();
 
   DIType *BaseType = DDTy->getBaseType().resolve();
@@ -199,10 +200,12 @@ void DebugHandlerBase::endInstruction() {
     return;
 
   assert(CurMI != nullptr);
-  // Don't create a new label after DBG_VALUE instructions.
-  // They don't generate code.
-  if (!CurMI->isDebugValue())
+  // Don't create a new label after DBG_VALUE and other instructions that don't
+  // generate code.
+  if (!CurMI->isMetaInstruction()) {
     PrevLabel = nullptr;
+    PrevInstBB = CurMI->getParent();
+  }
 
   DenseMap<const MachineInstr *, MCSymbol *>::iterator I =
       LabelsAfterInsn.find(CurMI);

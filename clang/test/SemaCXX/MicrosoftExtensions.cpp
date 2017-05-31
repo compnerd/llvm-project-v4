@@ -1,5 +1,6 @@
 // RUN: %clang_cc1 %s -triple i686-pc-win32 -fsyntax-only -Wmicrosoft -Wc++11-extensions -Wno-long-long -verify -fms-extensions -fexceptions -fcxx-exceptions -DTEST1
 // RUN: %clang_cc1 %s -triple i686-pc-win32 -fsyntax-only -Wmicrosoft -Wc++11-extensions -Wno-long-long -verify -fexceptions -fcxx-exceptions -DTEST2
+// RUN: %clang_cc1 %s -triple i686-pc-win32 -fsyntax-only -std=c++11 -fms-compatibility -verify -DTEST3
 
 #if TEST1
 
@@ -158,18 +159,15 @@ void m1() {
 }
 
 
-
-
-
-void f(long long);
-void f(int);
-
-int main()
-{
-  // This is an ambiguous call in standard C++.
-  // This calls f(long long) in Microsoft mode because LL is always signed.
-  f(0xffffffffffffffffLL);
+namespace signed_hex_i64 {
+void f(long long); // expected-note {{candidate function}}
+void f(int); // expected-note {{candidate function}}
+void g() {
+  // This used to be controlled by -fms-extensions, but it is now under
+  // -fms-compatibility.
+  f(0xffffffffffffffffLL); // expected-error {{call to 'f' is ambiguous}}
   f(0xffffffffffffffffi64);
+}
 }
 
 // Enumeration types with a fixed underlying type.
@@ -493,6 +491,13 @@ int S::fn() { return 0; } // expected-warning {{is missing exception specificati
 
 // Check that __unaligned is not recognized if MS extensions are not enabled
 typedef char __unaligned *aligned_type; // expected-error {{expected ';' after top level declarator}}
+
+#elif TEST3
+
+namespace PR32750 {
+template<typename T> struct A {};
+template<typename T> struct B : A<A<T>> { A<T>::C::D d; }; // expected-error {{missing 'typename' prior to dependent type name 'A<T>::C::D'}}
+}
 
 #else
 

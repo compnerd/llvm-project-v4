@@ -584,8 +584,16 @@ namespace {
       emitCommonTypeInfo(out, info);
 
       uint8_t payload = 0;
+      if (auto swiftImportAsNonGeneric = info.getSwiftImportAsNonGeneric()) {
+        payload |= (0x01 << 1) | swiftImportAsNonGeneric.getValue();
+      }
+      payload <<= 2;
+      if (auto swiftObjCMembers = info.getSwiftObjCMembers()) {
+        payload |= (0x01 << 1) | swiftObjCMembers.getValue();
+      }
+      payload <<= 3;
       if (auto nullable = info.getDefaultNullability()) {
-        payload = (0x01 << 2) | static_cast<uint8_t>(*nullable);
+        payload |= (0x01 << 2) | static_cast<uint8_t>(*nullable);
       }
       payload = (payload << 1) | (info.hasDesignatedInits() ? 1 : 0);
       out << payload;
@@ -766,7 +774,7 @@ namespace {
     }
 
     void emitUnversionedInfo(raw_ostream &out, const ObjCMethodInfo &info) {
-      uint8_t payload = info.FactoryAsInit;
+      uint8_t payload = 0;
       payload = (payload << 1) | info.DesignatedInit;
       payload = (payload << 1) | info.Required;
       endian::Writer<little> writer(out);
@@ -1048,7 +1056,32 @@ namespace {
   };
 
   /// Used to serialize the on-disk tag table.
-  class TagTableInfo : public CommonTypeTableInfo<TagTableInfo, TagInfo> { };
+  class TagTableInfo : public CommonTypeTableInfo<TagTableInfo, TagInfo> {
+  public:
+    unsigned getUnversionedInfoSize(const TagInfo &info) {
+      return 1 + getCommonTypeInfoSize(info);
+    }
+
+    void emitUnversionedInfo(raw_ostream &out, const TagInfo &info) {
+      endian::Writer<little> writer(out);
+
+      uint8_t payload = 0;
+      if (auto enumExtensibility = info.EnumExtensibility) {
+        payload |= static_cast<uint8_t>(enumExtensibility.getValue()) + 1;
+        assert((payload < (1 << 2)) && "must fit in two bits");
+      }
+
+      payload <<= 2;
+      if (Optional<bool> value = info.isFlagEnum()) {
+        payload |= 1 << 0;
+        payload |= value.getValue() << 1;
+      }
+
+      writer.write<uint8_t>(payload);
+
+      emitCommonTypeInfo(out, info);
+    }
+  };
 
 } // end anonymous namespace
 

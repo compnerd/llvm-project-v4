@@ -79,8 +79,7 @@ static cl::opt<CompactBranchPolicy> MipsCompactBranchPolicy(
   cl::values(
     clEnumValN(CB_Never, "never", "Do not use compact branches if possible."),
     clEnumValN(CB_Optimal, "optimal", "Use compact branches where appropiate (default)."),
-    clEnumValN(CB_Always, "always", "Always use compact branches if possible."),
-    clEnumValEnd
+    clEnumValN(CB_Always, "always", "Always use compact branches if possible.")
   )
 );
 
@@ -192,9 +191,7 @@ namespace {
     Filler(TargetMachine &tm)
       : MachineFunctionPass(ID), TM(tm) { }
 
-    const char *getPassName() const override {
-      return "Mips Delay Slot Filler";
-    }
+    StringRef getPassName() const override { return "Mips Delay Slot Filler"; }
 
     bool runOnMachineFunction(MachineFunction &F) override {
       bool Changed = false;
@@ -213,7 +210,7 @@ namespace {
 
     MachineFunctionProperties getRequiredProperties() const override {
       return MachineFunctionProperties().set(
-          MachineFunctionProperties::Property::AllVRegsAllocated);
+          MachineFunctionProperties::Property::NoVRegs);
     }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -560,7 +557,7 @@ static int getEquivalentCallShort(int Opcode) {
     return Mips::JALRS16_MM;
   case Mips::TAILCALL_MM:
     llvm_unreachable("Attempting to shorten the TAILCALL_MM pseudo!");
-  case Mips::TAILCALLREG_MM:
+  case Mips::TAILCALLREG:
     return Mips::JR16_MM;
   default:
     llvm_unreachable("Unexpected call instruction for microMIPS.");

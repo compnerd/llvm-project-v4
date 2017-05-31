@@ -10,6 +10,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "gtest/gtest.h"
 
+#include <list>
 #include <vector>
 
 using namespace llvm;
@@ -136,8 +137,7 @@ template <> struct CanCopy<false> {
   CanCopy(const CanCopy &) = delete;
 
   CanCopy() = default;
-  // FIXME: Use '= default' when we drop MSVC 2013.
-  CanCopy(CanCopy &&) {}
+  CanCopy(CanCopy &&) = default;
 };
 
 template <bool Moveable, bool Copyable>
@@ -193,6 +193,51 @@ TEST(STLExtrasTest, EnumerateLifetimeSemantics) {
   EXPECT_EQ(0, Destructors);
 }
 
+TEST(STLExtrasTest, ApplyTuple) {
+  auto T = std::make_tuple(1, 3, 7);
+  auto U = llvm::apply_tuple(
+      [](int A, int B, int C) { return std::make_tuple(A - B, B - C, C - A); },
+      T);
+
+  EXPECT_EQ(-2, std::get<0>(U));
+  EXPECT_EQ(-4, std::get<1>(U));
+  EXPECT_EQ(6, std::get<2>(U));
+
+  auto V = llvm::apply_tuple(
+      [](int A, int B, int C) {
+        return std::make_tuple(std::make_pair(A, char('A' + A)),
+                               std::make_pair(B, char('A' + B)),
+                               std::make_pair(C, char('A' + C)));
+      },
+      T);
+
+  EXPECT_EQ(std::make_pair(1, 'B'), std::get<0>(V));
+  EXPECT_EQ(std::make_pair(3, 'D'), std::get<1>(V));
+  EXPECT_EQ(std::make_pair(7, 'H'), std::get<2>(V));
+}
+
+class apply_variadic {
+  static int apply_one(int X) { return X + 1; }
+  static char apply_one(char C) { return C + 1; }
+  static StringRef apply_one(StringRef S) { return S.drop_back(); }
+
+public:
+  template <typename... Ts>
+  auto operator()(Ts &&... Items)
+      -> decltype(std::make_tuple(apply_one(Items)...)) {
+    return std::make_tuple(apply_one(Items)...);
+  }
+};
+
+TEST(STLExtrasTest, ApplyTupleVariadic) {
+  auto Items = std::make_tuple(1, llvm::StringRef("Test"), 'X');
+  auto Values = apply_tuple(apply_variadic(), Items);
+
+  EXPECT_EQ(2, std::get<0>(Values));
+  EXPECT_EQ("Tes", std::get<1>(Values));
+  EXPECT_EQ('Y', std::get<2>(Values));
+}
+
 TEST(STLExtrasTest, CountAdaptor) {
   std::vector<int> v;
 
@@ -208,6 +253,59 @@ TEST(STLExtrasTest, CountAdaptor) {
   EXPECT_EQ(2, count(v, 2));
   EXPECT_EQ(1, count(v, 3));
   EXPECT_EQ(1, count(v, 4));
+}
+
+TEST(STLExtrasTest, ConcatRange) {
+  std::vector<int> Expected = {1, 2, 3, 4, 5, 6, 7, 8};
+  std::vector<int> Test;
+
+  std::vector<int> V1234 = {1, 2, 3, 4};
+  std::list<int> L56 = {5, 6};
+  SmallVector<int, 2> SV78 = {7, 8};
+
+  // Use concat across different sized ranges of different types with different
+  // iterators.
+  for (int &i : concat<int>(V1234, L56, SV78))
+    Test.push_back(i);
+  EXPECT_EQ(Expected, Test);
+
+  // Use concat between a temporary, an L-value, and an R-value to make sure
+  // complex lifetimes work well.
+  Test.clear();
+  for (int &i : concat<int>(std::vector<int>(V1234), L56, std::move(SV78)))
+    Test.push_back(i);
+  EXPECT_EQ(Expected, Test);
+}
+
+TEST(STLExtrasTest, PartitionAdaptor) {
+  std::vector<int> V = {1, 2, 3, 4, 5, 6, 7, 8};
+
+  auto I = partition(V, [](int i) { return i % 2 == 0; });
+  ASSERT_EQ(V.begin() + 4, I);
+
+  // Sort the two halves as partition may have messed with the order.
+  std::sort(V.begin(), I);
+  std::sort(I, V.end());
+
+  EXPECT_EQ(2, V[0]);
+  EXPECT_EQ(4, V[1]);
+  EXPECT_EQ(6, V[2]);
+  EXPECT_EQ(8, V[3]);
+  EXPECT_EQ(1, V[4]);
+  EXPECT_EQ(3, V[5]);
+  EXPECT_EQ(5, V[6]);
+  EXPECT_EQ(7, V[7]);
+}
+
+TEST(STLExtrasTest, EraseIf) {
+  std::vector<int> V = {1, 2, 3, 4, 5, 6, 7, 8};
+
+  erase_if(V, [](int i) { return i % 2 == 0; });
+  EXPECT_EQ(4u, V.size());
+  EXPECT_EQ(1, V[0]);
+  EXPECT_EQ(3, V[1]);
+  EXPECT_EQ(5, V[2]);
+  EXPECT_EQ(7, V[3]);
 }
 
 }

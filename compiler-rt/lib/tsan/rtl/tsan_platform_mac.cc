@@ -44,7 +44,7 @@
 
 namespace __tsan {
 
-#ifndef SANITIZER_GO
+#if !SANITIZER_GO
 static void *SignalSafeGetOrAllocate(uptr *dst, uptr size) {
   atomic_uintptr_t *a = (atomic_uintptr_t *)dst;
   void *val = (void *)atomic_load_relaxed(a);
@@ -178,7 +178,7 @@ void WriteMemoryProfile(char *buf, uptr buf_size, uptr nthread, uptr nlive) {
     nthread, nlive);
 }
 
-#ifndef SANITIZER_GO
+#if !SANITIZER_GO
 void InitializeShadowMemoryPlatform() { }
 
 // On OS X, GCD worker threads are created without a call to pthread_create. We
@@ -207,7 +207,7 @@ static void my_pthread_introspection_hook(unsigned int event, pthread_t thread,
       ThreadState *parent_thread_state = nullptr;  // No parent.
       int tid = ThreadCreate(parent_thread_state, 0, (uptr)thread, true);
       CHECK_NE(tid, 0);
-      ThreadStart(thr, tid, GetTid());
+      ThreadStart(thr, tid, GetTid(), /*workerthread*/ true);
     }
   } else if (event == PTHREAD_INTROSPECTION_THREAD_TERMINATE) {
     if (thread == pthread_self()) {
@@ -228,7 +228,7 @@ void InitializePlatformEarly() {
 
 void InitializePlatform() {
   DisableCoreDumperIfNecessary();
-#ifndef SANITIZER_GO
+#if !SANITIZER_GO
   CheckAndProtect();
 
   CHECK_EQ(main_thread_identity, 0);
@@ -239,7 +239,7 @@ void InitializePlatform() {
 #endif
 }
 
-#ifndef SANITIZER_GO
+#if !SANITIZER_GO
 // Note: this function runs with async signals enabled,
 // so it must not touch any tsan state.
 int call_pthread_cancel_with_cleanup(int(*fn)(void *c, void *m,

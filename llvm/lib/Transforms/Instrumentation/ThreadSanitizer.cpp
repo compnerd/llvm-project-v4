@@ -88,7 +88,7 @@ namespace {
 /// ThreadSanitizer: instrument the code in module to find races.
 struct ThreadSanitizer : public FunctionPass {
   ThreadSanitizer() : FunctionPass(ID) {}
-  const char *getPassName() const override;
+  StringRef getPassName() const override;
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnFunction(Function &F) override;
   bool doInitialization(Module &M) override;
@@ -143,9 +143,7 @@ INITIALIZE_PASS_END(
     "ThreadSanitizer: detects data races.",
     false, false)
 
-const char *ThreadSanitizer::getPassName() const {
-  return "ThreadSanitizer";
-}
+StringRef ThreadSanitizer::getPassName() const { return "ThreadSanitizer"; }
 
 void ThreadSanitizer::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetLibraryInfoWrapperPass>();
@@ -490,6 +488,13 @@ bool ThreadSanitizer::instrumentLoadOrStore(Instruction *I,
   Value *Addr = IsWrite
       ? cast<StoreInst>(I)->getPointerOperand()
       : cast<LoadInst>(I)->getPointerOperand();
+
+  // swifterror memory addresses are mem2reg promoted by instruction selection.
+  // As such they cannot have regular uses like an instrumentation function and
+  // it makes no sense to track them as memory.
+  if (Addr->isSwiftError())
+    return false;
+
   int Idx = getMemoryAccessFuncIndex(Addr, DL);
   if (Idx < 0)
     return false;
@@ -538,7 +543,7 @@ static ConstantInt *createOrdering(IRBuilder<> *IRB, AtomicOrdering ord) {
   switch (ord) {
     case AtomicOrdering::NotAtomic:
       llvm_unreachable("unexpected atomic ordering!");
-    case AtomicOrdering::Unordered:              // Fall-through.
+    case AtomicOrdering::Unordered:              LLVM_FALLTHROUGH;
     case AtomicOrdering::Monotonic:              v = 0; break;
     // Not specified yet:
     // case AtomicOrdering::Consume:                v = 1; break;

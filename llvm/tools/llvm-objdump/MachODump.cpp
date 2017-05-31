@@ -20,6 +20,7 @@
 #include "llvm/Config/config.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
@@ -47,10 +48,6 @@
 #include <algorithm>
 #include <cstring>
 #include <system_error>
-
-#if HAVE_CXXABI_H
-#include <cxxabi.h>
-#endif
 
 #ifdef HAVE_LIBXAR
 extern "C" {
@@ -134,7 +131,7 @@ cl::opt<bool>
 
 cl::opt<std::string> llvm::DisSymName(
     "dis-symname",
-    cl::desc("disassemble just this symbol's instructions (requires -macho"));
+    cl::desc("disassemble just this symbol's instructions (requires -macho)"));
 
 static cl::opt<bool> NoSymbolicOperands(
     "no-symbolic-operands",
@@ -189,22 +186,12 @@ static const Target *GetTarget(const MachOObjectFile *MachOObj,
 struct SymbolSorter {
   bool operator()(const SymbolRef &A, const SymbolRef &B) {
     Expected<SymbolRef::Type> ATypeOrErr = A.getType();
-    if (!ATypeOrErr) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(ATypeOrErr.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!ATypeOrErr)
+      report_error(A.getObject()->getFileName(), ATypeOrErr.takeError());
     SymbolRef::Type AType = *ATypeOrErr;
     Expected<SymbolRef::Type> BTypeOrErr = B.getType();
-    if (!BTypeOrErr) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(BTypeOrErr.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!BTypeOrErr)
+      report_error(B.getObject()->getFileName(), BTypeOrErr.takeError());
     SymbolRef::Type BType = *BTypeOrErr;
     uint64_t AAddr = (AType != SymbolRef::ST_Function) ? 0 : A.getValue();
     uint64_t BAddr = (BType != SymbolRef::ST_Function) ? 0 : B.getValue();
@@ -301,13 +288,8 @@ static void getSectionsAndSymbols(MachOObjectFile *MachOObj,
                                   uint64_t &BaseSegmentAddress) {
   for (const SymbolRef &Symbol : MachOObj->symbols()) {
     Expected<StringRef> SymName = Symbol.getName();
-    if (!SymName) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(SymName.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!SymName)
+      report_error(MachOObj->getFileName(), SymName.takeError());
     if (!SymName->startswith("ltmp"))
       Symbols.push_back(Symbol);
   }
@@ -386,13 +368,8 @@ static void PrintIndirectSymbolTable(MachOObjectFile *O, bool verbose,
         symbol_iterator Sym = O->getSymbolByIndex(indirect_symbol);
         SymbolRef Symbol = *Sym;
         Expected<StringRef> SymName = Symbol.getName();
-        if (!SymName) {
-          std::string Buf;
-          raw_string_ostream OS(Buf);
-          logAllUnhandledErrors(SymName.takeError(), OS, "");
-          OS.flush();
-          report_fatal_error(Buf);
-        }
+        if (!SymName)
+          report_error(O->getFileName(), SymName.takeError());
         outs() << *SymName;
       } else {
         outs() << "?";
@@ -618,25 +595,15 @@ static void CreateSymbolAddressMap(MachOObjectFile *O,
   // Create a map of symbol addresses to symbol names.
   for (const SymbolRef &Symbol : O->symbols()) {
     Expected<SymbolRef::Type> STOrErr = Symbol.getType();
-    if (!STOrErr) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(STOrErr.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!STOrErr)
+      report_error(O->getFileName(), STOrErr.takeError());
     SymbolRef::Type ST = *STOrErr;
     if (ST == SymbolRef::ST_Function || ST == SymbolRef::ST_Data ||
         ST == SymbolRef::ST_Other) {
       uint64_t Address = Symbol.getValue();
       Expected<StringRef> SymNameOrErr = Symbol.getName();
-      if (!SymNameOrErr) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(SymNameOrErr.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!SymNameOrErr)
+        report_error(O->getFileName(), SymNameOrErr.takeError());
       StringRef SymName = *SymNameOrErr;
       if (!SymName.startswith(".objc"))
         (*AddrMap)[Address] = SymName;
@@ -871,13 +838,8 @@ static void DumpLiteralPointerSection(MachOObjectFile *O,
     if (Reloc != Relocs.end()) {
       symbol_iterator RelocSym = Reloc->second;
       Expected<StringRef> SymName = RelocSym->getName();
-      if (!SymName) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(SymName.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!SymName)
+        report_error(O->getFileName(), SymName.takeError());
       outs() << "external relocation entry for symbol:" << *SymName << "\n";
       continue;
     }
@@ -1180,7 +1142,7 @@ static void DumpInfoPlistSectionContents(StringRef Filename,
       StringRef BytesStr;
       Section.getContents(BytesStr);
       const char *sect = reinterpret_cast<const char *>(BytesStr.data());
-      outs() << sect;
+      outs() << format("%.*s", BytesStr.size(), sect) << "\n";
       return;
     }
   }
@@ -1226,7 +1188,7 @@ static void printObjcMetaData(MachOObjectFile *O, bool verbose);
 // archive member and or in a slice of a universal file.  It prints the
 // the file name and header info and then processes it according to the
 // command line options.
-static void ProcessMachO(StringRef Filename, MachOObjectFile *MachOOF,
+static void ProcessMachO(StringRef Name, MachOObjectFile *MachOOF,
                          StringRef ArchiveMemberName = StringRef(),
                          StringRef ArchitectureName = StringRef()) {
   // If we are doing some processing here on the Mach-O file print the header
@@ -1236,7 +1198,7 @@ static void ProcessMachO(StringRef Filename, MachOObjectFile *MachOOF,
       LazyBind || WeakBind || IndirectSymbols || DataInCode || LinkOptHints ||
       DylibsUsed || DylibId || ObjcMetaData || (FilterSections.size() != 0)) {
     if (!NoLeadingHeaders) {
-      outs() << Filename;
+      outs() << Name;
       if (!ArchiveMemberName.empty())
         outs() << '(' << ArchiveMemberName << ')';
       if (!ArchitectureName.empty())
@@ -1244,9 +1206,28 @@ static void ProcessMachO(StringRef Filename, MachOObjectFile *MachOOF,
       outs() << ":\n";
     }
   }
+  // To use the report_error() form with an ArchiveName and FileName set
+  // these up based on what is passed for Name and ArchiveMemberName.
+  StringRef ArchiveName;
+  StringRef FileName;
+  if (!ArchiveMemberName.empty()) {
+    ArchiveName = Name;
+    FileName = ArchiveMemberName;
+  } else {
+    ArchiveName = StringRef();
+    FileName = Name;
+  }
+
+  // If we need the symbol table to do the operation then check it here to
+  // produce a good error message as to where the Mach-O file comes from in
+  // the error message.
+  if (Disassemble || IndirectSymbols || FilterSections.size() != 0 ||
+      UnwindInfo)
+    if (Error Err = MachOOF->checkSymbolTable())
+      report_error(ArchiveName, FileName, std::move(Err), ArchitectureName);
 
   if (Disassemble)
-    DisassembleMachO(Filename, MachOOF, "__TEXT", "__text");
+    DisassembleMachO(FileName, MachOOF, "__TEXT", "__text");
   if (IndirectSymbols)
     PrintIndirectSymbols(MachOOF, !NonVerbose);
   if (DataInCode)
@@ -1260,17 +1241,15 @@ static void ProcessMachO(StringRef Filename, MachOObjectFile *MachOOF,
   if (SectionContents)
     PrintSectionContents(MachOOF);
   if (FilterSections.size() != 0)
-    DumpSectionContents(Filename, MachOOF, !NonVerbose);
+    DumpSectionContents(FileName, MachOOF, !NonVerbose);
   if (InfoPlist)
-    DumpInfoPlistSectionContents(Filename, MachOOF);
+    DumpInfoPlistSectionContents(FileName, MachOOF);
   if (DylibsUsed)
     PrintDylibs(MachOOF, false);
   if (DylibId)
     PrintDylibs(MachOOF, true);
-  if (SymbolTable) {
-    StringRef ArchiveName = ArchiveMemberName == StringRef() ? "" : Filename;
+  if (SymbolTable)
     PrintSymbolTable(MachOOF, ArchiveName, ArchitectureName);
-  }
   if (UnwindInfo)
     printMachOUnwindInfo(MachOOF);
   if (PrivateHeaders) {
@@ -1558,12 +1537,13 @@ static void printArchiveChild(StringRef Filename, const Archive::Child &C,
 static void printArchiveHeaders(StringRef Filename, Archive *A, bool verbose,
                                 bool print_offset,
                                 StringRef ArchitectureName = StringRef()) {
-  Error Err;
+  Error Err = Error::success();
+  ;
   for (const auto &C : A->children(Err, false))
     printArchiveChild(Filename, C, verbose, print_offset, ArchitectureName);
 
   if (Err)
-    report_error(Filename, std::move(Err));
+    report_error(StringRef(), Filename, std::move(Err), ArchitectureName);
 }
 
 // ParseInputMachO() parses the named Mach-O file in Filename and handles the
@@ -1586,8 +1566,13 @@ void llvm::ParseInputMachO(StringRef Filename) {
 
   // Attempt to open the binary.
   Expected<OwningBinary<Binary>> BinaryOrErr = createBinary(Filename);
-  if (!BinaryOrErr)
-    report_error(Filename, BinaryOrErr.takeError());
+  if (!BinaryOrErr) {
+    if (auto E = isNotObjectErrorInvalidFileType(BinaryOrErr.takeError()))
+      report_error(Filename, std::move(E));
+    else
+      outs() << Filename << ": is not an object file\n";
+    return;
+  }
   Binary &Bin = *BinaryOrErr.get().getBinary();
 
   if (Archive *A = dyn_cast<Archive>(&Bin)) {
@@ -1595,7 +1580,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
     if (ArchiveHeaders)
       printArchiveHeaders(Filename, A, !NonVerbose, ArchiveMemberOffsets);
 
-    Error Err;
+    Error Err = Error::success();
     for (auto &C : A->children(Err)) {
       Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
       if (!ChildOrErr) {
@@ -1653,7 +1638,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
               if (ArchiveHeaders)
                 printArchiveHeaders(Filename, A.get(), !NonVerbose,
                                     ArchiveMemberOffsets, ArchitectureName);
-              Error Err;
+              Error Err = Error::success();
               for (auto &C : A->children(Err)) {
                 Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
                 if (!ChildOrErr) {
@@ -1709,7 +1694,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
             if (ArchiveHeaders)
               printArchiveHeaders(Filename, A.get(), !NonVerbose,
                                   ArchiveMemberOffsets);
-            Error Err;
+            Error Err = Error::success();
             for (auto &C : A->children(Err)) {
               Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
               if (!ChildOrErr) {
@@ -1761,7 +1746,7 @@ void llvm::ParseInputMachO(StringRef Filename) {
         if (ArchiveHeaders)
           printArchiveHeaders(Filename, A.get(), !NonVerbose,
                               ArchiveMemberOffsets, ArchitectureName);
-        Error Err;
+        Error Err = Error::success();
         for (auto &C : A->children(Err)) {
           Expected<std::unique_ptr<Binary>> ChildOrErr = C.getAsBinary();
           if (!ChildOrErr) {
@@ -1800,10 +1785,6 @@ void llvm::ParseInputMachO(StringRef Filename) {
   llvm_unreachable("Input object can't be invalid at this point");
 }
 
-typedef std::pair<uint64_t, const char *> BindInfoEntry;
-typedef std::vector<BindInfoEntry> BindTable;
-typedef BindTable::iterator bind_table_iterator;
-
 // The block of info used by the Symbolizer call backs.
 struct DisassembleInfo {
   bool verbose;
@@ -1817,7 +1798,7 @@ struct DisassembleInfo {
   char *demangled_name;
   uint64_t adrp_addr;
   uint32_t adrp_inst;
-  BindTable *bindtable;
+  std::unique_ptr<SymbolAddressMap> bindtable;
   uint32_t depth;
 };
 
@@ -1907,13 +1888,8 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
     }
     if (reloc_found && isExtern) {
       Expected<StringRef> SymName = Symbol.getName();
-      if (!SymName) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(SymName.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!SymName)
+        report_error(info->O->getFileName(), SymName.takeError());
       const char *name = SymName->data();
       op_info->AddSymbol.Present = 1;
       op_info->AddSymbol.Name = name;
@@ -1982,13 +1958,8 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
       if (info->O->getAnyRelocationPCRel(RE))
         op_info->Value -= Pc + Offset + Size;
       Expected<StringRef> SymName = Symbol.getName();
-      if (!SymName) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(SymName.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!SymName)
+        report_error(info->O->getFileName(), SymName.takeError());
       const char *name = SymName->data();
       unsigned Type = info->O->getAnyRelocationType(RE);
       if (Type == MachO::X86_64_RELOC_SUBTRACTOR) {
@@ -2004,13 +1975,8 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
           symbol_iterator RelocSymNext = info->O->getSymbolByIndex(SymbolNum);
           Symbol = *RelocSymNext;
           Expected<StringRef> SymNameNext = Symbol.getName();
-          if (!SymNameNext) {
-            std::string Buf;
-            raw_string_ostream OS(Buf);
-            logAllUnhandledErrors(SymNameNext.takeError(), OS, "");
-            OS.flush();
-            report_fatal_error(Buf);
-          }
+          if (!SymNameNext)
+            report_error(info->O->getFileName(), SymNameNext.takeError());
           name = SymNameNext->data();
         }
       }
@@ -2081,13 +2047,8 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
 
     if (isExtern) {
       Expected<StringRef> SymName = Symbol.getName();
-      if (!SymName) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(SymName.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!SymName)
+        report_error(info->O->getFileName(), SymName.takeError());
       const char *name = SymName->data();
       op_info->AddSymbol.Present = 1;
       op_info->AddSymbol.Name = name;
@@ -2109,7 +2070,7 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
     // If we have a branch that is not an external relocation entry then
     // return 0 so the code in tryAddingSymbolicOperand() can use the
     // SymbolLookUp call back with the branch target address to look up the
-    // symbol and possiblity add an annotation for a symbol stub.
+    // symbol and possibility add an annotation for a symbol stub.
     if (isExtern == 0 && (r_type == MachO::ARM_RELOC_BR24 ||
                           r_type == MachO::ARM_THUMB_RELOC_BR22))
       return 0;
@@ -2205,13 +2166,8 @@ static int SymbolizerGetOpInfo(void *DisInfo, uint64_t Pc, uint64_t Offset,
     if (!info->O->getPlainRelocationExternal(RE))
       return 0;
     Expected<StringRef> SymName = Reloc->getSymbol()->getName();
-    if (!SymName) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(SymName.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!SymName)
+      report_error(info->O->getFileName(), SymName.takeError());
     const char *name = SymName->data();
     op_info->AddSymbol.Present = 1;
     op_info->AddSymbol.Name = name;
@@ -2340,13 +2296,8 @@ static const char *GuessIndirectSymbol(uint64_t ReferenceValue,
               symbol_iterator Sym = info->O->getSymbolByIndex(indirect_symbol);
               SymbolRef Symbol = *Sym;
               Expected<StringRef> SymName = Symbol.getName();
-              if (!SymName) {
-                std::string Buf;
-                raw_string_ostream OS(Buf);
-                logAllUnhandledErrors(SymName.takeError(), OS, "");
-                OS.flush();
-                report_fatal_error(Buf);
-              }
+              if (!SymName)
+                report_error(info->O->getFileName(), SymName.takeError());
               const char *name = SymName->data();
               return name;
             }
@@ -2380,13 +2331,8 @@ static const char *GuessIndirectSymbol(uint64_t ReferenceValue,
               symbol_iterator Sym = info->O->getSymbolByIndex(indirect_symbol);
               SymbolRef Symbol = *Sym;
               Expected<StringRef> SymName = Symbol.getName();
-              if (!SymName) {
-                std::string Buf;
-                raw_string_ostream OS(Buf);
-                logAllUnhandledErrors(SymName.takeError(), OS, "");
-                OS.flush();
-                report_fatal_error(Buf);
-              }
+              if (!SymName)
+                report_error(info->O->getFileName(), SymName.takeError());
               const char *name = SymName->data();
               return name;
             }
@@ -2614,13 +2560,8 @@ static const char *get_symbol_64(uint32_t sect_offset, SectionRef S,
   if (reloc_found && isExtern) {
     n_value = Symbol.getValue();
     Expected<StringRef> NameOrError = Symbol.getName();
-    if (!NameOrError) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(NameOrError.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!NameOrError)
+      report_error(info->O->getFileName(), NameOrError.takeError());
     StringRef Name = *NameOrError;
     if (!Name.empty()) {
       SymbolName = Name.data();
@@ -4417,12 +4358,7 @@ static bool print_class_ro64_t(uint64_t p, struct DisassembleInfo *info,
   r = get_pointer_64(p, offset, left, S, info);
   if (r == nullptr || left < sizeof(struct class_ro64_t))
     return false;
-  memset(&cro, '\0', sizeof(struct class_ro64_t));
-  if (left < sizeof(struct class_ro64_t)) {
-    memcpy(&cro, r, left);
-    outs() << "   (class_ro_t entends past the end of the section)\n";
-  } else
-    memcpy(&cro, r, sizeof(struct class_ro64_t));
+  memcpy(&cro, r, sizeof(struct class_ro64_t));
   if (info->O->isLittleEndian() != sys::IsLittleEndianHost)
     swapStruct(cro);
   outs() << "                    flags " << format("0x%" PRIx32, cro.flags);
@@ -4619,12 +4555,7 @@ static void print_class64_t(uint64_t p, struct DisassembleInfo *info) {
   r = get_pointer_64(p, offset, left, S, info);
   if (r == nullptr || left < sizeof(struct class64_t))
     return;
-  memset(&c, '\0', sizeof(struct class64_t));
-  if (left < sizeof(struct class64_t)) {
-    memcpy(&c, r, left);
-    outs() << "   (class_t entends past the end of the section)\n";
-  } else
-    memcpy(&c, r, sizeof(struct class64_t));
+  memcpy(&c, r, sizeof(struct class64_t));
   if (info->O->isLittleEndian() != sys::IsLittleEndianHost)
     swapStruct(c);
 
@@ -5343,47 +5274,72 @@ static void printObjc2_64bit_MetaData(MachOObjectFile *O, bool verbose) {
   SectionRef CL = get_section(O, "__OBJC2", "__class_list");
   if (CL == SectionRef())
     CL = get_section(O, "__DATA", "__objc_classlist");
+  if (CL == SectionRef())
+    CL = get_section(O, "__DATA_CONST", "__objc_classlist");
+  if (CL == SectionRef())
+    CL = get_section(O, "__DATA_DIRTY", "__objc_classlist");
   info.S = CL;
   walk_pointer_list_64("class", CL, O, &info, print_class64_t);
 
   SectionRef CR = get_section(O, "__OBJC2", "__class_refs");
   if (CR == SectionRef())
     CR = get_section(O, "__DATA", "__objc_classrefs");
+  if (CR == SectionRef())
+    CR = get_section(O, "__DATA_CONST", "__objc_classrefs");
+  if (CR == SectionRef())
+    CR = get_section(O, "__DATA_DIRTY", "__objc_classrefs");
   info.S = CR;
   walk_pointer_list_64("class refs", CR, O, &info, nullptr);
 
   SectionRef SR = get_section(O, "__OBJC2", "__super_refs");
   if (SR == SectionRef())
     SR = get_section(O, "__DATA", "__objc_superrefs");
+  if (SR == SectionRef())
+    SR = get_section(O, "__DATA_CONST", "__objc_superrefs");
+  if (SR == SectionRef())
+    SR = get_section(O, "__DATA_DIRTY", "__objc_superrefs");
   info.S = SR;
   walk_pointer_list_64("super refs", SR, O, &info, nullptr);
 
   SectionRef CA = get_section(O, "__OBJC2", "__category_list");
   if (CA == SectionRef())
     CA = get_section(O, "__DATA", "__objc_catlist");
+  if (CA == SectionRef())
+    CA = get_section(O, "__DATA_CONST", "__objc_catlist");
+  if (CA == SectionRef())
+    CA = get_section(O, "__DATA_DIRTY", "__objc_catlist");
   info.S = CA;
   walk_pointer_list_64("category", CA, O, &info, print_category64_t);
 
   SectionRef PL = get_section(O, "__OBJC2", "__protocol_list");
   if (PL == SectionRef())
     PL = get_section(O, "__DATA", "__objc_protolist");
+  if (PL == SectionRef())
+    PL = get_section(O, "__DATA_CONST", "__objc_protolist");
+  if (PL == SectionRef())
+    PL = get_section(O, "__DATA_DIRTY", "__objc_protolist");
   info.S = PL;
   walk_pointer_list_64("protocol", PL, O, &info, nullptr);
 
   SectionRef MR = get_section(O, "__OBJC2", "__message_refs");
   if (MR == SectionRef())
     MR = get_section(O, "__DATA", "__objc_msgrefs");
+  if (MR == SectionRef())
+    MR = get_section(O, "__DATA_CONST", "__objc_msgrefs");
+  if (MR == SectionRef())
+    MR = get_section(O, "__DATA_DIRTY", "__objc_msgrefs");
   info.S = MR;
   print_message_refs64(MR, &info);
 
   SectionRef II = get_section(O, "__OBJC2", "__image_info");
   if (II == SectionRef())
     II = get_section(O, "__DATA", "__objc_imageinfo");
+  if (II == SectionRef())
+    II = get_section(O, "__DATA_CONST", "__objc_imageinfo");
+  if (II == SectionRef())
+    II = get_section(O, "__DATA_DIRTY", "__objc_imageinfo");
   info.S = II;
   print_image_info64(II, &info);
-
-  if (info.bindtable != nullptr)
-    delete info.bindtable;
 }
 
 static void printObjc2_32bit_MetaData(MachOObjectFile *O, bool verbose) {
@@ -5412,75 +5368,75 @@ static void printObjc2_32bit_MetaData(MachOObjectFile *O, bool verbose) {
   info.adrp_addr = 0;
   info.adrp_inst = 0;
 
-  const SectionRef CL = get_section(O, "__OBJC2", "__class_list");
-  if (CL != SectionRef()) {
-    info.S = CL;
-    walk_pointer_list_32("class", CL, O, &info, print_class32_t);
-  } else {
-    const SectionRef CL = get_section(O, "__DATA", "__objc_classlist");
-    info.S = CL;
-    walk_pointer_list_32("class", CL, O, &info, print_class32_t);
-  }
+  SectionRef CL = get_section(O, "__OBJC2", "__class_list");
+  if (CL == SectionRef())
+    CL = get_section(O, "__DATA", "__objc_classlist");
+  if (CL == SectionRef())
+    CL = get_section(O, "__DATA_CONST", "__objc_classlist");
+  if (CL == SectionRef())
+    CL = get_section(O, "__DATA_DIRTY", "__objc_classlist");
+  info.S = CL;
+  walk_pointer_list_32("class", CL, O, &info, print_class32_t);
 
-  const SectionRef CR = get_section(O, "__OBJC2", "__class_refs");
-  if (CR != SectionRef()) {
-    info.S = CR;
-    walk_pointer_list_32("class refs", CR, O, &info, nullptr);
-  } else {
-    const SectionRef CR = get_section(O, "__DATA", "__objc_classrefs");
-    info.S = CR;
-    walk_pointer_list_32("class refs", CR, O, &info, nullptr);
-  }
+  SectionRef CR = get_section(O, "__OBJC2", "__class_refs");
+  if (CR == SectionRef())
+    CR = get_section(O, "__DATA", "__objc_classrefs");
+  if (CR == SectionRef())
+    CR = get_section(O, "__DATA_CONST", "__objc_classrefs");
+  if (CR == SectionRef())
+    CR = get_section(O, "__DATA_DIRTY", "__objc_classrefs");
+  info.S = CR;
+  walk_pointer_list_32("class refs", CR, O, &info, nullptr);
 
-  const SectionRef SR = get_section(O, "__OBJC2", "__super_refs");
-  if (SR != SectionRef()) {
-    info.S = SR;
-    walk_pointer_list_32("super refs", SR, O, &info, nullptr);
-  } else {
-    const SectionRef SR = get_section(O, "__DATA", "__objc_superrefs");
-    info.S = SR;
-    walk_pointer_list_32("super refs", SR, O, &info, nullptr);
-  }
+  SectionRef SR = get_section(O, "__OBJC2", "__super_refs");
+  if (SR == SectionRef())
+    SR = get_section(O, "__DATA", "__objc_superrefs");
+  if (SR == SectionRef())
+    SR = get_section(O, "__DATA_CONST", "__objc_superrefs");
+  if (SR == SectionRef())
+    SR = get_section(O, "__DATA_DIRTY", "__objc_superrefs");
+  info.S = SR;
+  walk_pointer_list_32("super refs", SR, O, &info, nullptr);
 
-  const SectionRef CA = get_section(O, "__OBJC2", "__category_list");
-  if (CA != SectionRef()) {
-    info.S = CA;
-    walk_pointer_list_32("category", CA, O, &info, print_category32_t);
-  } else {
-    const SectionRef CA = get_section(O, "__DATA", "__objc_catlist");
-    info.S = CA;
-    walk_pointer_list_32("category", CA, O, &info, print_category32_t);
-  }
+  SectionRef CA = get_section(O, "__OBJC2", "__category_list");
+  if (CA == SectionRef())
+    CA = get_section(O, "__DATA", "__objc_catlist");
+  if (CA == SectionRef())
+    CA = get_section(O, "__DATA_CONST", "__objc_catlist");
+  if (CA == SectionRef())
+    CA = get_section(O, "__DATA_DIRTY", "__objc_catlist");
+  info.S = CA;
+  walk_pointer_list_32("category", CA, O, &info, print_category32_t);
 
-  const SectionRef PL = get_section(O, "__OBJC2", "__protocol_list");
-  if (PL != SectionRef()) {
-    info.S = PL;
-    walk_pointer_list_32("protocol", PL, O, &info, nullptr);
-  } else {
-    const SectionRef PL = get_section(O, "__DATA", "__objc_protolist");
-    info.S = PL;
-    walk_pointer_list_32("protocol", PL, O, &info, nullptr);
-  }
+  SectionRef PL = get_section(O, "__OBJC2", "__protocol_list");
+  if (PL == SectionRef())
+    PL = get_section(O, "__DATA", "__objc_protolist");
+  if (PL == SectionRef())
+    PL = get_section(O, "__DATA_CONST", "__objc_protolist");
+  if (PL == SectionRef())
+    PL = get_section(O, "__DATA_DIRTY", "__objc_protolist");
+  info.S = PL;
+  walk_pointer_list_32("protocol", PL, O, &info, nullptr);
 
-  const SectionRef MR = get_section(O, "__OBJC2", "__message_refs");
-  if (MR != SectionRef()) {
-    info.S = MR;
-    print_message_refs32(MR, &info);
-  } else {
-    const SectionRef MR = get_section(O, "__DATA", "__objc_msgrefs");
-    info.S = MR;
-    print_message_refs32(MR, &info);
-  }
+  SectionRef MR = get_section(O, "__OBJC2", "__message_refs");
+  if (MR == SectionRef())
+    MR = get_section(O, "__DATA", "__objc_msgrefs");
+  if (MR == SectionRef())
+    MR = get_section(O, "__DATA_CONST", "__objc_msgrefs");
+  if (MR == SectionRef())
+    MR = get_section(O, "__DATA_DIRTY", "__objc_msgrefs");
+  info.S = MR;
+  print_message_refs32(MR, &info);
 
-  const SectionRef II = get_section(O, "__OBJC2", "__image_info");
-  if (II != SectionRef()) {
-    info.S = II;
-    print_image_info32(II, &info);
-  } else {
-    const SectionRef II = get_section(O, "__DATA", "__objc_imageinfo");
-    info.S = II;
-    print_image_info32(II, &info);
-  }
+  SectionRef II = get_section(O, "__OBJC2", "__image_info");
+  if (II == SectionRef())
+    II = get_section(O, "__DATA", "__objc_imageinfo");
+  if (II == SectionRef())
+    II = get_section(O, "__DATA_CONST", "__objc_imageinfo");
+  if (II == SectionRef())
+    II = get_section(O, "__DATA_DIRTY", "__objc_imageinfo");
+  info.S = II;
+  print_image_info32(II, &info);
 }
 
 static bool printObjc1_32bit_MetaData(MachOObjectFile *O, bool verbose) {
@@ -6240,11 +6196,9 @@ static const char *GuessLiteralPointer(uint64_t ReferenceValue,
 // Out type and the ReferenceName will also be set which is added as a comment
 // to the disassembled instruction.
 //
-#if HAVE_CXXABI_H
 // If the symbol name is a C++ mangled name then the demangled name is
 // returned through ReferenceName and ReferenceType is set to
 // LLVMDisassembler_ReferenceType_DeMangled_Name .
-#endif
 //
 // When this is called to get a symbol name for a branch target then the
 // ReferenceType will be LLVMDisassembler_ReferenceType_In_Branch and then
@@ -6279,21 +6233,18 @@ static const char *SymbolizerSymbolLookUp(void *DisInfo,
       method_reference(info, ReferenceType, ReferenceName);
       if (*ReferenceType != LLVMDisassembler_ReferenceType_Out_Objc_Message)
         *ReferenceType = LLVMDisassembler_ReferenceType_Out_SymbolStub;
-    } else
-#if HAVE_CXXABI_H
-        if (SymbolName != nullptr && strncmp(SymbolName, "__Z", 3) == 0) {
+    } else if (SymbolName != nullptr && strncmp(SymbolName, "__Z", 3) == 0) {
       if (info->demangled_name != nullptr)
         free(info->demangled_name);
       int status;
       info->demangled_name =
-          abi::__cxa_demangle(SymbolName + 1, nullptr, nullptr, &status);
+          itaniumDemangle(SymbolName + 1, nullptr, nullptr, &status);
       if (info->demangled_name != nullptr) {
         *ReferenceName = info->demangled_name;
         *ReferenceType = LLVMDisassembler_ReferenceType_DeMangled_Name;
       } else
         *ReferenceType = LLVMDisassembler_ReferenceType_InOut_None;
     } else
-#endif
       *ReferenceType = LLVMDisassembler_ReferenceType_InOut_None;
   } else if (*ReferenceType == LLVMDisassembler_ReferenceType_In_PCrel_Load) {
     *ReferenceName =
@@ -6382,20 +6333,17 @@ static const char *SymbolizerSymbolLookUp(void *DisInfo,
         GuessLiteralPointer(ReferenceValue, ReferencePC, ReferenceType, info);
     if (*ReferenceName == nullptr)
       *ReferenceType = LLVMDisassembler_ReferenceType_InOut_None;
-  }
-#if HAVE_CXXABI_H
-  else if (SymbolName != nullptr && strncmp(SymbolName, "__Z", 3) == 0) {
+  } else if (SymbolName != nullptr && strncmp(SymbolName, "__Z", 3) == 0) {
     if (info->demangled_name != nullptr)
       free(info->demangled_name);
     int status;
     info->demangled_name =
-        abi::__cxa_demangle(SymbolName + 1, nullptr, nullptr, &status);
+        itaniumDemangle(SymbolName + 1, nullptr, nullptr, &status);
     if (info->demangled_name != nullptr) {
       *ReferenceName = info->demangled_name;
       *ReferenceType = LLVMDisassembler_ReferenceType_DeMangled_Name;
     }
   }
-#endif
   else {
     *ReferenceName = nullptr;
     *ReferenceType = LLVMDisassembler_ReferenceType_InOut_None;
@@ -6413,7 +6361,7 @@ static void emitComments(raw_svector_ostream &CommentStream,
   // Flush the stream before taking its content.
   StringRef Comments = CommentsToEmit.str();
   // Get the default information for printing a comment.
-  const char *CommentBegin = MAI.getCommentString();
+  StringRef CommentBegin = MAI.getCommentString();
   unsigned CommentColumn = MAI.getCommentColumn();
   bool IsFirst = true;
   while (!Comments.empty()) {
@@ -6630,25 +6578,15 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     bool DisSymNameFound = false;
     for (const SymbolRef &Symbol : MachOOF->symbols()) {
       Expected<SymbolRef::Type> STOrErr = Symbol.getType();
-      if (!STOrErr) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(STOrErr.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!STOrErr)
+        report_error(MachOOF->getFileName(), STOrErr.takeError());
       SymbolRef::Type ST = *STOrErr;
       if (ST == SymbolRef::ST_Function || ST == SymbolRef::ST_Data ||
           ST == SymbolRef::ST_Other) {
         uint64_t Address = Symbol.getValue();
         Expected<StringRef> SymNameOrErr = Symbol.getName();
-        if (!SymNameOrErr) {
-          std::string Buf;
-          raw_string_ostream OS(Buf);
-          logAllUnhandledErrors(SymNameOrErr.takeError(), OS, "");
-          OS.flush();
-          report_fatal_error(Buf);
-        }
+        if (!SymNameOrErr)
+          report_error(MachOOF->getFileName(), SymNameOrErr.takeError());
         StringRef SymName = *SymNameOrErr;
         AddrMap[Address] = SymName;
         if (!DisSymName.empty() && DisSymName == SymName)
@@ -6692,26 +6630,22 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
     if (Bytes.size() == 0)
       return;
 
+    // If the section has symbols but no symbol at the start of the section
+    // these are used to make sure the bytes before the first symbol are
+    // disassembled.
+    bool FirstSymbol = true;
+    bool FirstSymbolAtSectionStart = true;
+
     // Disassemble symbol by symbol.
     for (unsigned SymIdx = 0; SymIdx != Symbols.size(); SymIdx++) {
       Expected<StringRef> SymNameOrErr = Symbols[SymIdx].getName();
-      if (!SymNameOrErr) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(SymNameOrErr.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!SymNameOrErr)
+        report_error(MachOOF->getFileName(), SymNameOrErr.takeError());
       StringRef SymName = *SymNameOrErr;
 
       Expected<SymbolRef::Type> STOrErr = Symbols[SymIdx].getType();
-      if (!STOrErr) {
-        std::string Buf;
-        raw_string_ostream OS(Buf);
-        logAllUnhandledErrors(STOrErr.takeError(), OS, "");
-        OS.flush();
-        report_fatal_error(Buf);
-      }
+      if (!STOrErr)
+        report_error(MachOOF->getFileName(), STOrErr.takeError());
       SymbolRef::Type ST = *STOrErr;
       if (ST != SymbolRef::ST_Function && ST != SymbolRef::ST_Data)
         continue;
@@ -6766,13 +6700,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       uint64_t NextSymIdx = SymIdx + 1;
       while (Symbols.size() > NextSymIdx) {
         Expected<SymbolRef::Type> STOrErr = Symbols[NextSymIdx].getType();
-        if (!STOrErr) {
-          std::string Buf;
-          raw_string_ostream OS(Buf);
-          logAllUnhandledErrors(STOrErr.takeError(), OS, "");
-          OS.flush();
-          report_fatal_error(Buf);
-        }
+        if (!STOrErr)
+          report_error(MachOOF->getFileName(), STOrErr.takeError());
         SymbolRef::Type NextSymType = *STOrErr;
         if (NextSymType == SymbolRef::ST_Function) {
           containsNextSym =
@@ -6796,10 +6725,28 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       // (i.e. we're not targeting M-class) and the function is Thumb.
       bool UseThumbTarget = IsThumb && ThumbTarget;
 
-      outs() << SymName << ":\n";
+      // If we are not specifying a symbol to start disassembly with and this
+      // is the first symbol in the section but not at the start of the section
+      // then move the disassembly index to the start of the section and
+      // don't print the symbol name just yet.  This is so the bytes before the
+      // first symbol are disassembled.
+      uint64_t SymbolStart = Start;
+      if (DisSymName.empty() && FirstSymbol && Start != 0) {
+        FirstSymbolAtSectionStart = false;
+        Start = 0;
+      }
+      else
+        outs() << SymName << ":\n";
+
       DILineInfo lastLine;
       for (uint64_t Index = Start; Index < End; Index += Size) {
         MCInst Inst;
+
+        // If this is the first symbol in the section and it was not at the
+        // start of the section, see if we are at its Index now and if so print
+        // the symbol name.
+        if (FirstSymbol && !FirstSymbolAtSectionStart && Index == SymbolStart)
+          outs() << SymName << ":\n";
 
         uint64_t PC = SectAddress + Index;
         if (!NoLeadingAddr) {
@@ -6893,6 +6840,9 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
           }
         }
       }
+      // Now that we are done disassembled the first symbol set the bool that
+      // were doing this to false.
+      FirstSymbol = false;
     }
     if (!symbolTableWorked) {
       // Reading the symbol table didn't work, disassemble the whole section.
@@ -6903,8 +6853,10 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
         MCInst Inst;
 
         uint64_t PC = SectAddress + Index;
+        SmallVector<char, 64> AnnotationsBytes;
+        raw_svector_ostream Annotations(AnnotationsBytes);
         if (DisAsm->getInstruction(Inst, InstSize, Bytes.slice(Index), PC,
-                                   DebugOut, nulls())) {
+                                   DebugOut, Annotations)) {
           if (!NoLeadingAddr) {
             if (FullLeadingAddr) {
               if (MachOOF->is64Bit())
@@ -6919,7 +6871,8 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
             outs() << "\t";
             dumpBytes(makeArrayRef(Bytes.data() + Index, InstSize), outs());
           }
-          IP->printInst(&Inst, outs(), "", *STI);
+          StringRef AnnotationsStr = Annotations.str();
+          IP->printInst(&Inst, outs(), AnnotationsStr, *STI);
           outs() << "\n";
         } else {
           unsigned int Arch = MachOOF->getArch();
@@ -6944,14 +6897,10 @@ static void DisassembleMachO(StringRef Filename, MachOObjectFile *MachOOF,
       free(SymbolizerInfo.method);
     if (SymbolizerInfo.demangled_name != nullptr)
       free(SymbolizerInfo.demangled_name);
-    if (SymbolizerInfo.bindtable != nullptr)
-      delete SymbolizerInfo.bindtable;
     if (ThumbSymbolizerInfo.method != nullptr)
       free(ThumbSymbolizerInfo.method);
     if (ThumbSymbolizerInfo.demangled_name != nullptr)
       free(ThumbSymbolizerInfo.demangled_name);
-    if (ThumbSymbolizerInfo.bindtable != nullptr)
-      delete ThumbSymbolizerInfo.bindtable;
   }
 }
 
@@ -7018,13 +6967,8 @@ static void findUnwindRelocNameAddend(const MachOObjectFile *Obj,
                                       StringRef &Name, uint64_t &Addend) {
   if (Reloc.getSymbol() != Obj->symbol_end()) {
     Expected<StringRef> NameOrErr = Reloc.getSymbol()->getName();
-    if (!NameOrErr) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(NameOrErr.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!NameOrErr)
+      report_error(Obj->getFileName(), NameOrErr.takeError());
     Name = *NameOrErr;
     Addend = Addr;
     return;
@@ -7048,24 +6992,14 @@ static void findUnwindRelocNameAddend(const MachOObjectFile *Obj,
   --Sym;
 
   auto SectOrErr = Sym->second.getSection();
-  if (!SectOrErr) {
-    std::string Buf;
-    raw_string_ostream OS(Buf);
-    logAllUnhandledErrors(SectOrErr.takeError(), OS, "");
-    OS.flush();
-    report_fatal_error(Buf);
-  }
+  if (!SectOrErr)
+    report_error(Obj->getFileName(), SectOrErr.takeError());
   section_iterator SymSection = *SectOrErr;
   if (RelocSection == *SymSection) {
     // There's a valid symbol in the same section before this reference.
     Expected<StringRef> NameOrErr = Sym->second.getName();
-    if (!NameOrErr) {
-      std::string Buf;
-      raw_string_ostream OS(Buf);
-      logAllUnhandledErrors(NameOrErr.takeError(), OS, "");
-      OS.flush();
-      report_fatal_error(Buf);
-    }
+    if (!NameOrErr)
+      report_error(Obj->getFileName(), NameOrErr.takeError());
     Name = *NameOrErr;
     Addend = Addr - Sym->first;
     return;
@@ -7771,9 +7705,9 @@ static void PrintSegmentCommand(uint32_t cmd, uint32_t cmdsize,
     if ((initprot &
          ~(MachO::VM_PROT_READ | MachO::VM_PROT_WRITE |
            MachO::VM_PROT_EXECUTE)) != 0)
-      outs() << "  initprot ?" << format("0x%08" PRIx32, initprot) << "\n";
+      outs() << " initprot ?" << format("0x%08" PRIx32, initprot) << "\n";
     else {
-      outs() << "  initprot ";
+      outs() << " initprot ";
       outs() << ((initprot & MachO::VM_PROT_READ) ? "r" : "-");
       outs() << ((initprot & MachO::VM_PROT_WRITE) ? "w" : "-");
       outs() << ((initprot & MachO::VM_PROT_EXECUTE) ? "x\n" : "-\n");
@@ -8298,6 +8232,51 @@ static void PrintVersionMinLoadCommand(MachO::version_min_command vd) {
   outs() << "\n";
 }
 
+static void PrintNoteLoadCommand(MachO::note_command Nt) {
+  outs() << "       cmd LC_NOTE\n";
+  outs() << "   cmdsize " << Nt.cmdsize;
+  if (Nt.cmdsize != sizeof(struct MachO::note_command))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  const char *d = Nt.data_owner;
+  outs() << "data_owner " << format("%.16s\n", d);
+  outs() << "    offset " << Nt.offset << "\n";
+  outs() << "      size " << Nt.size << "\n";
+}
+
+static void PrintBuildToolVersion(MachO::build_tool_version bv) {
+  outs() << "      tool " << MachOObjectFile::getBuildTool(bv.tool) << "\n";
+  outs() << "   version " << MachOObjectFile::getVersionString(bv.version)
+         << "\n";
+}
+
+static void PrintBuildVersionLoadCommand(const MachOObjectFile *obj,
+                                         MachO::build_version_command bd) {
+  outs() << "       cmd LC_BUILD_VERSION\n";
+  outs() << "   cmdsize " << bd.cmdsize;
+  if (bd.cmdsize !=
+      sizeof(struct MachO::build_version_command) +
+          bd.ntools * sizeof(struct MachO::build_tool_version))
+    outs() << " Incorrect size\n";
+  else
+    outs() << "\n";
+  outs() << "  platform " << MachOObjectFile::getBuildPlatform(bd.platform)
+         << "\n";
+  if (bd.sdk)
+    outs() << "       sdk " << MachOObjectFile::getVersionString(bd.sdk)
+           << "\n";
+  else
+    outs() << "       sdk n/a\n";
+  outs() << "     minos " << MachOObjectFile::getVersionString(bd.minos)
+         << "\n";
+  outs() << "    ntools " << bd.ntools << "\n";
+  for (unsigned i = 0; i < bd.ntools; ++i) {
+    MachO::build_tool_version bv = obj->getBuildToolVersion(i);
+    PrintBuildToolVersion(bv);
+  }
+}
+
 static void PrintSourceVersionCommand(MachO::source_version_command sd) {
   outs() << "      cmd LC_SOURCE_VERSION\n";
   outs() << "  cmdsize " << sd.cmdsize;
@@ -8503,6 +8482,25 @@ static void PrintRoutinesCommand64(MachO::routines_command_64 r) {
   outs() << "    reserved6 " << r.reserved6 << "\n";
 }
 
+static void Print_x86_thread_state32_t(MachO::x86_thread_state32_t &cpu32) {
+  outs() << "\t    eax " << format("0x%08" PRIx32, cpu32.eax);
+  outs() << " ebx    " << format("0x%08" PRIx32, cpu32.ebx);
+  outs() << " ecx " << format("0x%08" PRIx32, cpu32.ecx);
+  outs() << " edx " << format("0x%08" PRIx32, cpu32.edx) << "\n";
+  outs() << "\t    edi " << format("0x%08" PRIx32, cpu32.edi);
+  outs() << " esi    " << format("0x%08" PRIx32, cpu32.esi);
+  outs() << " ebp " << format("0x%08" PRIx32, cpu32.ebp);
+  outs() << " esp " << format("0x%08" PRIx32, cpu32.esp) << "\n";
+  outs() << "\t    ss  " << format("0x%08" PRIx32, cpu32.ss);
+  outs() << " eflags " << format("0x%08" PRIx32, cpu32.eflags);
+  outs() << " eip " << format("0x%08" PRIx32, cpu32.eip);
+  outs() << " cs  " << format("0x%08" PRIx32, cpu32.cs) << "\n";
+  outs() << "\t    ds  " << format("0x%08" PRIx32, cpu32.ds);
+  outs() << " es     " << format("0x%08" PRIx32, cpu32.es);
+  outs() << " fs  " << format("0x%08" PRIx32, cpu32.fs);
+  outs() << " gs  " << format("0x%08" PRIx32, cpu32.gs) << "\n";
+}
+
 static void Print_x86_thread_state64_t(MachO::x86_thread_state64_t &cpu64) {
   outs() << "   rax  " << format("0x%016" PRIx64, cpu64.rax);
   outs() << " rbx " << format("0x%016" PRIx64, cpu64.rbx);
@@ -8666,6 +8664,63 @@ static void Print_x86_exception_state_t(MachO::x86_exception_state64_t &exc64) {
   outs() << " faultvaddr " << format("0x%016" PRIx64, exc64.faultvaddr) << "\n";
 }
 
+static void Print_arm_thread_state32_t(MachO::arm_thread_state32_t &cpu32) {
+  outs() << "\t    r0  " << format("0x%08" PRIx32, cpu32.r[0]);
+  outs() << " r1     "   << format("0x%08" PRIx32, cpu32.r[1]);
+  outs() << " r2  "      << format("0x%08" PRIx32, cpu32.r[2]);
+  outs() << " r3  "      << format("0x%08" PRIx32, cpu32.r[3]) << "\n";
+  outs() << "\t    r4  " << format("0x%08" PRIx32, cpu32.r[4]);
+  outs() << " r5     "   << format("0x%08" PRIx32, cpu32.r[5]);
+  outs() << " r6  "      << format("0x%08" PRIx32, cpu32.r[6]);
+  outs() << " r7  "      << format("0x%08" PRIx32, cpu32.r[7]) << "\n";
+  outs() << "\t    r8  " << format("0x%08" PRIx32, cpu32.r[8]);
+  outs() << " r9     "   << format("0x%08" PRIx32, cpu32.r[9]);
+  outs() << " r10 "      << format("0x%08" PRIx32, cpu32.r[10]);
+  outs() << " r11 "      << format("0x%08" PRIx32, cpu32.r[11]) << "\n";
+  outs() << "\t    r12 " << format("0x%08" PRIx32, cpu32.r[12]);
+  outs() << " sp     "   << format("0x%08" PRIx32, cpu32.sp);
+  outs() << " lr  "      << format("0x%08" PRIx32, cpu32.lr);
+  outs() << " pc  "      << format("0x%08" PRIx32, cpu32.pc) << "\n";
+  outs() << "\t   cpsr " << format("0x%08" PRIx32, cpu32.cpsr) << "\n";
+}
+
+static void Print_arm_thread_state64_t(MachO::arm_thread_state64_t &cpu64) {
+  outs() << "\t    x0  " << format("0x%016" PRIx64, cpu64.x[0]);
+  outs() << " x1  "      << format("0x%016" PRIx64, cpu64.x[1]);
+  outs() << " x2  "      << format("0x%016" PRIx64, cpu64.x[2]) << "\n";
+  outs() << "\t    x3  " << format("0x%016" PRIx64, cpu64.x[3]);
+  outs() << " x4  "      << format("0x%016" PRIx64, cpu64.x[4]);
+  outs() << " x5  "      << format("0x%016" PRIx64, cpu64.x[5]) << "\n";
+  outs() << "\t    x6  " << format("0x%016" PRIx64, cpu64.x[6]);
+  outs() << " x7  "      << format("0x%016" PRIx64, cpu64.x[7]);
+  outs() << " x8  "      << format("0x%016" PRIx64, cpu64.x[8]) << "\n";
+  outs() << "\t    x9  " << format("0x%016" PRIx64, cpu64.x[9]);
+  outs() << " x10 "      << format("0x%016" PRIx64, cpu64.x[10]);
+  outs() << " x11 "      << format("0x%016" PRIx64, cpu64.x[11]) << "\n";
+  outs() << "\t    x12 " << format("0x%016" PRIx64, cpu64.x[12]);
+  outs() << " x13 "      << format("0x%016" PRIx64, cpu64.x[13]);
+  outs() << " x14 "      << format("0x%016" PRIx64, cpu64.x[14]) << "\n";
+  outs() << "\t    x15 " << format("0x%016" PRIx64, cpu64.x[15]);
+  outs() << " x16 "      << format("0x%016" PRIx64, cpu64.x[16]);
+  outs() << " x17 "      << format("0x%016" PRIx64, cpu64.x[17]) << "\n";
+  outs() << "\t    x18 " << format("0x%016" PRIx64, cpu64.x[18]);
+  outs() << " x19 "      << format("0x%016" PRIx64, cpu64.x[19]);
+  outs() << " x20 "      << format("0x%016" PRIx64, cpu64.x[20]) << "\n";
+  outs() << "\t    x21 " << format("0x%016" PRIx64, cpu64.x[21]);
+  outs() << " x22 "      << format("0x%016" PRIx64, cpu64.x[22]);
+  outs() << " x23 "      << format("0x%016" PRIx64, cpu64.x[23]) << "\n";
+  outs() << "\t    x24 " << format("0x%016" PRIx64, cpu64.x[24]);
+  outs() << " x25 "      << format("0x%016" PRIx64, cpu64.x[25]);
+  outs() << " x26 "      << format("0x%016" PRIx64, cpu64.x[26]) << "\n";
+  outs() << "\t    x27 " << format("0x%016" PRIx64, cpu64.x[27]);
+  outs() << " x28 "      << format("0x%016" PRIx64, cpu64.x[28]);
+  outs() << "  fp "      << format("0x%016" PRIx64, cpu64.fp) << "\n";
+  outs() << "\t     lr " << format("0x%016" PRIx64, cpu64.lr);
+  outs() << " sp  "      << format("0x%016" PRIx64, cpu64.sp);
+  outs() << "  pc "      << format("0x%016" PRIx64, cpu64.pc) << "\n";
+  outs() << "\t   cpsr " << format("0x%08"  PRIx32, cpu64.cpsr) << "\n";
+}
+
 static void PrintThreadCommand(MachO::thread_command t, const char *Ptr,
                                bool isLittleEndian, uint32_t cputype) {
   if (t.cmd == MachO::LC_THREAD)
@@ -8683,7 +8738,85 @@ static void PrintThreadCommand(MachO::thread_command t, const char *Ptr,
   const char *begin = Ptr + sizeof(struct MachO::thread_command);
   const char *end = Ptr + t.cmdsize;
   uint32_t flavor, count, left;
-  if (cputype == MachO::CPU_TYPE_X86_64) {
+  if (cputype == MachO::CPU_TYPE_I386) {
+    while (begin < end) {
+      if (end - begin > (ptrdiff_t)sizeof(uint32_t)) {
+        memcpy((char *)&flavor, begin, sizeof(uint32_t));
+        begin += sizeof(uint32_t);
+      } else {
+        flavor = 0;
+        begin = end;
+      }
+      if (isLittleEndian != sys::IsLittleEndianHost)
+        sys::swapByteOrder(flavor);
+      if (end - begin > (ptrdiff_t)sizeof(uint32_t)) {
+        memcpy((char *)&count, begin, sizeof(uint32_t));
+        begin += sizeof(uint32_t);
+      } else {
+        count = 0;
+        begin = end;
+      }
+      if (isLittleEndian != sys::IsLittleEndianHost)
+        sys::swapByteOrder(count);
+      if (flavor == MachO::x86_THREAD_STATE32) {
+        outs() << "     flavor i386_THREAD_STATE\n";
+        if (count == MachO::x86_THREAD_STATE32_COUNT)
+          outs() << "      count i386_THREAD_STATE_COUNT\n";
+        else
+          outs() << "      count " << count
+                 << " (not x86_THREAD_STATE32_COUNT)\n";
+        MachO::x86_thread_state32_t cpu32;
+        left = end - begin;
+        if (left >= sizeof(MachO::x86_thread_state32_t)) {
+          memcpy(&cpu32, begin, sizeof(MachO::x86_thread_state32_t));
+          begin += sizeof(MachO::x86_thread_state32_t);
+        } else {
+          memset(&cpu32, '\0', sizeof(MachO::x86_thread_state32_t));
+          memcpy(&cpu32, begin, left);
+          begin += left;
+        }
+        if (isLittleEndian != sys::IsLittleEndianHost)
+          swapStruct(cpu32);
+        Print_x86_thread_state32_t(cpu32);
+      } else if (flavor == MachO::x86_THREAD_STATE) {
+        outs() << "     flavor x86_THREAD_STATE\n";
+        if (count == MachO::x86_THREAD_STATE_COUNT)
+          outs() << "      count x86_THREAD_STATE_COUNT\n";
+        else
+          outs() << "      count " << count
+                 << " (not x86_THREAD_STATE_COUNT)\n";
+        struct MachO::x86_thread_state_t ts;
+        left = end - begin;
+        if (left >= sizeof(MachO::x86_thread_state_t)) {
+          memcpy(&ts, begin, sizeof(MachO::x86_thread_state_t));
+          begin += sizeof(MachO::x86_thread_state_t);
+        } else {
+          memset(&ts, '\0', sizeof(MachO::x86_thread_state_t));
+          memcpy(&ts, begin, left);
+          begin += left;
+        }
+        if (isLittleEndian != sys::IsLittleEndianHost)
+          swapStruct(ts);
+        if (ts.tsh.flavor == MachO::x86_THREAD_STATE32) {
+          outs() << "\t    tsh.flavor x86_THREAD_STATE32 ";
+          if (ts.tsh.count == MachO::x86_THREAD_STATE32_COUNT)
+            outs() << "tsh.count x86_THREAD_STATE32_COUNT\n";
+          else
+            outs() << "tsh.count " << ts.tsh.count
+                   << " (not x86_THREAD_STATE32_COUNT\n";
+          Print_x86_thread_state32_t(ts.uts.ts32);
+        } else {
+          outs() << "\t    tsh.flavor " << ts.tsh.flavor << "  tsh.count "
+                 << ts.tsh.count << "\n";
+        }
+      } else {
+        outs() << "     flavor " << flavor << " (unknown)\n";
+        outs() << "      count " << count << "\n";
+        outs() << "      state (unknown)\n";
+        begin += count * sizeof(uint32_t);
+      }
+    }
+  } else if (cputype == MachO::CPU_TYPE_X86_64) {
     while (begin < end) {
       if (end - begin > (ptrdiff_t)sizeof(uint32_t)) {
         memcpy((char *)&flavor, begin, sizeof(uint32_t));
@@ -8815,6 +8948,100 @@ static void PrintThreadCommand(MachO::thread_command t, const char *Ptr,
           outs() << "\t    esh.flavor " << es.esh.flavor << "  esh.count "
                  << es.esh.count << "\n";
         }
+      } else {
+        outs() << "     flavor " << flavor << " (unknown)\n";
+        outs() << "      count " << count << "\n";
+        outs() << "      state (unknown)\n";
+        begin += count * sizeof(uint32_t);
+      }
+    }
+  } else if (cputype == MachO::CPU_TYPE_ARM) {
+    while (begin < end) {
+      if (end - begin > (ptrdiff_t)sizeof(uint32_t)) {
+        memcpy((char *)&flavor, begin, sizeof(uint32_t));
+        begin += sizeof(uint32_t);
+      } else {
+        flavor = 0;
+        begin = end;
+      }
+      if (isLittleEndian != sys::IsLittleEndianHost)
+        sys::swapByteOrder(flavor);
+      if (end - begin > (ptrdiff_t)sizeof(uint32_t)) {
+        memcpy((char *)&count, begin, sizeof(uint32_t));
+        begin += sizeof(uint32_t);
+      } else {
+        count = 0;
+        begin = end;
+      }
+      if (isLittleEndian != sys::IsLittleEndianHost)
+        sys::swapByteOrder(count);
+      if (flavor == MachO::ARM_THREAD_STATE) {
+        outs() << "     flavor ARM_THREAD_STATE\n";
+        if (count == MachO::ARM_THREAD_STATE_COUNT)
+          outs() << "      count ARM_THREAD_STATE_COUNT\n";
+        else
+          outs() << "      count " << count
+                 << " (not ARM_THREAD_STATE_COUNT)\n";
+        MachO::arm_thread_state32_t cpu32;
+        left = end - begin;
+        if (left >= sizeof(MachO::arm_thread_state32_t)) {
+          memcpy(&cpu32, begin, sizeof(MachO::arm_thread_state32_t));
+          begin += sizeof(MachO::arm_thread_state32_t);
+        } else {
+          memset(&cpu32, '\0', sizeof(MachO::arm_thread_state32_t));
+          memcpy(&cpu32, begin, left);
+          begin += left;
+        }
+        if (isLittleEndian != sys::IsLittleEndianHost)
+          swapStruct(cpu32);
+        Print_arm_thread_state32_t(cpu32);
+      } else {
+        outs() << "     flavor " << flavor << " (unknown)\n";
+        outs() << "      count " << count << "\n";
+        outs() << "      state (unknown)\n";
+        begin += count * sizeof(uint32_t);
+      }
+    }
+  } else if (cputype == MachO::CPU_TYPE_ARM64) {
+    while (begin < end) {
+      if (end - begin > (ptrdiff_t)sizeof(uint32_t)) {
+        memcpy((char *)&flavor, begin, sizeof(uint32_t));
+        begin += sizeof(uint32_t);
+      } else {
+        flavor = 0;
+        begin = end;
+      }
+      if (isLittleEndian != sys::IsLittleEndianHost)
+        sys::swapByteOrder(flavor);
+      if (end - begin > (ptrdiff_t)sizeof(uint32_t)) {
+        memcpy((char *)&count, begin, sizeof(uint32_t));
+        begin += sizeof(uint32_t);
+      } else {
+        count = 0;
+        begin = end;
+      }
+      if (isLittleEndian != sys::IsLittleEndianHost)
+        sys::swapByteOrder(count);
+      if (flavor == MachO::ARM_THREAD_STATE64) {
+        outs() << "     flavor ARM_THREAD_STATE64\n";
+        if (count == MachO::ARM_THREAD_STATE64_COUNT)
+          outs() << "      count ARM_THREAD_STATE64_COUNT\n";
+        else
+          outs() << "      count " << count
+                 << " (not ARM_THREAD_STATE64_COUNT)\n";
+        MachO::arm_thread_state64_t cpu64;
+        left = end - begin;
+        if (left >= sizeof(MachO::arm_thread_state64_t)) {
+          memcpy(&cpu64, begin, sizeof(MachO::arm_thread_state64_t));
+          begin += sizeof(MachO::arm_thread_state64_t);
+        } else {
+          memset(&cpu64, '\0', sizeof(MachO::arm_thread_state64_t));
+          memcpy(&cpu64, begin, left);
+          begin += left;
+        }
+        if (isLittleEndian != sys::IsLittleEndianHost)
+          swapStruct(cpu64);
+        Print_arm_thread_state64_t(cpu64);
       } else {
         outs() << "     flavor " << flavor << " (unknown)\n";
         outs() << "      count " << count << "\n";
@@ -8992,6 +9219,13 @@ static void PrintLoadCommands(const MachOObjectFile *Obj, uint32_t filetype,
                Command.C.cmd == MachO::LC_VERSION_MIN_WATCHOS) {
       MachO::version_min_command Vd = Obj->getVersionMinLoadCommand(Command);
       PrintVersionMinLoadCommand(Vd);
+    } else if (Command.C.cmd == MachO::LC_NOTE) {
+      MachO::note_command Nt = Obj->getNoteLoadCommand(Command);
+      PrintNoteLoadCommand(Nt);
+    } else if (Command.C.cmd == MachO::LC_BUILD_VERSION) {
+      MachO::build_version_command Bv =
+          Obj->getBuildVersionLoadCommand(Command);
+      PrintBuildVersionLoadCommand(Obj, Bv);
     } else if (Command.C.cmd == MachO::LC_SOURCE_VERSION) {
       MachO::source_version_command Sd = Obj->getSourceVersionCommand(Command);
       PrintSourceVersionCommand(Sd);
@@ -9394,29 +9628,19 @@ void llvm::printMachOWeakBindTable(const object::MachOObjectFile *Obj) {
 static const char *get_dyld_bind_info_symbolname(uint64_t ReferenceValue,
                                                  struct DisassembleInfo *info) {
   if (info->bindtable == nullptr) {
-    info->bindtable = new (BindTable);
+    info->bindtable = llvm::make_unique<SymbolAddressMap>();
     SegInfo sectionTable(info->O);
     for (const llvm::object::MachOBindEntry &Entry : info->O->bindTable()) {
       uint32_t SegIndex = Entry.segmentIndex();
       uint64_t OffsetInSeg = Entry.segmentOffset();
       if (!sectionTable.isValidSegIndexAndOffset(SegIndex, OffsetInSeg))
-        continue;
+        return nullptr;
       uint64_t Address = sectionTable.address(SegIndex, OffsetInSeg);
-      const char *SymbolName = nullptr;
       StringRef name = Entry.symbolName();
       if (!name.empty())
-        SymbolName = name.data();
-      info->bindtable->push_back(std::make_pair(Address, SymbolName));
+        (*info->bindtable)[Address] = name;
     }
   }
-  for (bind_table_iterator BI = info->bindtable->begin(),
-                           BE = info->bindtable->end();
-       BI != BE; ++BI) {
-    uint64_t Address = BI->first;
-    if (ReferenceValue == Address) {
-      const char *SymbolName = BI->second;
-      return SymbolName;
-    }
-  }
-  return nullptr;
+  auto name = info->bindtable->lookup(ReferenceValue);
+  return !name.empty() ? name.data() : nullptr;
 }

@@ -760,6 +760,8 @@ define void @fastmathflags(float %op1, float %op2) {
   ; CHECK: %f.nsz = fadd nsz float %op1, %op2
   %f.arcp = fadd arcp float %op1, %op2
   ; CHECK: %f.arcp = fadd arcp float %op1, %op2
+  %f.contract = fadd contract float %op1, %op2
+  ; CHECK: %f.contract = fadd contract float %op1, %op2
   %f.fast = fadd fast float %op1, %op2
   ; CHECK: %f.fast = fadd fast float %op1, %op2
   ret void
@@ -1610,6 +1612,13 @@ normal:
 
 declare void @f.writeonly() writeonly
 ; CHECK: declare void @f.writeonly() #39
+
+;; Constant Expressions
+
+define i8** @constexpr() {
+  ; CHECK: ret i8** getelementptr inbounds ({ [4 x i8*], [4 x i8*] }, { [4 x i8*], [4 x i8*] }* null, i32 0, inrange i32 1, i32 2)
+  ret i8** getelementptr inbounds ({ [4 x i8*], [4 x i8*] }, { [4 x i8*], [4 x i8*] }* null, i32 0, inrange i32 1, i32 2)
+}
 
 ; CHECK: attributes #0 = { alignstack=4 }
 ; CHECK: attributes #1 = { alignstack=8 }

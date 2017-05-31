@@ -54,6 +54,9 @@
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include <algorithm>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <system_error>
 
@@ -111,6 +114,7 @@ static const char *const kAsanStackFreeNameTemplate = "__asan_stack_free_";
 static const char *const kAsanGenPrefix = "__asan_gen_";
 static const char *const kODRGenPrefix = "__odr_asan_gen_";
 static const char *const kSanCovGenPrefix = "__sancov_gen_";
+static const char *const kAsanSetShadowPrefix = "__asan_set_shadow_";
 static const char *const kAsanPoisonStackMemoryName =
     "__asan_poison_stack_memory";
 static const char *const kAsanUnpoisonStackMemoryName =
@@ -172,6 +176,11 @@ static cl::opt<int> ClMaxInsnsToInstrumentPerBB(
 // This flag may need to be replaced with -f[no]asan-stack.
 static cl::opt<bool> ClStack("asan-stack", cl::desc("Handle stack memory"),
                              cl::Hidden, cl::init(true));
+static cl::opt<uint32_t> ClMaxInlinePoisoningSize(
+    "asan-max-inline-poisoning-size",
+    cl::desc(
+        "Inline shadow poisoning for blocks up to the given size in bytes."),
+    cl::Hidden, cl::init(64));
 static cl::opt<bool> ClUseAfterReturn("asan-use-after-return",
                                       cl::desc("Check stack-use-after-return"),
                                       cl::Hidden, cl::init(true));
@@ -270,7 +279,7 @@ static cl::opt<std::string> ClDebugFunc("asan-debug-func", cl::Hidden,
                                         cl::desc("Debug func"));
 static cl::opt<int> ClDebugMin("asan-debug-min", cl::desc("Debug min inst"),
                                cl::Hidden, cl::init(-1));
-static cl::opt<int> ClDebugMax("asan-debug-max", cl::desc("Debug man inst"),
+static cl::opt<int> ClDebugMax("asan-debug-max", cl::desc("Debug max inst"),
                                cl::Hidden, cl::init(-1));
 
 STATISTIC(NumInstrumentedReads, "Number of instrumented reads");
@@ -470,7 +479,7 @@ struct AddressSanitizer : public FunctionPass {
         LocalDynamicShadow(nullptr) {
     initializeAddressSanitizerPass(*PassRegistry::getPassRegistry());
   }
-  const char *getPassName() const override {
+  StringRef getPassName() const override {
     return "AddressSanitizerFunctionPass";
   }
   void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -494,15 +503,19 @@ struct AddressSanitizer : public FunctionPass {
 
   /// If it is an interesting memory access, return the PointerOperand
   /// and set IsWrite/Alignment. Otherwise return nullptr.
+  /// MaybeMask is an output parameter for the mask Value, if we're looking at a
+  /// masked load/store.
   Value *isInterestingMemoryAccess(Instruction *I, bool *IsWrite,
-                                   uint64_t *TypeSize, unsigned *Alignment);
+                                   uint64_t *TypeSize, unsigned *Alignment,
+                                   Value **MaybeMask = nullptr);
   void instrumentMop(ObjectSizeOffsetVisitor &ObjSizeVis, Instruction *I,
                      bool UseCalls, const DataLayout &DL);
   void instrumentPointerComparisonOrSubtraction(Instruction *I);
   void instrumentAddress(Instruction *OrigIns, Instruction *InsertBefore,
                          Value *Addr, uint32_t TypeSize, bool IsWrite,
                          Value *SizeArgument, bool UseCalls, uint32_t Exp);
-  void instrumentUnusualSizeOrAlignment(Instruction *I, Value *Addr,
+  void instrumentUnusualSizeOrAlignment(Instruction *I,
+                                        Instruction *InsertBefore, Value *Addr,
                                         uint32_t TypeSize, bool IsWrite,
                                         Value *SizeArgument, bool UseCalls,
                                         uint32_t Exp);
@@ -581,9 +594,9 @@ class AddressSanitizerModule : public ModulePass {
         Recover(Recover || ClRecover) {}
   bool runOnModule(Module &M) override;
   static char ID;  // Pass identification, replacement for typeid
-  const char *getPassName() const override { return "AddressSanitizerModule"; }
+  StringRef getPassName() const override { return "AddressSanitizerModule"; }
 
- private:
+private:
   void initializeCallbacks(Module &M);
 
   bool InstrumentGlobals(IRBuilder<> &IRB, Module &M);
@@ -652,6 +665,7 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
 
   Function *AsanStackMallocFunc[kMaxAsanStackMallocSizeClass + 1],
       *AsanStackFreeFunc[kMaxAsanStackMallocSizeClass + 1];
+  Function *AsanSetShadowFunc[0x100] = {};
   Function *AsanPoisonStackMemoryFunc, *AsanUnpoisonStackMemoryFunc;
   Function *AsanAllocaPoisonFunc, *AsanAllocasUnpoisonFunc;
 
@@ -844,12 +858,21 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
 
   /// Finds alloca where the value comes from.
   AllocaInst *findAllocaForValue(Value *V);
-  void poisonRedZones(ArrayRef<uint8_t> ShadowBytes, IRBuilder<> &IRB,
-                      Value *ShadowBase, bool DoPoison);
+
+  // Copies bytes from ShadowBytes into shadow memory for indexes where
+  // ShadowMask is not zero. If ShadowMask[i] is zero, we assume that
+  // ShadowBytes[i] is constantly zero and doesn't need to be overwritten.
+  void copyToShadow(ArrayRef<uint8_t> ShadowMask, ArrayRef<uint8_t> ShadowBytes,
+                    IRBuilder<> &IRB, Value *ShadowBase);
+  void copyToShadow(ArrayRef<uint8_t> ShadowMask, ArrayRef<uint8_t> ShadowBytes,
+                    size_t Begin, size_t End, IRBuilder<> &IRB,
+                    Value *ShadowBase);
+  void copyToShadowInline(ArrayRef<uint8_t> ShadowMask,
+                          ArrayRef<uint8_t> ShadowBytes, size_t Begin,
+                          size_t End, IRBuilder<> &IRB, Value *ShadowBase);
+
   void poisonAlloca(Value *V, uint64_t Size, IRBuilder<> &IRB, bool DoPoison);
 
-  void SetShadowToStackAfterReturnInlined(IRBuilder<> &IRB, Value *ShadowBase,
-                                          int Size);
   Value *createAllocaForLayout(IRBuilder<> &IRB, const ASanStackFrameLayout &L,
                                bool Dynamic);
   PHINode *createPHI(IRBuilder<> &IRB, Value *Cond, Value *ValueIfTrue,
@@ -990,18 +1013,19 @@ bool AddressSanitizer::isInterestingAlloca(const AllocaInst &AI) {
        (!ClSkipPromotableAllocas || !isAllocaPromotable(&AI)) &&
        // inalloca allocas are not treated as static, and we don't want
        // dynamic alloca instrumentation for them as well.
-       !AI.isUsedWithInAlloca());
+       !AI.isUsedWithInAlloca() &&
+       // swifterror allocas are register promoted by ISel
+       !AI.isSwiftError());
 
   ProcessedAllocas[&AI] = IsInteresting;
   return IsInteresting;
 }
 
-/// If I is an interesting memory access, return the PointerOperand
-/// and set IsWrite/Alignment. Otherwise return nullptr.
 Value *AddressSanitizer::isInterestingMemoryAccess(Instruction *I,
                                                    bool *IsWrite,
                                                    uint64_t *TypeSize,
-                                                   unsigned *Alignment) {
+                                                   unsigned *Alignment,
+                                                   Value **MaybeMask) {
   // Skip memory accesses inserted by another instrumentation.
   if (I->getMetadata("nosanitize")) return nullptr;
 
@@ -1035,13 +1059,49 @@ Value *AddressSanitizer::isInterestingMemoryAccess(Instruction *I,
     *TypeSize = DL.getTypeStoreSizeInBits(XCHG->getCompareOperand()->getType());
     *Alignment = 0;
     PtrOperand = XCHG->getPointerOperand();
+  } else if (auto CI = dyn_cast<CallInst>(I)) {
+    auto *F = dyn_cast<Function>(CI->getCalledValue());
+    if (F && (F->getName().startswith("llvm.masked.load.") ||
+              F->getName().startswith("llvm.masked.store."))) {
+      unsigned OpOffset = 0;
+      if (F->getName().startswith("llvm.masked.store.")) {
+        if (!ClInstrumentWrites)
+          return nullptr;
+        // Masked store has an initial operand for the value.
+        OpOffset = 1;
+        *IsWrite = true;
+      } else {
+        if (!ClInstrumentReads)
+          return nullptr;
+        *IsWrite = false;
+      }
+
+      auto BasePtr = CI->getOperand(0 + OpOffset);
+      auto Ty = cast<PointerType>(BasePtr->getType())->getElementType();
+      *TypeSize = DL.getTypeStoreSizeInBits(Ty);
+      if (auto AlignmentConstant =
+              dyn_cast<ConstantInt>(CI->getOperand(1 + OpOffset)))
+        *Alignment = (unsigned)AlignmentConstant->getZExtValue();
+      else
+        *Alignment = 1; // No alignment guarantees. We probably got Undef
+      if (MaybeMask)
+        *MaybeMask = CI->getOperand(2 + OpOffset);
+      PtrOperand = BasePtr;
+    }
   }
 
-  // Do not instrument acesses from different address spaces; we cannot deal
-  // with them.
   if (PtrOperand) {
+    // Do not instrument acesses from different address spaces; we cannot deal
+    // with them.
     Type *PtrTy = cast<PointerType>(PtrOperand->getType()->getScalarType());
     if (PtrTy->getPointerAddressSpace() != 0)
+      return nullptr;
+
+    // Ignore swifterror addresses.
+    // swifterror memory addresses are mem2reg promoted by instruction
+    // selection. As such they cannot have regular uses like an instrumentation
+    // function and it makes no sense to track them as memory.
+    if (PtrOperand->isSwiftError())
       return nullptr;
   }
 
@@ -1093,13 +1153,71 @@ void AddressSanitizer::instrumentPointerComparisonOrSubtraction(
   IRB.CreateCall(F, Param);
 }
 
+static void doInstrumentAddress(AddressSanitizer *Pass, Instruction *I,
+                                Instruction *InsertBefore, Value *Addr,
+                                unsigned Alignment, unsigned Granularity,
+                                uint32_t TypeSize, bool IsWrite,
+                                Value *SizeArgument, bool UseCalls,
+                                uint32_t Exp) {
+  // Instrument a 1-, 2-, 4-, 8-, or 16- byte access with one check
+  // if the data is properly aligned.
+  if ((TypeSize == 8 || TypeSize == 16 || TypeSize == 32 || TypeSize == 64 ||
+       TypeSize == 128) &&
+      (Alignment >= Granularity || Alignment == 0 || Alignment >= TypeSize / 8))
+    return Pass->instrumentAddress(I, InsertBefore, Addr, TypeSize, IsWrite,
+                                   nullptr, UseCalls, Exp);
+  Pass->instrumentUnusualSizeOrAlignment(I, InsertBefore, Addr, TypeSize,
+                                         IsWrite, nullptr, UseCalls, Exp);
+}
+
+static void instrumentMaskedLoadOrStore(AddressSanitizer *Pass,
+                                        const DataLayout &DL, Type *IntptrTy,
+                                        Value *Mask, Instruction *I,
+                                        Value *Addr, unsigned Alignment,
+                                        unsigned Granularity, uint32_t TypeSize,
+                                        bool IsWrite, Value *SizeArgument,
+                                        bool UseCalls, uint32_t Exp) {
+  auto *VTy = cast<PointerType>(Addr->getType())->getElementType();
+  uint64_t ElemTypeSize = DL.getTypeStoreSizeInBits(VTy->getScalarType());
+  unsigned Num = VTy->getVectorNumElements();
+  auto Zero = ConstantInt::get(IntptrTy, 0);
+  for (unsigned Idx = 0; Idx < Num; ++Idx) {
+    Value *InstrumentedAddress = nullptr;
+    Instruction *InsertBefore = I;
+    if (auto *Vector = dyn_cast<ConstantVector>(Mask)) {
+      // dyn_cast as we might get UndefValue
+      if (auto *Masked = dyn_cast<ConstantInt>(Vector->getOperand(Idx))) {
+        if (Masked->isNullValue())
+          // Mask is constant false, so no instrumentation needed.
+          continue;
+        // If we have a true or undef value, fall through to doInstrumentAddress
+        // with InsertBefore == I
+      }
+    } else {
+      IRBuilder<> IRB(I);
+      Value *MaskElem = IRB.CreateExtractElement(Mask, Idx);
+      TerminatorInst *ThenTerm = SplitBlockAndInsertIfThen(MaskElem, I, false);
+      InsertBefore = ThenTerm;
+    }
+
+    IRBuilder<> IRB(InsertBefore);
+    InstrumentedAddress =
+        IRB.CreateGEP(Addr, {Zero, ConstantInt::get(IntptrTy, Idx)});
+    doInstrumentAddress(Pass, I, InsertBefore, InstrumentedAddress, Alignment,
+                        Granularity, ElemTypeSize, IsWrite, SizeArgument,
+                        UseCalls, Exp);
+  }
+}
+
 void AddressSanitizer::instrumentMop(ObjectSizeOffsetVisitor &ObjSizeVis,
                                      Instruction *I, bool UseCalls,
                                      const DataLayout &DL) {
   bool IsWrite = false;
   unsigned Alignment = 0;
   uint64_t TypeSize = 0;
-  Value *Addr = isInterestingMemoryAccess(I, &IsWrite, &TypeSize, &Alignment);
+  Value *MaybeMask = nullptr;
+  Value *Addr =
+      isInterestingMemoryAccess(I, &IsWrite, &TypeSize, &Alignment, &MaybeMask);
   assert(Addr);
 
   // Optimization experiments.
@@ -1141,15 +1259,14 @@ void AddressSanitizer::instrumentMop(ObjectSizeOffsetVisitor &ObjSizeVis,
     NumInstrumentedReads++;
 
   unsigned Granularity = 1 << Mapping.Scale;
-  // Instrument a 1-, 2-, 4-, 8-, or 16- byte access with one check
-  // if the data is properly aligned.
-  if ((TypeSize == 8 || TypeSize == 16 || TypeSize == 32 || TypeSize == 64 ||
-       TypeSize == 128) &&
-      (Alignment >= Granularity || Alignment == 0 || Alignment >= TypeSize / 8))
-    return instrumentAddress(I, I, Addr, TypeSize, IsWrite, nullptr, UseCalls,
-                             Exp);
-  instrumentUnusualSizeOrAlignment(I, Addr, TypeSize, IsWrite, nullptr,
-                                   UseCalls, Exp);
+  if (MaybeMask) {
+    instrumentMaskedLoadOrStore(this, DL, IntptrTy, MaybeMask, I, Addr,
+                                Alignment, Granularity, TypeSize, IsWrite,
+                                nullptr, UseCalls, Exp);
+  } else {
+    doInstrumentAddress(this, I, I, Addr, Alignment, Granularity, TypeSize,
+                        IsWrite, nullptr, UseCalls, Exp);
+  }
 }
 
 Instruction *AddressSanitizer::generateCrashCode(Instruction *InsertBefore,
@@ -1264,9 +1381,9 @@ void AddressSanitizer::instrumentAddress(Instruction *OrigIns,
 // and the last bytes. We call __asan_report_*_n(addr, real_size) to be able
 // to report the actual access size.
 void AddressSanitizer::instrumentUnusualSizeOrAlignment(
-    Instruction *I, Value *Addr, uint32_t TypeSize, bool IsWrite,
-    Value *SizeArgument, bool UseCalls, uint32_t Exp) {
-  IRBuilder<> IRB(I);
+    Instruction *I, Instruction *InsertBefore, Value *Addr, uint32_t TypeSize,
+    bool IsWrite, Value *SizeArgument, bool UseCalls, uint32_t Exp) {
+  IRBuilder<> IRB(InsertBefore);
   Value *Size = ConstantInt::get(IntptrTy, TypeSize / 8);
   Value *AddrLong = IRB.CreatePointerCast(Addr, IntptrTy);
   if (UseCalls) {
@@ -1280,8 +1397,8 @@ void AddressSanitizer::instrumentUnusualSizeOrAlignment(
     Value *LastByte = IRB.CreateIntToPtr(
         IRB.CreateAdd(AddrLong, ConstantInt::get(IntptrTy, TypeSize / 8 - 1)),
         Addr->getType());
-    instrumentAddress(I, I, Addr, 8, IsWrite, Size, false, Exp);
-    instrumentAddress(I, I, LastByte, 8, IsWrite, Size, false, Exp);
+    instrumentAddress(I, InsertBefore, Addr, 8, IsWrite, Size, false, Exp);
+    instrumentAddress(I, InsertBefore, LastByte, 8, IsWrite, Size, false, Exp);
   }
 }
 
@@ -1718,7 +1835,7 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
 
     // Transfer the debug info.  The payload starts at offset zero so we can
     // copy the debug info over as is.
-    SmallVector<DIGlobalVariable *, 1> GVs;
+    SmallVector<DIGlobalVariableExpression *, 1> GVs;
     G->getDebugInfo(GVs);
     for (auto *GV : GVs)
       NewGlobal->addDebugInfo(GV);
@@ -1745,7 +1862,8 @@ bool AddressSanitizerModule::InstrumentGlobals(IRBuilder<> &IRB, Module &M) {
     GlobalValue *InstrumentedGlobal = NewGlobal;
 
     bool CanUsePrivateAliases =
-        TargetTriple.isOSBinFormatELF() || TargetTriple.isOSBinFormatMachO();
+        TargetTriple.isOSBinFormatELF() || TargetTriple.isOSBinFormatMachO() ||
+        TargetTriple.isOSBinFormatWasm();
     if (CanUsePrivateAliases && ClUsePrivateAliasForGlobals) {
       // Create local alias for NewGlobal to avoid crash on ODR between
       // instrumented and non-instrumented libraries.
@@ -2014,11 +2132,20 @@ bool AddressSanitizer::runOnFunction(Function &F) {
     int NumInsnsPerBB = 0;
     for (auto &Inst : BB) {
       if (LooksLikeCodeInBug11395(&Inst)) return false;
+      Value *MaybeMask = nullptr;
       if (Value *Addr = isInterestingMemoryAccess(&Inst, &IsWrite, &TypeSize,
-                                                  &Alignment)) {
+                                                  &Alignment, &MaybeMask)) {
         if (ClOpt && ClOptSameTemp) {
-          if (!TempsToInstrument.insert(Addr).second)
-            continue;  // We've seen this temp in the current BB.
+          // If we have a mask, skip instrumentation if we've already
+          // instrumented the full object. But don't add to TempsToInstrument
+          // because we might get another load/store with a different mask.
+          if (MaybeMask) {
+            if (TempsToInstrument.count(Addr))
+              continue; // We've seen this (whole) temp in the current BB.
+          } else {
+            if (!TempsToInstrument.insert(Addr).second)
+              continue; // We've seen this temp in the current BB.
+          }
         }
       } else if (ClInvalidPointerPairs &&
                  isInterestingPointerComparisonOrSubtraction(&Inst)) {
@@ -2122,6 +2249,15 @@ void FunctionStackPoisoner::initializeCallbacks(Module &M) {
                               IntptrTy, IntptrTy, nullptr));
   }
 
+  for (size_t Val : {0x00, 0xf1, 0xf2, 0xf3, 0xf5, 0xf8}) {
+    std::ostringstream Name;
+    Name << kAsanSetShadowPrefix;
+    Name << std::setw(2) << std::setfill('0') << std::hex << Val;
+    AsanSetShadowFunc[Val] =
+        checkSanitizerInterfaceFunction(M.getOrInsertFunction(
+            Name.str(), IRB.getVoidTy(), IntptrTy, IntptrTy, nullptr));
+  }
+
   AsanAllocaPoisonFunc = checkSanitizerInterfaceFunction(M.getOrInsertFunction(
       kAsanAllocaPoison, IRB.getVoidTy(), IntptrTy, IntptrTy, nullptr));
   AsanAllocasUnpoisonFunc =
@@ -2129,31 +2265,93 @@ void FunctionStackPoisoner::initializeCallbacks(Module &M) {
           kAsanAllocasUnpoison, IRB.getVoidTy(), IntptrTy, IntptrTy, nullptr));
 }
 
-void FunctionStackPoisoner::poisonRedZones(ArrayRef<uint8_t> ShadowBytes,
-                                           IRBuilder<> &IRB, Value *ShadowBase,
-                                           bool DoPoison) {
-  size_t n = ShadowBytes.size();
-  size_t i = 0;
-  // We need to (un)poison n bytes of stack shadow. Poison as many as we can
-  // using 64-bit stores (if we are on 64-bit arch), then poison the rest
-  // with 32-bit stores, then with 16-byte stores, then with 8-byte stores.
-  for (size_t LargeStoreSizeInBytes = ASan.LongSize / 8;
-       LargeStoreSizeInBytes != 0; LargeStoreSizeInBytes /= 2) {
-    for (; i + LargeStoreSizeInBytes - 1 < n; i += LargeStoreSizeInBytes) {
-      uint64_t Val = 0;
-      for (size_t j = 0; j < LargeStoreSizeInBytes; j++) {
-        if (F.getParent()->getDataLayout().isLittleEndian())
-          Val |= (uint64_t)ShadowBytes[i + j] << (8 * j);
-        else
-          Val = (Val << 8) | ShadowBytes[i + j];
-      }
-      if (!Val) continue;
-      Value *Ptr = IRB.CreateAdd(ShadowBase, ConstantInt::get(IntptrTy, i));
-      Type *StoreTy = Type::getIntNTy(*C, LargeStoreSizeInBytes * 8);
-      Value *Poison = ConstantInt::get(StoreTy, DoPoison ? Val : 0);
-      IRB.CreateStore(Poison, IRB.CreateIntToPtr(Ptr, StoreTy->getPointerTo()));
+void FunctionStackPoisoner::copyToShadowInline(ArrayRef<uint8_t> ShadowMask,
+                                               ArrayRef<uint8_t> ShadowBytes,
+                                               size_t Begin, size_t End,
+                                               IRBuilder<> &IRB,
+                                               Value *ShadowBase) {
+  if (Begin >= End)
+    return;
+
+  const size_t LargestStoreSizeInBytes =
+      std::min<size_t>(sizeof(uint64_t), ASan.LongSize / 8);
+
+  const bool IsLittleEndian = F.getParent()->getDataLayout().isLittleEndian();
+
+  // Poison given range in shadow using larges store size with out leading and
+  // trailing zeros in ShadowMask. Zeros never change, so they need neither
+  // poisoning nor up-poisoning. Still we don't mind if some of them get into a
+  // middle of a store.
+  for (size_t i = Begin; i < End;) {
+    if (!ShadowMask[i]) {
+      assert(!ShadowBytes[i]);
+      ++i;
+      continue;
+    }
+
+    size_t StoreSizeInBytes = LargestStoreSizeInBytes;
+    // Fit store size into the range.
+    while (StoreSizeInBytes > End - i)
+      StoreSizeInBytes /= 2;
+
+    // Minimize store size by trimming trailing zeros.
+    for (size_t j = StoreSizeInBytes - 1; j && !ShadowMask[i + j]; --j) {
+      while (j <= StoreSizeInBytes / 2)
+        StoreSizeInBytes /= 2;
+    }
+
+    uint64_t Val = 0;
+    for (size_t j = 0; j < StoreSizeInBytes; j++) {
+      if (IsLittleEndian)
+        Val |= (uint64_t)ShadowBytes[i + j] << (8 * j);
+      else
+        Val = (Val << 8) | ShadowBytes[i + j];
+    }
+
+    Value *Ptr = IRB.CreateAdd(ShadowBase, ConstantInt::get(IntptrTy, i));
+    Value *Poison = IRB.getIntN(StoreSizeInBytes * 8, Val);
+    IRB.CreateAlignedStore(
+        Poison, IRB.CreateIntToPtr(Ptr, Poison->getType()->getPointerTo()), 1);
+
+    i += StoreSizeInBytes;
+  }
+}
+
+void FunctionStackPoisoner::copyToShadow(ArrayRef<uint8_t> ShadowMask,
+                                         ArrayRef<uint8_t> ShadowBytes,
+                                         IRBuilder<> &IRB, Value *ShadowBase) {
+  copyToShadow(ShadowMask, ShadowBytes, 0, ShadowMask.size(), IRB, ShadowBase);
+}
+
+void FunctionStackPoisoner::copyToShadow(ArrayRef<uint8_t> ShadowMask,
+                                         ArrayRef<uint8_t> ShadowBytes,
+                                         size_t Begin, size_t End,
+                                         IRBuilder<> &IRB, Value *ShadowBase) {
+  assert(ShadowMask.size() == ShadowBytes.size());
+  size_t Done = Begin;
+  for (size_t i = Begin, j = Begin + 1; i < End; i = j++) {
+    if (!ShadowMask[i]) {
+      assert(!ShadowBytes[i]);
+      continue;
+    }
+    uint8_t Val = ShadowBytes[i];
+    if (!AsanSetShadowFunc[Val])
+      continue;
+
+    // Skip same values.
+    for (; j < End && ShadowMask[j] && Val == ShadowBytes[j]; ++j) {
+    }
+
+    if (j - i >= ClMaxInlinePoisoningSize) {
+      copyToShadowInline(ShadowMask, ShadowBytes, Done, i, IRB, ShadowBase);
+      IRB.CreateCall(AsanSetShadowFunc[Val],
+                     {IRB.CreateAdd(ShadowBase, ConstantInt::get(IntptrTy, i)),
+                      ConstantInt::get(IntptrTy, j - i)});
+      Done = j;
     }
   }
+
+  copyToShadowInline(ShadowMask, ShadowBytes, Done, End, IRB, ShadowBase);
 }
 
 // Fake stack allocator (asan_fake_stack.h) has 11 size classes
@@ -2164,26 +2362,6 @@ static int StackMallocSizeClass(uint64_t LocalStackSize) {
   for (int i = 0;; i++, MaxSize *= 2)
     if (LocalStackSize <= MaxSize) return i;
   llvm_unreachable("impossible LocalStackSize");
-}
-
-// Set Size bytes starting from ShadowBase to kAsanStackAfterReturnMagic.
-// We can not use MemSet intrinsic because it may end up calling the actual
-// memset. Size is a multiple of 8.
-// Currently this generates 8-byte stores on x86_64; it may be better to
-// generate wider stores.
-void FunctionStackPoisoner::SetShadowToStackAfterReturnInlined(
-    IRBuilder<> &IRB, Value *ShadowBase, int Size) {
-  assert(!(Size % 8));
-
-  // kAsanStackAfterReturnMagic is 0xf5.
-  const uint64_t kAsanStackAfterReturnMagic64 = 0xf5f5f5f5f5f5f5f5ULL;
-
-  for (int i = 0; i < Size; i += 8) {
-    Value *p = IRB.CreateAdd(ShadowBase, ConstantInt::get(IntptrTy, i));
-    IRB.CreateStore(
-        ConstantInt::get(IRB.getInt64Ty(), kAsanStackAfterReturnMagic64),
-        IRB.CreateIntToPtr(p, IRB.getInt64Ty()->getPointerTo()));
-  }
 }
 
 PHINode *FunctionStackPoisoner::createPHI(IRBuilder<> &IRB, Value *Cond,
@@ -2278,31 +2456,50 @@ void FunctionStackPoisoner::processStaticAllocas() {
   // If we have a call to llvm.localescape, keep it in the entry block.
   if (LocalEscapeCall) LocalEscapeCall->moveBefore(InsBefore);
 
-  // Insert poison calls for lifetime intrinsics for static allocas.
+  SmallVector<ASanStackVariableDescription, 16> SVD;
+  SVD.reserve(AllocaVec.size());
+  for (AllocaInst *AI : AllocaVec) {
+    ASanStackVariableDescription D = {AI->getName().data(),
+                                      ASan.getAllocaSizeInBytes(*AI),
+                                      0,
+                                      AI->getAlignment(),
+                                      AI,
+                                      0,
+                                      0};
+    SVD.push_back(D);
+  }
+
+  // Minimal header size (left redzone) is 4 pointers,
+  // i.e. 32 bytes on 64-bit platforms and 16 bytes in 32-bit platforms.
+  size_t MinHeaderSize = ASan.LongSize / 2;
+  const ASanStackFrameLayout &L =
+      ComputeASanStackFrameLayout(SVD, 1ULL << Mapping.Scale, MinHeaderSize);
+
+  // Build AllocaToSVDMap for ASanStackVariableDescription lookup.
+  DenseMap<const AllocaInst *, ASanStackVariableDescription *> AllocaToSVDMap;
+  for (auto &Desc : SVD)
+    AllocaToSVDMap[Desc.AI] = &Desc;
+
+  // Update SVD with information from lifetime intrinsics.
   for (const auto &APC : StaticAllocaPoisonCallVec) {
     assert(APC.InsBefore);
     assert(APC.AI);
     assert(ASan.isInterestingAlloca(*APC.AI));
     assert(APC.AI->isStaticAlloca());
 
-    IRBuilder<> IRB(APC.InsBefore);
-    poisonAlloca(APC.AI, APC.Size, IRB, APC.DoPoison);
+    ASanStackVariableDescription &Desc = *AllocaToSVDMap[APC.AI];
+    Desc.LifetimeSize = Desc.Size;
+    if (const DILocation *FnLoc = EntryDebugLocation.get()) {
+      if (const DILocation *LifetimeLoc = APC.InsBefore->getDebugLoc().get()) {
+        if (LifetimeLoc->getFile() == FnLoc->getFile())
+          if (unsigned Line = LifetimeLoc->getLine())
+            Desc.Line = std::min(Desc.Line ? Desc.Line : Line, Line);
+      }
+    }
   }
 
-  SmallVector<ASanStackVariableDescription, 16> SVD;
-  SVD.reserve(AllocaVec.size());
-  for (AllocaInst *AI : AllocaVec) {
-    ASanStackVariableDescription D = {AI->getName().data(),
-                                      ASan.getAllocaSizeInBytes(*AI),
-                                      AI->getAlignment(), AI, 0};
-    SVD.push_back(D);
-  }
-  // Minimal header size (left redzone) is 4 pointers,
-  // i.e. 32 bytes on 64-bit platforms and 16 bytes in 32-bit platforms.
-  size_t MinHeaderSize = ASan.LongSize / 2;
-  ASanStackFrameLayout L;
-  ComputeASanStackFrameLayout(SVD, 1ULL << Mapping.Scale, MinHeaderSize, &L);
-  DEBUG(dbgs() << L.DescriptionString << " --- " << L.FrameSize << "\n");
+  auto DescriptionString = ComputeASanStackFrameDescription(SVD);
+  DEBUG(dbgs() << DescriptionString << " --- " << L.FrameSize << "\n");
   uint64_t LocalStackSize = L.FrameSize;
   bool DoStackMalloc = ClUseAfterReturn && !ASan.CompileKernel &&
                        LocalStackSize <= kMaxStackMallocSize;
@@ -2370,7 +2567,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
     Value *NewAllocaPtr = IRB.CreateIntToPtr(
         IRB.CreateAdd(LocalStackBase, ConstantInt::get(IntptrTy, Desc.Offset)),
         AI->getType());
-    replaceDbgDeclareForAlloca(AI, NewAllocaPtr, DIB, /*Deref=*/true);
+    replaceDbgDeclareForAlloca(AI, NewAllocaPtr, DIB, DIExpression::NoDeref);
     AI->replaceAllUsesWith(NewAllocaPtr);
   }
 
@@ -2385,7 +2582,7 @@ void FunctionStackPoisoner::processStaticAllocas() {
                     ConstantInt::get(IntptrTy, ASan.LongSize / 8)),
       IntptrPtrTy);
   GlobalVariable *StackDescriptionGlobal =
-      createPrivateGlobalForString(*F.getParent(), L.DescriptionString,
+      createPrivateGlobalForString(*F.getParent(), DescriptionString,
                                    /*AllowMerging*/ true);
   Value *Description = IRB.CreatePointerCast(StackDescriptionGlobal, IntptrTy);
   IRB.CreateStore(Description, BasePlus1);
@@ -2396,20 +2593,33 @@ void FunctionStackPoisoner::processStaticAllocas() {
       IntptrPtrTy);
   IRB.CreateStore(IRB.CreatePointerCast(&F, IntptrTy), BasePlus2);
 
-  // Poison the stack redzones at the entry.
-  Value *ShadowBase = ASan.memToShadow(LocalStackBase, IRB);
-  poisonRedZones(L.ShadowBytes, IRB, ShadowBase, true);
+  const auto &ShadowAfterScope = GetShadowBytesAfterScope(SVD, L);
 
-  auto UnpoisonStack = [&](IRBuilder<> &IRB) {
-    // Do this always as poisonAlloca can be disabled with
-    // detect_stack_use_after_scope=0.
-    poisonRedZones(L.ShadowBytes, IRB, ShadowBase, false);
-    if (!StaticAllocaPoisonCallVec.empty()) {
-      // If we poisoned some allocas in llvm.lifetime analysis,
-      // unpoison whole stack frame now.
-      poisonAlloca(LocalStackBase, LocalStackSize, IRB, false);
+  // Poison the stack red zones at the entry.
+  Value *ShadowBase = ASan.memToShadow(LocalStackBase, IRB);
+  // As mask we must use most poisoned case: red zones and after scope.
+  // As bytes we can use either the same or just red zones only.
+  copyToShadow(ShadowAfterScope, ShadowAfterScope, IRB, ShadowBase);
+
+  if (!StaticAllocaPoisonCallVec.empty()) {
+    const auto &ShadowInScope = GetShadowBytes(SVD, L);
+
+    // Poison static allocas near lifetime intrinsics.
+    for (const auto &APC : StaticAllocaPoisonCallVec) {
+      const ASanStackVariableDescription &Desc = *AllocaToSVDMap[APC.AI];
+      assert(Desc.Offset % L.Granularity == 0);
+      size_t Begin = Desc.Offset / L.Granularity;
+      size_t End = Begin + (APC.Size + L.Granularity - 1) / L.Granularity;
+
+      IRBuilder<> IRB(APC.InsBefore);
+      copyToShadow(ShadowAfterScope,
+                   APC.DoPoison ? ShadowAfterScope : ShadowInScope, Begin, End,
+                   IRB, ShadowBase);
     }
-  };
+  }
+
+  SmallVector<uint8_t, 64> ShadowClean(ShadowAfterScope.size(), 0);
+  SmallVector<uint8_t, 64> ShadowAfterReturn;
 
   // (Un)poison the stack before all ret instructions.
   for (auto Ret : RetVec) {
@@ -2437,8 +2647,10 @@ void FunctionStackPoisoner::processStaticAllocas() {
       IRBuilder<> IRBPoison(ThenTerm);
       if (StackMallocIdx <= 4) {
         int ClassSize = kMinStackMallocSize << StackMallocIdx;
-        SetShadowToStackAfterReturnInlined(IRBPoison, ShadowBase,
-                                           ClassSize >> Mapping.Scale);
+        ShadowAfterReturn.resize(ClassSize / L.Granularity,
+                                 kAsanStackUseAfterReturnMagic);
+        copyToShadow(ShadowAfterReturn, ShadowAfterReturn, IRBPoison,
+                     ShadowBase);
         Value *SavedFlagPtrPtr = IRBPoison.CreateAdd(
             FakeStack,
             ConstantInt::get(IntptrTy, ClassSize - ASan.LongSize / 8));
@@ -2455,9 +2667,9 @@ void FunctionStackPoisoner::processStaticAllocas() {
       }
 
       IRBuilder<> IRBElse(ElseTerm);
-      UnpoisonStack(IRBElse);
+      copyToShadow(ShadowAfterScope, ShadowClean, IRBElse, ShadowBase);
     } else {
-      UnpoisonStack(IRBRet);
+      copyToShadow(ShadowAfterScope, ShadowClean, IRBRet, ShadowBase);
     }
   }
 
@@ -2486,7 +2698,7 @@ void FunctionStackPoisoner::poisonAlloca(Value *V, uint64_t Size,
 
 AllocaInst *FunctionStackPoisoner::findAllocaForValue(Value *V) {
   if (AllocaInst *AI = dyn_cast<AllocaInst>(V))
-    // We're intested only in allocas we can handle.
+    // We're interested only in allocas we can handle.
     return ASan.isInterestingAlloca(*AI) ? AI : nullptr;
   // See if we've already calculated (or started to calculate) alloca for a
   // given value.

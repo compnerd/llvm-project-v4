@@ -51,4 +51,14 @@ int lprofGetHostName(char *Name, int Len);
 unsigned lprofBoolCmpXchg(void **Ptr, void *OldV, void *NewV);
 void *lprofPtrFetchAdd(void **Mem, long ByteIncr);
 
+/* Temporarily suspend SIGKILL. Return value of 1 means a restore is needed.
+ * Other return values mean no restore is needed.
+ */
+int lprofSuspendSigKill();
+
+/* Restore previously suspended SIGKILL. */
+void lprofRestoreSigKill();
+
+void lprofInstallSignalHandler(int sig, void(*handler)(int));
+
 #endif /* PROFILE_INSTRPROFILINGUTIL_H */

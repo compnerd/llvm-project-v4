@@ -118,8 +118,10 @@ static inline size_t getMemUsage() {
 }
 
 TimeRecord TimeRecord::getCurrentTime(bool Start) {
+  using Seconds = std::chrono::duration<double, std::ratio<1>>;
   TimeRecord Result;
-  sys::TimeValue now(0,0), user(0,0), sys(0,0);
+  sys::TimePoint<> now;
+  std::chrono::nanoseconds user, sys;
 
   if (Start) {
     Result.MemUsed = getMemUsage();
@@ -129,9 +131,9 @@ TimeRecord TimeRecord::getCurrentTime(bool Start) {
     Result.MemUsed = getMemUsage();
   }
 
-  Result.WallTime   =  now.seconds() +  now.microseconds() / 1000000.0;
-  Result.UserTime   = user.seconds() + user.microseconds() / 1000000.0;
-  Result.SystemTime =  sys.seconds() +  sys.microseconds() / 1000000.0;
+  Result.WallTime = Seconds(now.time_since_epoch()).count();
+  Result.UserTime = Seconds(user).count();
+  Result.SystemTime = Seconds(sys).count();
   return Result;
 }
 
@@ -220,12 +222,6 @@ NamedRegionTimer::NamedRegionTimer(StringRef Name, StringRef Description,
                  : &NamedGroupedTimers->get(Name, Description, GroupName,
                                             GroupDescription)) {}
 
-NamedRegionTimer::NamedRegionTimer(StringRef Name, StringRef GroupName,
-                                   bool Enabled)
-  : TimeRegion(!Enabled ? nullptr
-                 : &NamedGroupedTimers->get(Name, Name, GroupName,
-                                            GroupName)) {}
-
 //===----------------------------------------------------------------------===//
 //   TimerGroup Implementation
 //===----------------------------------------------------------------------===//
@@ -244,9 +240,6 @@ TimerGroup::TimerGroup(StringRef Name, StringRef Description)
   Next = TimerGroupList;
   Prev = &TimerGroupList;
   TimerGroupList = this;
-}
-
-TimerGroup::TimerGroup(StringRef Name) : TimerGroup(Name, Name) {
 }
 
 TimerGroup::~TimerGroup() {

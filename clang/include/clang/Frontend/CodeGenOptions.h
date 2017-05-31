@@ -44,7 +44,6 @@ protected:
 class CodeGenOptions : public CodeGenOptionsBase {
 public:
   enum InliningMethod {
-    NoInlining,         // Perform no inlining whatsoever.
     NormalInlining,     // Use the standard function inlining pass.
     OnlyHintInlining,   // Inline only (implicitly) hinted functions.
     OnlyAlwaysInlining  // Only run the always inlining pass.
@@ -70,12 +69,6 @@ public:
     LocalExecTLSModel
   };
 
-  enum FPContractModeKind {
-    FPC_Off,        // Form fused FP ops only where result will not be affected.
-    FPC_On,         // Form fused FP ops according to FP_CONTRACT rules.
-    FPC_Fast        // Aggressively fuse FP ops (E.g. FMA).
-  };
-
   enum StructReturnConventionKind {
     SRCK_Default,  // No special option was passed.
     SRCK_OnStack,  // Small structs on the stack (-fpcc-struct-return).
@@ -99,9 +92,13 @@ public:
   /// The code model to use (-mcmodel).
   std::string CodeModel;
 
-  /// The filename with path we use for coverage files. The extension will be
-  /// replaced.
-  std::string CoverageFile;
+  /// The filename with path we use for coverage data files. The runtime
+  /// allows further manipulation with the GCOV_PREFIX and GCOV_PREFIX_STRIP
+  /// environment variables.
+  std::string CoverageDataFile;
+
+  /// The filename with path we use for coverage notes files.
+  std::string CoverageNotesFile;
 
   /// The version string to put into coverage files.
   char CoverageVersion[4];
@@ -120,6 +117,9 @@ public:
 
   /// The ABI to use for passing floating point arguments.
   std::string FloatABI;
+
+  /// The floating-point denormal mode to use.
+  std::string FPDenormalMode;
 
   /// The float precision limit to use, if non-empty.
   std::string LimitFloatPrecision;

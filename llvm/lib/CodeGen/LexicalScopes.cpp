@@ -74,8 +74,9 @@ void LexicalScopes::extractLexicalScopes(
         continue;
       }
 
-      // Ignore DBG_VALUE. It does not contribute to any instruction in output.
-      if (MInsn.isDebugValue())
+      // Ignore DBG_VALUE and similar instruction that do not contribute to any
+      // instruction in the output.
+      if (MInsn.isMetaInstruction())
         continue;
 
       if (RangeBeginMI) {
@@ -299,9 +300,8 @@ bool LexicalScopes::dominates(const DILocation *DL, MachineBasicBlock *MBB) {
   return Result;
 }
 
-/// dump - Print data structures.
-void LexicalScope::dump(unsigned Indent) const {
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+LLVM_DUMP_METHOD void LexicalScope::dump(unsigned Indent) const {
   raw_ostream &err = dbgs();
   err.indent(Indent);
   err << "DFSIn: " << DFSIn << " DFSOut: " << DFSOut << "\n";
@@ -316,5 +316,5 @@ void LexicalScope::dump(unsigned Indent) const {
   for (unsigned i = 0, e = Children.size(); i != e; ++i)
     if (Children[i] != this)
       Children[i]->dump(Indent + 2);
-#endif
 }
+#endif
