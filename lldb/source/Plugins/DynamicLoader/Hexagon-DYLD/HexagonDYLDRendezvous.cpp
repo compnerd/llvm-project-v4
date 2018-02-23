@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+#include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -348,8 +352,9 @@ void HexagonDYLDRendezvous::DumpToLog(Log *log) const {
   log->Printf("   State  : %s",
               (state == eConsistent)
                   ? "consistent"
-                  : (state == eAdd) ? "add" : (state == eDelete) ? "delete"
-                                                                 : "unknown");
+                  : (state == eAdd)
+                        ? "add"
+                        : (state == eDelete) ? "delete" : "unknown");
 
   iterator I = begin();
   iterator E = end();

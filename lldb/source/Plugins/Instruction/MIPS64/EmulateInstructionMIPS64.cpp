@@ -12,12 +12,12 @@
 #include <stdlib.h>
 
 #include "lldb/Core/Address.h"
+#include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/Opcode.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/RegisterValue.h"
 #include "lldb/Host/PosixApi.h"
 #include "lldb/Symbol/UnwindPlan.h"
-#include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Stream.h"
@@ -199,7 +199,10 @@ EmulateInstructionMIPS64::CreateInstance(const ArchSpec &arch,
           inst_type)) {
     if (arch.GetTriple().getArch() == llvm::Triple::mips64 ||
         arch.GetTriple().getArch() == llvm::Triple::mips64el) {
-      return new EmulateInstructionMIPS64(arch);
+      std::auto_ptr<EmulateInstructionMIPS64> emulate_insn_ap(
+          new EmulateInstructionMIPS64(arch));
+      if (emulate_insn_ap.get())
+        return emulate_insn_ap.release();
     }
   }
 
@@ -798,9 +801,7 @@ EmulateInstructionMIPS64::GetOpcodeForInstruction(const char *op_name) {
       // Branch instructions
       //----------------------------------------------------------------------
       {"BEQ", &EmulateInstructionMIPS64::Emulate_BXX_3ops, "BEQ rs,rt,offset"},
-      {"BEQ64", &EmulateInstructionMIPS64::Emulate_BXX_3ops, "BEQ rs,rt,offset"},
       {"BNE", &EmulateInstructionMIPS64::Emulate_BXX_3ops, "BNE rs,rt,offset"},
-      {"BNE64", &EmulateInstructionMIPS64::Emulate_BXX_3ops, "BNE rs,rt,offset"},
       {"BEQL", &EmulateInstructionMIPS64::Emulate_BXX_3ops,
        "BEQL rs,rt,offset"},
       {"BNEL", &EmulateInstructionMIPS64::Emulate_BXX_3ops,
@@ -813,7 +814,6 @@ EmulateInstructionMIPS64::GetOpcodeForInstruction(const char *op_name) {
       {"BALC", &EmulateInstructionMIPS64::Emulate_BALC, "BALC offset"},
       {"BC", &EmulateInstructionMIPS64::Emulate_BC, "BC offset"},
       {"BGEZ", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BGEZ rs,offset"},
-      {"BGEZ64", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BGEZ rs,offset"},
       {"BLEZALC", &EmulateInstructionMIPS64::Emulate_Bcond_Link_C,
        "BLEZALC rs,offset"},
       {"BGEZALC", &EmulateInstructionMIPS64::Emulate_Bcond_Link_C,
@@ -828,61 +828,34 @@ EmulateInstructionMIPS64::GetOpcodeForInstruction(const char *op_name) {
        "BNEZALC rs,offset"},
       {"BEQC", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
        "BEQC rs,rt,offset"},
-      {"BEQC64", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
-       "BEQC rs,rt,offset"},
       {"BNEC", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
-       "BNEC rs,rt,offset"},
-      {"BNEC64", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
        "BNEC rs,rt,offset"},
       {"BLTC", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
        "BLTC rs,rt,offset"},
-      {"BLTC64", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
-       "BLTC rs,rt,offset"},
       {"BGEC", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
-       "BGEC rs,rt,offset"},
-      {"BGEC64", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
        "BGEC rs,rt,offset"},
       {"BLTUC", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
        "BLTUC rs,rt,offset"},
-      {"BLTUC64", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
-       "BLTUC rs,rt,offset"},
       {"BGEUC", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
-       "BGEUC rs,rt,offset"},
-      {"BGEUC64", &EmulateInstructionMIPS64::Emulate_BXX_3ops_C,
        "BGEUC rs,rt,offset"},
       {"BLTZC", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
        "BLTZC rt,offset"},
-      {"BLTZC64", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
-       "BLTZC rt,offset"},
       {"BLEZC", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
-       "BLEZC rt,offset"},
-      {"BLEZC64", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
        "BLEZC rt,offset"},
       {"BGEZC", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
        "BGEZC rt,offset"},
-      {"BGEZC64", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
-       "BGEZC rt,offset"},
       {"BGTZC", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
-       "BGTZC rt,offset"},
-      {"BGTZC64", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
        "BGTZC rt,offset"},
       {"BEQZC", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
        "BEQZC rt,offset"},
-      {"BEQZC64", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
-       "BEQZC rt,offset"},
       {"BNEZC", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
-       "BNEZC rt,offset"},
-      {"BNEZC64", &EmulateInstructionMIPS64::Emulate_BXX_2ops_C,
        "BNEZC rt,offset"},
       {"BGEZL", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BGEZL rt,offset"},
       {"BGTZ", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BGTZ rt,offset"},
-      {"BGTZ64", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BGTZ rt,offset"},
       {"BGTZL", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BGTZL rt,offset"},
       {"BLEZ", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BLEZ rt,offset"},
-      {"BLEZ64", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BLEZ rt,offset"},
       {"BLEZL", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BLEZL rt,offset"},
       {"BLTZ", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BLTZ rt,offset"},
-      {"BLTZ64", &EmulateInstructionMIPS64::Emulate_BXX_2ops, "BLTZ rt,offset"},
       {"BLTZAL", &EmulateInstructionMIPS64::Emulate_Bcond_Link,
        "BLTZAL rt,offset"},
       {"BLTZALL", &EmulateInstructionMIPS64::Emulate_Bcond_Link,
@@ -899,11 +872,8 @@ EmulateInstructionMIPS64::GetOpcodeForInstruction(const char *op_name) {
       {"JALR64", &EmulateInstructionMIPS64::Emulate_JALR, "JALR target"},
       {"JALR_HB", &EmulateInstructionMIPS64::Emulate_JALR, "JALR.HB target"},
       {"JIALC", &EmulateInstructionMIPS64::Emulate_JIALC, "JIALC rt,offset"},
-      {"JIALC64", &EmulateInstructionMIPS64::Emulate_JIALC, "JIALC rt,offset"},
       {"JIC", &EmulateInstructionMIPS64::Emulate_JIC, "JIC rt,offset"},
-      {"JIC64", &EmulateInstructionMIPS64::Emulate_JIC, "JIC rt,offset"},
       {"JR", &EmulateInstructionMIPS64::Emulate_JR, "JR target"},
-      {"JR64", &EmulateInstructionMIPS64::Emulate_JR, "JR target"},
       {"JR_HB", &EmulateInstructionMIPS64::Emulate_JR, "JR.HB target"},
       {"BC1F", &EmulateInstructionMIPS64::Emulate_FP_branch, "BC1F cc, offset"},
       {"BC1T", &EmulateInstructionMIPS64::Emulate_FP_branch, "BC1T cc, offset"},
@@ -983,10 +953,13 @@ bool EmulateInstructionMIPS64::EvaluateInstruction(uint32_t evaluate_options) {
    * mc_insn.getOpcode() returns decoded opcode. However to make use
    * of llvm::Mips::<insn> we would need "MipsGenInstrInfo.inc".
   */
-  const char *op_name = m_insn_info->getName(mc_insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(mc_insn.getOpcode());
 
-  if (op_name == NULL)
+  if (op_name_ref.empty())
     return false;
+
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   /*
    * Decoding has been done already. Just get the call-back function
@@ -1269,7 +1242,9 @@ bool EmulateInstructionMIPS64::Emulate_DSUBU_DADDU(llvm::MCInst &insn) {
   bool success = false;
   uint64_t result;
   uint8_t src, dst, rt;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   dst = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   src = m_reg_info->getEncodingValue(insn.getOperand(1).getReg());
@@ -1348,7 +1323,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs, rt;
   int64_t offset, pc, rs_val, rt_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   rt = m_reg_info->getEncodingValue(insn.getOperand(1).getReg());
@@ -1368,14 +1345,12 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops(llvm::MCInst &insn) {
   if (!success)
     return false;
 
-  if (!strcasecmp(op_name, "BEQ") || !strcasecmp(op_name, "BEQL") 
-       || !strcasecmp(op_name, "BEQ64") ) {
+  if (!strcasecmp(op_name, "BEQ") || !strcasecmp(op_name, "BEQL")) {
     if (rs_val == rt_val)
       target = pc + offset;
     else
       target = pc + 8;
-  } else if (!strcasecmp(op_name, "BNE") || !strcasecmp(op_name, "BNEL")
-              || !strcasecmp(op_name, "BNE64")) {
+  } else if (!strcasecmp(op_name, "BNE") || !strcasecmp(op_name, "BNEL")) {
     if (rs_val != rt_val)
       target = pc + offset;
     else
@@ -1403,7 +1378,9 @@ bool EmulateInstructionMIPS64::Emulate_Bcond_Link(llvm::MCInst &insn) {
   uint32_t rs;
   int64_t offset, pc, target = 0;
   int64_t rs_val;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();
@@ -1513,7 +1490,9 @@ bool EmulateInstructionMIPS64::Emulate_Bcond_Link_C(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs;
   int64_t offset, pc, rs_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();
@@ -1581,7 +1560,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs;
   int64_t offset, pc, rs_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();
@@ -1595,26 +1576,22 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops(llvm::MCInst &insn) {
   if (!success)
     return false;
 
-  if (!strcasecmp(op_name, "BLTZL") || !strcasecmp(op_name, "BLTZ")
-       || !strcasecmp(op_name, "BLTZ64")) {
+  if (!strcasecmp(op_name, "BLTZL") || !strcasecmp(op_name, "BLTZ")) {
     if (rs_val < 0)
       target = pc + offset;
     else
       target = pc + 8;
-  } else if (!strcasecmp(op_name, "BGEZL") || !strcasecmp(op_name, "BGEZ")
-              || !strcasecmp(op_name, "BGEZ64")) {
+  } else if (!strcasecmp(op_name, "BGEZL") || !strcasecmp(op_name, "BGEZ")) {
     if (rs_val >= 0)
       target = pc + offset;
     else
       target = pc + 8;
-  } else if (!strcasecmp(op_name, "BGTZL") || !strcasecmp(op_name, "BGTZ")
-              || !strcasecmp(op_name, "BGTZ64")) {
+  } else if (!strcasecmp(op_name, "BGTZL") || !strcasecmp(op_name, "BGTZ")) {
     if (rs_val > 0)
       target = pc + offset;
     else
       target = pc + 8;
-  } else if (!strcasecmp(op_name, "BLEZL") || !strcasecmp(op_name, "BLEZ") 
-              || !strcasecmp(op_name, "BLEZ64")) {
+  } else if (!strcasecmp(op_name, "BLEZL") || !strcasecmp(op_name, "BLEZ")) {
     if (rs_val <= 0)
       target = pc + offset;
     else
@@ -1672,7 +1649,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops_C(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs, rt;
   int64_t offset, pc, rs_val, rt_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
   uint32_t current_inst_size = m_insn_info->get(insn.getOpcode()).getSize();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
@@ -1693,32 +1672,32 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops_C(llvm::MCInst &insn) {
   if (!success)
     return false;
 
-  if (!strcasecmp(op_name, "BEQC") || !strcasecmp(op_name, "BEQC64")) {
+  if (!strcasecmp(op_name, "BEQC")) {
     if (rs_val == rt_val)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BNEC") || !strcasecmp(op_name, "BNEC64")) {
+  } else if (!strcasecmp(op_name, "BNEC")) {
     if (rs_val != rt_val)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BLTC") || !strcasecmp(op_name, "BLTC64")) {
+  } else if (!strcasecmp(op_name, "BLTC")) {
     if (rs_val < rt_val)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BGEC64") || !strcasecmp(op_name, "BGEC")) {
+  } else if (!strcasecmp(op_name, "BGEC")) {
     if (rs_val >= rt_val)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BLTUC") || !strcasecmp(op_name, "BLTUC64")) {
+  } else if (!strcasecmp(op_name, "BLTUC")) {
     if (rs_val < rt_val)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BGEUC") || !strcasecmp(op_name, "BGEUC64")) {
+  } else if (!strcasecmp(op_name, "BGEUC")) {
     if ((uint32_t)rs_val >= (uint32_t)rt_val)
       target = pc + offset;
     else
@@ -1755,7 +1734,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops_C(llvm::MCInst &insn) {
   uint32_t rs;
   int64_t offset, pc, target = 0;
   int64_t rs_val;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
   uint32_t current_inst_size = m_insn_info->get(insn.getOpcode()).getSize();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
@@ -1770,32 +1751,32 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops_C(llvm::MCInst &insn) {
   if (!success)
     return false;
 
-  if (!strcasecmp(op_name, "BLTZC") || !strcasecmp(op_name, "BLTZC64")) {
+  if (!strcasecmp(op_name, "BLTZC")) {
     if (rs_val < 0)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BLEZC") || !strcasecmp(op_name, "BLEZC64")) {
+  } else if (!strcasecmp(op_name, "BLEZC")) {
     if (rs_val <= 0)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BGEZC") || !strcasecmp(op_name, "BGEZC64")) {
+  } else if (!strcasecmp(op_name, "BGEZC")) {
     if (rs_val >= 0)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BGTZC") || !strcasecmp(op_name, "BGTZC64")) {
+  } else if (!strcasecmp(op_name, "BGTZC")) {
     if (rs_val > 0)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BEQZC") || !strcasecmp(op_name, "BEQZC64")) {
+  } else if (!strcasecmp(op_name, "BEQZC")) {
     if (rs_val == 0)
       target = pc + offset;
     else
       target = pc + 4;
-  } else if (!strcasecmp(op_name, "BNEZC") || !strcasecmp(op_name, "BNEZC64")) {
+  } else if (!strcasecmp(op_name, "BNEZC")) {
     if (rs_val != 0)
       target = pc + offset;
     else
@@ -2006,7 +1987,9 @@ bool EmulateInstructionMIPS64::Emulate_FP_branch(llvm::MCInst &insn) {
   bool success = false;
   uint32_t cc, fcsr;
   int64_t pc, offset, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   /*
    * BC1F cc, offset
@@ -2140,7 +2123,9 @@ bool EmulateInstructionMIPS64::Emulate_3D_branch(llvm::MCInst &insn) {
   bool success = false;
   uint32_t cc, fcsr;
   int64_t pc, offset, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   cc = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();

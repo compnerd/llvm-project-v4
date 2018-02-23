@@ -23,7 +23,9 @@
 #include "lldb/API/SBSourceManager.h"
 #include "lldb/API/SBStream.h"
 #include "lldb/API/SBStringList.h"
+#include "lldb/API/SBStringList.h"
 #include "lldb/API/SBSymbolContextList.h"
+#include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Breakpoint/BreakpointID.h"
 #include "lldb/Breakpoint/BreakpointIDList.h"
 #include "lldb/Breakpoint/BreakpointList.h"
@@ -31,6 +33,7 @@
 #include "lldb/Core/Address.h"
 #include "lldb/Core/AddressResolver.h"
 #include "lldb/Core/AddressResolverName.h"
+#include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/Module.h"
@@ -57,7 +60,6 @@
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/TargetList.h"
-#include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegularExpression.h"
@@ -992,6 +994,15 @@ lldb::SBBreakpoint SBTarget::BreakpointCreateBySourceRegex(
 lldb::SBBreakpoint
 SBTarget::BreakpointCreateForException(lldb::LanguageType language,
                                        bool catch_bp, bool throw_bp) {
+  SBStringList no_extra_args;
+  return BreakpointCreateForException(language, catch_bp, throw_bp,
+                                      no_extra_args);
+}
+
+lldb::SBBreakpoint
+SBTarget::BreakpointCreateForException(lldb::LanguageType language,
+                                       bool catch_bp, bool throw_bp,
+                                       SBStringList &extra_args) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_API));
 
   SBBreakpoint sb_bp;
@@ -1001,6 +1012,22 @@ SBTarget::BreakpointCreateForException(lldb::LanguageType language,
     const bool hardware = false;
     sb_bp = target_sp->CreateExceptionBreakpoint(language, catch_bp, throw_bp,
                                                   hardware);
+    size_t num_extra_args = extra_args.GetSize();
+    if (num_extra_args > 0) {
+      // Have to convert this to Args, and pass it to the precondition:
+      if (num_extra_args % 2 == 0) {
+        Args args;
+        for (size_t i = 0; i < num_extra_args; i += 2) {
+          args.AppendArgument(extra_args.GetStringAtIndex(i));
+          args.AppendArgument(extra_args.GetStringAtIndex(i + 1));
+        }
+        BreakpointSP bkpt = sb_bp.GetSP();
+        Breakpoint::BreakpointPreconditionSP pre_condition_sp =
+            bkpt->GetPrecondition();
+        if (pre_condition_sp)
+          pre_condition_sp->ConfigurePrecondition(args);
+      }
+    }
   }
 
   if (log)
@@ -1442,8 +1469,8 @@ lldb::SBModule SBTarget::AddModule(const char *path, const char *triple,
       module_spec.GetUUID().SetFromCString(uuid_cstr);
 
     if (triple)
-      module_spec.GetArchitecture() = Platform::GetAugmentedArchSpec(
-          target_sp->GetPlatform().get(), triple);
+      module_spec.GetArchitecture().SetTriple(triple,
+                                              target_sp->GetPlatform().get());
     else
       module_spec.GetArchitecture() = target_sp->GetArchitecture();
 

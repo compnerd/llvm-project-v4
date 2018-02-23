@@ -29,7 +29,7 @@ typedef std::vector<pthread_t> thread_vector;
 pseudo_barrier_t g_barrier;
 int g_breakpoint = 0;
 int g_sigusr1_count = 0;
-uint32_t g_watchme;
+std::atomic_int g_watchme;
 
 struct action_args {
   int delay;
@@ -74,7 +74,7 @@ watchpoint_func (void *input) {
     pseudo_barrier_wait(g_barrier);
     do_action_args(input);
 
-    g_watchme = 1;     // watchpoint triggers here
+    g_watchme += 1;     // watchpoint triggers here
     return 0;
 }
 
@@ -127,12 +127,12 @@ int dotest()
     // Actions are triggered immediately after the thread is spawned
     unsigned num_breakpoint_threads = 1;
     unsigned num_watchpoint_threads = 0;
-    unsigned num_signal_threads = 1;
+    unsigned num_signal_threads = 0;
     unsigned num_crash_threads = 0;
 
     // Actions below are triggered after a 1-second delay
     unsigned num_delay_breakpoint_threads = 0;
-    unsigned num_delay_watchpoint_threads = 0;
+    unsigned num_delay_watchpoint_threads = 1;
     unsigned num_delay_signal_threads = 0;
     unsigned num_delay_crash_threads = 0;
 

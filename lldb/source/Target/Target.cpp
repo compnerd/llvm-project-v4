@@ -11,10 +11,12 @@
 // C++ Includes
 #include <mutex>
 // Other libraries and framework includes
+#include "swift/Frontend/Frontend.h"
 // Project includes
 #include "Plugins/ExpressionParser/Clang/ClangASTSource.h"
 #include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
 #include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
+#include "Plugins/ExpressionParser/Swift/SwiftREPL.h"
 #include "lldb/Breakpoint/BreakpointIDList.h"
 #include "lldb/Breakpoint/BreakpointResolver.h"
 #include "lldb/Breakpoint/BreakpointResolverAddress.h"
@@ -26,12 +28,12 @@
 #include "lldb/Core/Event.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
-#include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/SourceManager.h"
 #include "lldb/Core/State.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/ValueObject.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/REPL.h"
 #include "lldb/Expression/UserExpression.h"
 #include "lldb/Host/Host.h"
@@ -45,6 +47,8 @@
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/Symbol.h"
+#include "lldb/Symbol/SymbolFile.h"
+#include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
@@ -66,16 +70,6 @@ using namespace lldb_private;
 
 constexpr std::chrono::milliseconds EvaluateExpressionOptions::default_timeout;
 
-Target::Arch::Arch(const ArchSpec &spec)
-    : m_spec(spec),
-      m_plugin_up(PluginManager::CreateArchitectureInstance(spec)) {}
-
-const Target::Arch& Target::Arch::operator=(const ArchSpec &spec) {
-  m_spec = spec;
-  m_plugin_up = PluginManager::CreateArchitectureInstance(spec);
-  return *this;
-}
-
 ConstString &Target::GetStaticBroadcasterClass() {
   static ConstString class_name("lldb.target");
   return class_name;
@@ -87,12 +81,12 @@ Target::Target(Debugger &debugger, const ArchSpec &target_arch,
       Broadcaster(debugger.GetBroadcasterManager(),
                   Target::GetStaticBroadcasterClass().AsCString()),
       ExecutionContextScope(), m_debugger(debugger), m_platform_sp(platform_sp),
-      m_mutex(), m_arch(target_arch),
-      m_images(this), m_section_load_history(), m_breakpoint_list(false),
-      m_internal_breakpoint_list(true), m_watchpoint_list(), m_process_sp(),
-      m_search_filter_sp(), m_image_search_paths(ImageSearchPathsChanged, this),
-      m_ast_importer_sp(), m_source_manager_ap(), m_stop_hooks(),
-      m_stop_hook_next_id(0), m_valid(true), m_suppress_stop_hooks(false),
+      m_mutex(), m_arch(target_arch), m_images(this), m_section_load_history(),
+      m_breakpoint_list(false), m_internal_breakpoint_list(true),
+      m_watchpoint_list(), m_process_sp(), m_search_filter_sp(),
+      m_image_search_paths(ImageSearchPathsChanged, this), m_ast_importer_sp(),
+      m_source_manager_ap(), m_stop_hooks(), m_stop_hook_next_id(0),
+      m_valid(true), m_suppress_stop_hooks(false),
       m_is_dummy_target(is_dummy_target)
 
 {
@@ -107,11 +101,10 @@ Target::Target(Debugger &debugger, const ArchSpec &target_arch,
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
   if (log)
     log->Printf("%p Target::Target()", static_cast<void *>(this));
-  if (target_arch.IsValid()) {
-    LogIfAnyCategoriesSet(LIBLLDB_LOG_TARGET,
-                          "Target::Target created with architecture %s (%s)",
-                          target_arch.GetArchitectureName(),
-                          target_arch.GetTriple().getTriple().c_str());
+  if (m_arch.IsValid()) {
+    LogIfAnyCategoriesSet(
+        LIBLLDB_LOG_TARGET, "Target::Target created with architecture %s (%s)",
+        m_arch.GetArchitectureName(), m_arch.GetTriple().getTriple().c_str());
   }
 }
 
@@ -204,6 +197,13 @@ const lldb::ProcessSP &Target::GetProcessSP() const { return m_process_sp; }
 
 lldb::REPLSP Target::GetREPL(Status &err, lldb::LanguageType language,
                              const char *repl_options, bool can_create) {
+  err.Clear();
+
+  if (!GetProcessSP()) {
+    err.SetErrorStringWithFormat("Can't run the REPL without a live process.");
+    return REPLSP();
+  }
+
   if (language == eLanguageTypeUnknown) {
     std::set<LanguageType> repl_languages;
 
@@ -262,7 +262,7 @@ void Target::Destroy() {
   m_valid = false;
   DeleteCurrentProcess();
   m_platform_sp.reset();
-  m_arch = ArchSpec();
+  m_arch.Clear();
   ClearModules(true);
   m_section_load_history.Clear();
   const bool notify = false;
@@ -342,9 +342,15 @@ BreakpointSP Target::CreateBreakpoint(const FileSpecList *containingModules,
       break;
 
     case eInlineBreakpointsHeaders:
-      if (remapped_file.IsSourceImplementationFile())
-        check_inlines = eLazyBoolNo;
-      else
+      if (remapped_file.IsSourceImplementationFile()) {
+        // Swift can inline a lot of code from other swift files so always
+        // check inlines for swift source files
+        static ConstString g_swift_extension("swift");
+        if (remapped_file.GetFileNameExtension() == g_swift_extension)
+          check_inlines = eLazyBoolYes;
+        else
+          check_inlines = eLazyBoolNo;
+      } else
         check_inlines = eLazyBoolYes;
       break;
 
@@ -1378,8 +1384,8 @@ void Target::ClearModules(bool delete_locations) {
 
 void Target::DidExec() {
   // When a process exec's we need to know about it so we can do some cleanup.
-  m_breakpoint_list.RemoveInvalidLocations(m_arch.GetSpec());
-  m_internal_breakpoint_list.RemoveInvalidLocations(m_arch.GetSpec());
+  m_breakpoint_list.RemoveInvalidLocations(m_arch);
+  m_internal_breakpoint_list.RemoveInvalidLocations(m_arch);
 }
 
 void Target::SetExecutableModule(ModuleSP &executable_sp,
@@ -1397,12 +1403,13 @@ void Target::SetExecutableModule(ModuleSP &executable_sp,
 
     // If we haven't set an architecture yet, reset our architecture based on
     // what we found in the executable module.
-    if (!m_arch.GetSpec().IsValid()) {
+    if (!m_arch.IsValid()) {
       m_arch = executable_sp->GetArchitecture();
-      LLDB_LOG(log,
-               "setting architecture to {0} ({1}) based on executable file",
-               m_arch.GetSpec().GetArchitectureName(),
-               m_arch.GetSpec().GetTriple().getTriple());
+      if (log)
+        log->Printf("Target::SetExecutableModule setting architecture to %s "
+                    "(%s) based on executable file",
+                    m_arch.GetArchitectureName(),
+                    m_arch.GetTriple().getTriple().c_str());
     }
 
     FileSpecList dependent_files;
@@ -1420,7 +1427,7 @@ void Target::SetExecutableModule(ModuleSP &executable_sp,
         else
           platform_dependent_file_spec = dependent_file_spec;
 
-        ModuleSpec module_spec(platform_dependent_file_spec, m_arch.GetSpec());
+        ModuleSpec module_spec(platform_dependent_file_spec, m_arch);
         ModuleSP image_module_sp(GetSharedModule(module_spec));
         if (image_module_sp) {
           ObjectFile *objfile = image_module_sp->GetObjectFile();
@@ -1434,21 +1441,21 @@ void Target::SetExecutableModule(ModuleSP &executable_sp,
 
 bool Target::SetArchitecture(const ArchSpec &arch_spec) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET));
-  bool missing_local_arch = !m_arch.GetSpec().IsValid();
+  bool missing_local_arch = !m_arch.IsValid();
   bool replace_local_arch = true;
   bool compatible_local_arch = false;
   ArchSpec other(arch_spec);
 
   if (!missing_local_arch) {
-    if (m_arch.GetSpec().IsCompatibleMatch(arch_spec)) {
-      other.MergeFrom(m_arch.GetSpec());
+    if (m_arch.IsCompatibleMatch(arch_spec)) {
+      other.MergeFrom(m_arch);
 
-      if (m_arch.GetSpec().IsCompatibleMatch(other)) {
+      if (m_arch.IsCompatibleMatch(other)) {
         compatible_local_arch = true;
         bool arch_changed, vendor_changed, os_changed, os_ver_changed,
             env_changed;
 
-        m_arch.GetSpec().PiecewiseTripleCompare(other, arch_changed, vendor_changed,
+        m_arch.PiecewiseTripleCompare(other, arch_changed, vendor_changed,
                                       os_changed, os_ver_changed, env_changed);
 
         if (!arch_changed && !vendor_changed && !os_changed && !env_changed)
@@ -1462,9 +1469,10 @@ bool Target::SetArchitecture(const ArchSpec &arch_spec) {
     // update the architecture, unless the one we already have is more specified
     if (replace_local_arch)
       m_arch = other;
-    LLDB_LOG(log, "set architecture to {0} ({1})",
-             m_arch.GetSpec().GetArchitectureName(),
-             m_arch.GetSpec().GetTriple().getTriple());
+    if (log)
+      log->Printf("Target::SetArchitecture set architecture to %s (%s)",
+                  m_arch.GetArchitectureName(),
+                  m_arch.GetTriple().getTriple().c_str());
     return true;
   }
 
@@ -1501,12 +1509,12 @@ bool Target::SetArchitecture(const ArchSpec &arch_spec) {
 
 bool Target::MergeArchitecture(const ArchSpec &arch_spec) {
   if (arch_spec.IsValid()) {
-    if (m_arch.GetSpec().IsCompatibleMatch(arch_spec)) {
+    if (m_arch.IsCompatibleMatch(arch_spec)) {
       // The current target arch is compatible with "arch_spec", see if we
       // can improve our current architecture using bits from "arch_spec"
 
       // Merge bits from arch_spec into "merged_arch" and set our architecture
-      ArchSpec merged_arch(m_arch.GetSpec());
+      ArchSpec merged_arch(m_arch);
       merged_arch.MergeFrom(arch_spec);
       return SetArchitecture(merged_arch);
     } else {
@@ -1559,6 +1567,13 @@ void Target::ModulesDidLoad(ModuleList &module_list) {
     if (m_process_sp) {
       m_process_sp->ModulesDidLoad(module_list);
     }
+    // if there's no SwiftASTContext, clearing it doesn't really matter
+    const bool create_on_demand = false;
+    Status error;
+    auto swift_ast_ctx = GetScratchSwiftASTContext(error, create_on_demand);
+    if (swift_ast_ctx)
+      swift_ast_ctx->ModulesDidLoad(module_list);
+    module_list.ClearModuleDependentCaches();
     BroadcastEvent(eBroadcastBitModulesLoaded,
                    new TargetEventData(this->shared_from_this(), module_list));
   }
@@ -1834,8 +1849,8 @@ size_t Target::ReadScalarIntegerFromMemory(const Address &addr,
     size_t bytes_read =
         ReadMemory(addr, prefer_file_cache, &uval, byte_size, error);
     if (bytes_read == byte_size) {
-      DataExtractor data(&uval, sizeof(uval), m_arch.GetSpec().GetByteOrder(),
-                         m_arch.GetSpec().GetAddressByteSize());
+      DataExtractor data(&uval, sizeof(uval), m_arch.GetByteOrder(),
+                         m_arch.GetAddressByteSize());
       lldb::offset_t offset = 0;
       if (byte_size <= 4)
         scalar = data.GetMaxU32(&offset, byte_size);
@@ -1869,7 +1884,7 @@ bool Target::ReadPointerFromMemory(const Address &addr, bool prefer_file_cache,
                                    Status &error, Address &pointer_addr) {
   Scalar scalar;
   if (ReadScalarIntegerFromMemory(addr, prefer_file_cache,
-                                  m_arch.GetSpec().GetAddressByteSize(), false, scalar,
+                                  m_arch.GetAddressByteSize(), false, scalar,
                                   error)) {
     addr_t pointer_vm_addr = scalar.ULongLong(LLDB_INVALID_ADDRESS);
     if (pointer_vm_addr != LLDB_INVALID_ADDRESS) {
@@ -2070,9 +2085,17 @@ void Target::ImageSearchPathsChanged(const PathMappingList &path_list,
     target->SetExecutableModule(exe_module_sp, true);
 }
 
-TypeSystem *Target::GetScratchTypeSystemForLanguage(Status *error,
-                                                    lldb::LanguageType language,
-                                                    bool create_on_demand) {
+#ifdef __clang_analyzer__
+// See GetScratchTypeSystemForLanguage() in Target.h
+TypeSystem *Target::GetScratchTypeSystemForLanguageImpl(
+    Status *error, lldb::LanguageType language, bool create_on_demand,
+    const char *compiler_options)
+#else
+TypeSystem *Target::GetScratchTypeSystemForLanguage(
+    Status *error, lldb::LanguageType language, bool create_on_demand,
+    const char *compiler_options)
+#endif
+{
   if (!m_valid)
     return nullptr;
 
@@ -2101,12 +2124,86 @@ TypeSystem *Target::GetScratchTypeSystemForLanguage(Status *error,
     }
   }
 
-  return m_scratch_type_system_map.GetTypeSystemForLanguage(language, this,
-                                                            create_on_demand);
+  if (m_cant_make_scratch_type_system.find(language) !=
+      m_cant_make_scratch_type_system.end()) {
+    return nullptr;
+  }
+
+  TypeSystem *type_system = m_scratch_type_system_map.GetTypeSystemForLanguage(
+      language, this, create_on_demand, compiler_options);
+  if (language == eLanguageTypeSwift) {
+    if (SwiftASTContext *swift_ast_ctx =
+            llvm::dyn_cast_or_null<SwiftASTContext>(type_system)) {
+      if (swift_ast_ctx->CheckProcessChanged() ||
+          swift_ast_ctx->HasFatalErrors()) {
+        if (swift_ast_ctx->HasFatalErrors()) {
+          if (StreamSP error_stream_sp = GetDebugger().GetAsyncErrorStream()) {
+            error_stream_sp->Printf("Shared Swift state for %s has developed "
+                                    "fatal errors and is being discarded.\n",
+                                    GetExecutableModule()
+                                        ->GetPlatformFileSpec()
+                                        .GetFilename()
+                                        .AsCString());
+            error_stream_sp->PutCString(
+                "REPL definitions and persistent names/types will be lost.\n");
+            error_stream_sp->Flush();
+          }
+        }
+        m_scratch_type_system_map.RemoveTypeSystemsForLanguage(language);
+        type_system = m_scratch_type_system_map.GetTypeSystemForLanguage(
+            language, this, create_on_demand, compiler_options);
+
+        if (SwiftASTContext *new_swift_ast_ctx =
+                llvm::dyn_cast_or_null<SwiftASTContext>(type_system)) {
+          if (new_swift_ast_ctx->HasFatalErrors()) {
+            if (StreamSP error_stream_sp =
+                    GetDebugger().GetAsyncErrorStream()) {
+              error_stream_sp->PutCString("Can't construct shared Swift state "
+                                          "for this process after repeated "
+                                          "attempts.\n");
+              error_stream_sp->PutCString("Giving up.  Fatal errors:\n");
+              DiagnosticManager diag_mgr;
+              new_swift_ast_ctx->PrintDiagnostics(diag_mgr);
+              error_stream_sp->PutCString(diag_mgr.GetString().c_str());
+              error_stream_sp->Flush();
+            }
+
+            m_cant_make_scratch_type_system[language] = true;
+            m_scratch_type_system_map.RemoveTypeSystemsForLanguage(language);
+            type_system = nullptr;
+          }
+        }
+      }
+    } else if (create_on_demand) {
+      if (StreamSP error_stream_sp = GetDebugger().GetAsyncErrorStream()) {
+        error_stream_sp->Printf(
+            "Shared Swift state for %s could not be initialized.\n",
+            GetExecutableModule()
+                ->GetPlatformFileSpec()
+                .GetFilename()
+                .AsCString());
+        error_stream_sp->PutCString(
+            "The REPL and expressions are unavailable.\n");
+        error_stream_sp->Flush();
+      }
+    }
+  }
+  return type_system;
 }
 
+const TypeSystemMap &Target::GetTypeSystemMap() {
+  return m_scratch_type_system_map;
+}
+
+#ifdef __clang_analyzer__
+// See GetScratchTypeSystemForLanguage() in Target.h
 PersistentExpressionState *
-Target::GetPersistentExpressionStateForLanguage(lldb::LanguageType language) {
+Target::GetPersistentExpressionStateForLanguageImpl(lldb::LanguageType language)
+#else
+PersistentExpressionState *
+Target::GetPersistentExpressionStateForLanguage(lldb::LanguageType language)
+#endif
+{
   TypeSystem *type_system =
       GetScratchTypeSystemForLanguage(nullptr, language, true);
 
@@ -2198,7 +2295,13 @@ Target::GetUtilityFunctionForLanguage(const char *text,
   return utility_fn;
 }
 
-ClangASTContext *Target::GetScratchClangASTContext(bool create_on_demand) {
+#ifdef __clang_analyzer__
+// See GetScratchTypeSystemForLanguage() in Target.h
+ClangASTContext *Target::GetScratchClangASTContextImpl(bool create_on_demand)
+#else
+ClangASTContext *Target::GetScratchClangASTContext(bool create_on_demand)
+#endif
+{
   if (m_valid) {
     if (TypeSystem *type_system = GetScratchTypeSystemForLanguage(
             nullptr, eLanguageTypeC, create_on_demand))
@@ -2215,6 +2318,22 @@ ClangASTImporterSP Target::GetClangASTImporter() {
     return m_ast_importer_sp;
   }
   return ClangASTImporterSP();
+}
+
+#ifdef __clang_analyzer__
+// See GetScratchTypeSystemForLanguage() in Target.h
+SwiftASTContext *
+Target::GetScratchSwiftASTContextImpl(Status &error, bool create_on_demand,
+                                      const char *extra_options)
+#else
+SwiftASTContext *Target::GetScratchSwiftASTContext(Status &error,
+                                                   bool create_on_demand,
+                                                   const char *extra_options)
+#endif
+{
+  return llvm::dyn_cast_or_null<SwiftASTContext>(
+      GetScratchTypeSystemForLanguage(&error, eLanguageTypeSwift,
+                                      create_on_demand, extra_options));
 }
 
 void Target::SettingsInitialize() { Process::SettingsInitialize(); }
@@ -2313,7 +2432,7 @@ ExpressionResults Target::EvaluateExpression(
     result_valobj_sp = persistent_var_sp->GetValueObject();
     execution_results = eExpressionCompleted;
   } else {
-    llvm::StringRef prefix = GetExpressionPrefixContents();
+    const char *prefix = GetExpressionPrefixContentsAsCString();
     Status error;
     execution_results = UserExpression::Evaluate(exe_ctx, options, expr, prefix,
                                                  result_valobj_sp, error,
@@ -2362,7 +2481,7 @@ lldb::addr_t Target::GetPersistentSymbol(const ConstString &name) {
 lldb::addr_t Target::GetCallableLoadAddress(lldb::addr_t load_addr,
                                             AddressClass addr_class) const {
   addr_t code_addr = load_addr;
-  switch (m_arch.GetSpec().GetMachine()) {
+  switch (m_arch.GetMachine()) {
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
   case llvm::Triple::mips64:
@@ -2421,7 +2540,7 @@ lldb::addr_t Target::GetCallableLoadAddress(lldb::addr_t load_addr,
 lldb::addr_t Target::GetOpcodeLoadAddress(lldb::addr_t load_addr,
                                           AddressClass addr_class) const {
   addr_t opcode_addr = load_addr;
-  switch (m_arch.GetSpec().GetMachine()) {
+  switch (m_arch.GetMachine()) {
   case llvm::Triple::mips:
   case llvm::Triple::mipsel:
   case llvm::Triple::mips64:
@@ -2453,7 +2572,7 @@ lldb::addr_t Target::GetBreakableLoadAddress(lldb::addr_t addr) {
   addr_t breakable_addr = addr;
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
 
-  switch (m_arch.GetSpec().GetMachine()) {
+  switch (m_arch.GetMachine()) {
   default:
     break;
   case llvm::Triple::mips:
@@ -2464,7 +2583,7 @@ lldb::addr_t Target::GetBreakableLoadAddress(lldb::addr_t addr) {
     addr_t current_offset = 0;
     uint32_t loop_count = 0;
     Address resolved_addr;
-    uint32_t arch_flags = m_arch.GetSpec().GetFlags();
+    uint32_t arch_flags = m_arch.GetFlags();
     bool IsMips16 = arch_flags & ArchSpec::eMIPSAse_mips16;
     bool IsMicromips = arch_flags & ArchSpec::eMIPSAse_micromips;
     SectionLoadList &section_load_list = GetSectionLoadList();
@@ -2517,7 +2636,7 @@ lldb::addr_t Target::GetBreakableLoadAddress(lldb::addr_t addr) {
 
     // Create Disassembler Instance
     lldb::DisassemblerSP disasm_sp(
-        Disassembler::FindPlugin(m_arch.GetSpec(), nullptr, nullptr));
+        Disassembler::FindPlugin(m_arch, nullptr, nullptr));
 
     ExecutionContext exe_ctx;
     CalculateExecutionContext(exe_ctx);
@@ -2679,10 +2798,6 @@ void Target::RunStopHooks() {
 
   if (!m_process_sp)
     return;
-    
-  // Somebody might have restarted the process:
-  if (m_process_sp->GetState() != eStateStopped)
-    return;
 
   // <rdar://problem/12027563> make sure we check that we are not stopped
   // because of us running a user expression
@@ -2788,12 +2903,9 @@ void Target::RunStopHooks() {
         // running the stop hooks.
         if ((result.GetStatus() == eReturnStatusSuccessContinuingNoResult) ||
             (result.GetStatus() == eReturnStatusSuccessContinuingResult)) {
-          // But only complain if there were more stop hooks to do:
-          StopHookCollection::iterator tmp = pos;
-          if (++tmp != end)
-            result.AppendMessageWithFormat("\nAborting stop hooks, hook %" PRIu64
-                                           " set the program running.\n",
-                                           cur_hook_sp->GetID());
+          result.AppendMessageWithFormat("Aborting stop hooks, hook %" PRIu64
+                                         " set the program running.",
+                                         cur_hook_sp->GetID());
           keep_going = false;
         }
       }
@@ -2942,6 +3054,52 @@ bool Target::SetSectionUnloaded(const lldb::SectionSP &section_sp,
 }
 
 void Target::ClearAllLoadedSections() { m_section_load_history.Clear(); }
+
+lldb::addr_t Target::FindLoadAddrForNameInSymbolsAndPersistentVariables(
+    ConstString name_const_str, SymbolType symbol_type) {
+  lldb::addr_t symbol_addr = LLDB_INVALID_ADDRESS;
+  SymbolContextList sc_list;
+
+  if (GetImages().FindSymbolsWithNameAndType(name_const_str, symbol_type,
+                                             sc_list)) {
+    SymbolContext desired_symbol;
+
+    if (sc_list.GetSize() == 1 &&
+        sc_list.GetContextAtIndex(0, desired_symbol)) {
+      if (desired_symbol.symbol) {
+        symbol_addr = desired_symbol.symbol->GetAddress().GetLoadAddress(this);
+      }
+    } else if (sc_list.GetSize() > 1) {
+      for (size_t i = 0; i < sc_list.GetSize(); i++) {
+        if (sc_list.GetContextAtIndex(i, desired_symbol)) {
+          if (desired_symbol.symbol) {
+            symbol_addr =
+                desired_symbol.symbol->GetAddress().GetLoadAddress(this);
+            if (symbol_addr != LLDB_INVALID_ADDRESS)
+              break;
+          }
+        }
+      }
+    }
+  }
+
+  if (symbol_addr == LLDB_INVALID_ADDRESS) {
+    // If we didn't find it in the symbols, check the ClangPersistentVariables,
+    // 'cause we may have
+    // made it by hand.
+    ConstString mangled_const_str;
+    if (name_const_str.GetMangledCounterpart(mangled_const_str))
+      symbol_addr = GetPersistentSymbol(mangled_const_str);
+  }
+
+  if (symbol_addr == LLDB_INVALID_ADDRESS) {
+    // Let's try looking for the name passed-in itself, as it might be a mangled
+    // name
+    symbol_addr = GetPersistentSymbol(name_const_str);
+  }
+
+  return symbol_addr;
+}
 
 Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
   Status error;
@@ -3397,9 +3555,18 @@ static PropertyDefinition g_properties[] = {
     {"clang-module-search-paths", OptionValue::eTypeFileSpecList, false, 0,
      nullptr, nullptr,
      "List of directories to be searched when locating modules for Clang."},
+    {"swift-framework-search-paths", OptionValue::eTypeFileSpecList, false, 0,
+     nullptr, nullptr,
+     "List of directories to be searched when locating frameworks for Swift."},
+    {"swift-module-search-paths", OptionValue::eTypeFileSpecList, false, 0,
+     nullptr, nullptr,
+     "List of directories to be searched when locating modules for Swift."},
     {"auto-import-clang-modules", OptionValue::eTypeBoolean, false, true,
      nullptr, nullptr,
      "Automatically load Clang modules referred to by the program."},
+    {"use-all-compiler-flags", OptionValue::eTypeBoolean, false, false, nullptr,
+     nullptr, "Try to use compiler flags for all modules when setting up the "
+              "Swift expression parser, not just the main executable."},
     {"auto-apply-fixits", OptionValue::eTypeBoolean, false, true, nullptr,
      nullptr, "Automatically apply fix-it hints to expressions."},
     {"notify-about-fixits", OptionValue::eTypeBoolean, false, true, nullptr,
@@ -3509,6 +3676,10 @@ static PropertyDefinition g_properties[] = {
      OptionValue::eTypeString, nullptr, nullptr,
      "A list of trap handler function names, e.g. a common Unix user process "
      "one is _sigtramp."},
+    {"sdk-path", OptionValue::eTypeFileSpec, false, 0, nullptr, nullptr,
+     "The path to the SDK used to build the current target."},
+    {"module-cache-path", OptionValue::eTypeFileSpec, false, 0, nullptr,
+     nullptr, "The path to the module-cache directory."},
     {"display-runtime-support-values", OptionValue::eTypeBoolean, false, false,
      nullptr, nullptr, "If true, LLDB will show variables that are meant to "
                        "support the operation of a language's runtime "
@@ -3529,7 +3700,10 @@ enum {
   ePropertyExecutableSearchPaths,
   ePropertyDebugFileSearchPaths,
   ePropertyClangModuleSearchPaths,
+  ePropertySwiftFrameworkSearchPaths,
+  ePropertySwiftModuleSearchPaths,
   ePropertyAutoImportClangModules,
+  ePropertyUseAllCompilerFlags,
   ePropertyAutoApplyFixIts,
   ePropertyNotifyAboutFixIts,
   ePropertySaveObjects,
@@ -3558,6 +3732,8 @@ enum {
   ePropertyMemoryModuleLoadLevel,
   ePropertyDisplayExpressionsInCrashlogs,
   ePropertyTrapHandlerNames,
+  ePropertySDKPath,
+  ePropertyModuleCachePath,
   ePropertyDisplayRuntimeSupportValues,
   ePropertyNonStopModeEnabled,
   ePropertyExperimental
@@ -3656,17 +3832,15 @@ protected:
 // TargetProperties
 //----------------------------------------------------------------------
 static PropertyDefinition g_experimental_properties[]{
-    {"inject-local-vars", OptionValue::eTypeBoolean, true, true, nullptr,
+    {"inject-local-vars", OptionValue::eTypeBoolean, true, false, nullptr,
      nullptr,
      "If true, inject local variables explicitly into the expression text.  "
      "This will fix symbol resolution when there are name collisions between "
      "ivars and local variables.  "
      "But it can make expressions run much more slowly."},
-    {"use-modern-type-lookup", OptionValue::eTypeBoolean, true, false, nullptr,
-     nullptr, "If true, use Clang's modern type lookup infrastructure."},
     {nullptr, OptionValue::eTypeInvalid, true, 0, nullptr, nullptr, nullptr}};
 
-enum { ePropertyInjectLocalVars = 0, ePropertyUseModernTypeLookup };
+enum { ePropertyInjectLocalVars = 0 };
 
 class TargetExperimentalOptionValueProperties : public OptionValueProperties {
 public:
@@ -3775,18 +3949,6 @@ void TargetProperties::SetInjectLocalVariables(ExecutionContext *exe_ctx,
   if (exp_values)
     exp_values->SetPropertyAtIndexAsBoolean(exe_ctx, ePropertyInjectLocalVars,
                                             true);
-}
-
-bool TargetProperties::GetUseModernTypeLookup() const {
-  const Property *exp_property = m_collection_sp->GetPropertyAtIndex(
-      nullptr, false, ePropertyExperimental);
-  OptionValueProperties *exp_values =
-      exp_property->GetValue()->GetAsProperties();
-  if (exp_values)
-    return exp_values->GetPropertyAtIndexAsBoolean(
-        nullptr, ePropertyUseModernTypeLookup, true);
-  else
-    return true;
 }
 
 ArchSpec TargetProperties::GetDefaultArchitecture() const {
@@ -3950,6 +4112,42 @@ FileSpecList &TargetProperties::GetDebugFileSearchPaths() {
   return option_value->GetCurrentValue();
 }
 
+FileSpec &TargetProperties::GetModuleCachePath() {
+  const uint32_t idx = ePropertyModuleCachePath;
+  OptionValueFileSpec *option_value =
+      m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpec(NULL, false,
+                                                               idx);
+  assert(option_value);
+  return option_value->GetCurrentValue();
+}
+
+FileSpec &TargetProperties::GetSDKPath() {
+  const uint32_t idx = ePropertySDKPath;
+  OptionValueFileSpec *option_value =
+      m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpec(NULL, false,
+                                                               idx);
+  assert(option_value);
+  return option_value->GetCurrentValue();
+}
+
+FileSpecList &TargetProperties::GetSwiftFrameworkSearchPaths() {
+  const uint32_t idx = ePropertySwiftFrameworkSearchPaths;
+  OptionValueFileSpecList *option_value =
+      m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpecList(NULL, false,
+                                                                   idx);
+  assert(option_value);
+  return option_value->GetCurrentValue();
+}
+
+FileSpecList &TargetProperties::GetSwiftModuleSearchPaths() {
+  const uint32_t idx = ePropertySwiftModuleSearchPaths;
+  OptionValueFileSpecList *option_value =
+      m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpecList(NULL, false,
+                                                                   idx);
+  assert(option_value);
+  return option_value->GetCurrentValue();
+}
+
 FileSpecList &TargetProperties::GetClangModuleSearchPaths() {
   const uint32_t idx = ePropertyClangModuleSearchPaths;
   OptionValueFileSpecList *option_value =
@@ -3963,6 +4161,12 @@ bool TargetProperties::GetEnableAutoImportClangModules() const {
   const uint32_t idx = ePropertyAutoImportClangModules;
   return m_collection_sp->GetPropertyAtIndexAsBoolean(
       nullptr, idx, g_properties[idx].default_uint_value != 0);
+}
+
+bool TargetProperties::GetUseAllCompilerFlags() const {
+  const uint32_t idx = ePropertyUseAllCompilerFlags;
+  return m_collection_sp->GetPropertyAtIndexAsBoolean(
+      NULL, idx, g_properties[idx].default_uint_value != 0);
 }
 
 bool TargetProperties::GetEnableAutoApplyFixIts() const {
@@ -4046,19 +4250,18 @@ LanguageType TargetProperties::GetLanguage() const {
   return LanguageType();
 }
 
-llvm::StringRef TargetProperties::GetExpressionPrefixContents() {
+const char *TargetProperties::GetExpressionPrefixContentsAsCString() {
   const uint32_t idx = ePropertyExprPrefix;
   OptionValueFileSpec *file =
       m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpec(nullptr, false,
                                                                idx);
   if (file) {
-    DataBufferSP data_sp(file->GetFileContents());
+    const bool null_terminate = true;
+    DataBufferSP data_sp(file->GetFileContents(null_terminate));
     if (data_sp)
-      return llvm::StringRef(
-          reinterpret_cast<const char *>(data_sp->GetBytes()),
-          data_sp->GetByteSize());
+      return (const char *)data_sp->GetBytes();
   }
-  return "";
+  return nullptr;
 }
 
 bool TargetProperties::GetBreakpointsConsultPlatformAvoidList() {
@@ -4250,6 +4453,14 @@ void TargetProperties::DisableSTDIOValueChangedCallback(
     this_->m_launch_info.GetFlags().Set(lldb::eLaunchFlagDisableSTDIO);
   else
     this_->m_launch_info.GetFlags().Clear(lldb::eLaunchFlagDisableSTDIO);
+}
+
+uint32_t EvaluateExpressionOptions::GetExpressionNumber() const {
+  if (m_expr_number == 0) {
+    static uint32_t g_expr_idx = 0;
+    m_expr_number = ++g_expr_idx;
+  }
+  return m_expr_number;
 }
 
 //----------------------------------------------------------------------

@@ -39,48 +39,68 @@ using namespace std;
 extern int g_verbose;
 
 DWARFCompileUnit::DWARFCompileUnit(SymbolFileDWARF *dwarf2Data)
-    : m_dwarf2Data(dwarf2Data) {}
+    : m_dwarf2Data(dwarf2Data), m_abbrevs(NULL), m_user_data(NULL),
+      m_die_array(), m_func_aranges_ap(), m_base_addr(0),
+      m_offset(DW_INVALID_OFFSET), m_length(0), m_version(0),
+      m_addr_size(DWARFCompileUnit::GetDefaultAddressSize()),
+      m_producer(eProducerInvalid), m_producer_version_major(0),
+      m_producer_version_minor(0), m_producer_version_update(0),
+      m_language_type(eLanguageTypeUnknown), m_is_dwarf64(false),
+      m_is_optimized(eLazyBoolCalculate), m_addr_base(0),
+      m_ranges_base(0), m_base_obj_offset(DW_INVALID_OFFSET) {}
 
 DWARFCompileUnit::~DWARFCompileUnit() {}
 
-DWARFCompileUnitSP DWARFCompileUnit::Extract(SymbolFileDWARF *dwarf2Data,
-    lldb::offset_t *offset_ptr) {
-  DWARFCompileUnitSP cu_sp(new DWARFCompileUnit(dwarf2Data));
-  // Out of memory?
-  if (cu_sp.get() == NULL)
-    return nullptr;
+void DWARFCompileUnit::Clear() {
+  m_offset = DW_INVALID_OFFSET;
+  m_length = 0;
+  m_version = 0;
+  m_abbrevs = NULL;
+  m_addr_size = DWARFCompileUnit::GetDefaultAddressSize();
+  m_base_addr = 0;
+  m_die_array.clear();
+  m_func_aranges_ap.reset();
+  m_user_data = NULL;
+  m_producer = eProducerInvalid;
+  m_language_type = eLanguageTypeUnknown;
+  m_is_dwarf64 = false;
+  m_is_optimized = eLazyBoolCalculate;
+  m_addr_base = 0;
+  m_base_obj_offset = DW_INVALID_OFFSET;
+}
 
-  const DWARFDataExtractor &debug_info = dwarf2Data->get_debug_info_data();
+bool DWARFCompileUnit::Extract(const DWARFDataExtractor &debug_info,
+                               lldb::offset_t *offset_ptr) {
+  Clear();
 
-  cu_sp->m_offset = *offset_ptr;
+  m_offset = *offset_ptr;
 
   if (debug_info.ValidOffset(*offset_ptr)) {
     dw_offset_t abbr_offset;
-    const DWARFDebugAbbrev *abbr = dwarf2Data->DebugAbbrev();
-    cu_sp->m_length = debug_info.GetDWARFInitialLength(offset_ptr);
-    cu_sp->m_is_dwarf64 = debug_info.IsDWARF64();
-    cu_sp->m_version = debug_info.GetU16(offset_ptr);
+    const DWARFDebugAbbrev *abbr = m_dwarf2Data->DebugAbbrev();
+    m_length = debug_info.GetDWARFInitialLength(offset_ptr);
+    m_is_dwarf64 = debug_info.IsDWARF64();
+    m_version = debug_info.GetU16(offset_ptr);
     abbr_offset = debug_info.GetDWARFOffset(offset_ptr);
-    cu_sp->m_addr_size = debug_info.GetU8(offset_ptr);
+    m_addr_size = debug_info.GetU8(offset_ptr);
 
-    bool length_OK =
-        debug_info.ValidOffset(cu_sp->GetNextCompileUnitOffset() - 1);
-    bool version_OK = SymbolFileDWARF::SupportedVersion(cu_sp->m_version);
+    bool length_OK = debug_info.ValidOffset(GetNextCompileUnitOffset() - 1);
+    bool version_OK = SymbolFileDWARF::SupportedVersion(m_version);
     bool abbr_offset_OK =
-        dwarf2Data->get_debug_abbrev_data().ValidOffset(abbr_offset);
-    bool addr_size_OK = (cu_sp->m_addr_size == 4) || (cu_sp->m_addr_size == 8);
+        m_dwarf2Data->get_debug_abbrev_data().ValidOffset(abbr_offset);
+    bool addr_size_OK = ((m_addr_size == 4) || (m_addr_size == 8));
 
     if (length_OK && version_OK && addr_size_OK && abbr_offset_OK &&
         abbr != NULL) {
-      cu_sp->m_abbrevs = abbr->GetAbbreviationDeclarationSet(abbr_offset);
-      return cu_sp;
+      m_abbrevs = abbr->GetAbbreviationDeclarationSet(abbr_offset);
+      return true;
     }
 
     // reset the offset to where we tried to parse from if anything went wrong
-    *offset_ptr = cu_sp->m_offset;
+    *offset_ptr = m_offset;
   }
 
-  return nullptr;
+  return false;
 }
 
 void DWARFCompileUnit::ClearDIEs(bool keep_compile_unit_die) {
@@ -600,10 +620,6 @@ void DWARFCompileUnit::Index(NameToDIE &func_basenames,
                              NameToDIE &objc_class_selectors,
                              NameToDIE &globals, NameToDIE &types,
                              NameToDIE &namespaces) {
-  assert(!m_dwarf2Data->GetBaseCompileUnit() &&
-         "DWARFCompileUnit associated with .dwo or .dwp "
-         "should not be indexed directly");
-
   Log *log(LogChannelDWARF::GetLogIfAll(DWARF_LOG_LOOKUPS));
 
   if (log) {
@@ -788,30 +804,52 @@ void DWARFCompileUnit::IndexPrivate(
     case DW_TAG_subprogram:
       if (has_address) {
         if (name) {
-          ObjCLanguage::MethodName objc_method(name, true);
-          if (objc_method.IsValid(true)) {
-            ConstString objc_class_name_with_category(
-                objc_method.GetClassNameWithCategory());
-            ConstString objc_selector_name(objc_method.GetSelector());
-            ConstString objc_fullname_no_category_name(
-                objc_method.GetFullNameWithoutCategory(true));
-            ConstString objc_class_name_no_category(objc_method.GetClassName());
-            func_fullnames.Insert(ConstString(name),
-                                  DIERef(cu_offset, die.GetOffset()));
-            if (objc_class_name_with_category)
-              objc_class_selectors.Insert(objc_class_name_with_category,
-                                          DIERef(cu_offset, die.GetOffset()));
-            if (objc_class_name_no_category &&
-                objc_class_name_no_category != objc_class_name_with_category)
-              objc_class_selectors.Insert(objc_class_name_no_category,
-                                          DIERef(cu_offset, die.GetOffset()));
-            if (objc_selector_name)
-              func_selectors.Insert(objc_selector_name,
+          bool has_valid_objc_method = false;
+
+          if (Language::LanguageIsObjC(cu_language)) {
+            ObjCLanguage::MethodName objc_method(name, true);
+            if (objc_method.IsValid(true)) {
+              ConstString objc_class_name_with_category(
+                  objc_method.GetClassNameWithCategory());
+              ConstString objc_selector_name(objc_method.GetSelector());
+              ConstString objc_fullname_no_category_name(
+                  objc_method.GetFullNameWithoutCategory(true));
+              ConstString objc_class_name_no_category(
+                  objc_method.GetClassName());
+              func_fullnames.Insert(ConstString(name),
                                     DIERef(cu_offset, die.GetOffset()));
-            if (objc_fullname_no_category_name)
-              func_fullnames.Insert(objc_fullname_no_category_name,
+              if (objc_class_name_with_category)
+                objc_class_selectors.Insert(objc_class_name_with_category,
+                                            DIERef(cu_offset, die.GetOffset()));
+              if (objc_class_name_no_category &&
+                  objc_class_name_no_category != objc_class_name_with_category)
+                objc_class_selectors.Insert(objc_class_name_no_category,
+                                            DIERef(cu_offset, die.GetOffset()));
+              if (objc_selector_name)
+                func_selectors.Insert(objc_selector_name,
+                                      DIERef(cu_offset, die.GetOffset()));
+              if (objc_fullname_no_category_name)
+                func_fullnames.Insert(objc_fullname_no_category_name,
+                                      DIERef(cu_offset, die.GetOffset()));
+              has_valid_objc_method = true;
+            }
+          } else if (cu_language == eLanguageTypeGo) {
+            // If the name is of the form {something}.{basename}, we're going
+            // to inject an accelerator for basename into the mapping table.
+            // This will allow us to handle user-specified symbol names
+            // in Go versions where the DW_AT_name of the subprogram is
+            // set to {package}.{funcname}, without colliding with how
+            // Swift handles this.
+            llvm::StringRef name_string_ref(name);
+            const size_t dot_pos = name_string_ref.find_last_of('.');
+            if ((dot_pos != llvm::StringRef::npos) &&
+                (name_string_ref.size() > dot_pos + 1)) {
+              llvm::StringRef base_name = name_string_ref.substr(dot_pos + 1);
+              func_basenames.Insert(ConstString(base_name.str()),
                                     DIERef(cu_offset, die.GetOffset()));
+            }
           }
+
           // If we have a mangled name, then the DW_AT_name attribute
           // is usually the method name without the class or any parameters
           const DWARFDebugInfoEntry *parent = die.GetParent();
@@ -839,7 +877,7 @@ void DWARFCompileUnit::IndexPrivate(
             func_basenames.Insert(ConstString(name),
                                   DIERef(cu_offset, die.GetOffset()));
 
-          if (!is_method && !mangled_cstr && !objc_method.IsValid(true))
+          if (!is_method && !mangled_cstr && !has_valid_objc_method)
             func_fullnames.Insert(ConstString(name),
                                   DIERef(cu_offset, die.GetOffset()));
         }
@@ -901,8 +939,24 @@ void DWARFCompileUnit::IndexPrivate(
     case DW_TAG_typedef:
     case DW_TAG_union_type:
     case DW_TAG_unspecified_type:
-      if (name && !is_declaration)
+      if (name && !is_declaration) {
+        if (cu_language == eLanguageTypeGo) {
+          // For Go, check if the type name appears to have the full
+          // package scope in it.  If so, reduce to the basename and
+          // add a type lookup for the basename.
+          llvm::StringRef name_string_ref(name);
+          const size_t dot_pos = name_string_ref.find_last_of('.');
+          if ((dot_pos != llvm::StringRef::npos) &&
+              (name_string_ref.size() > dot_pos + 1)) {
+            llvm::StringRef base_name = name_string_ref.substr(dot_pos + 1);
+            types.Insert(ConstString(base_name),
+                         DIERef(cu_offset, die.GetOffset()));
+          }
+        }
+
+        // Add a type mapping for the name just as it appeared.
         types.Insert(ConstString(name), DIERef(cu_offset, die.GetOffset()));
+      }
       if (mangled_cstr && !is_declaration)
         types.Insert(ConstString(mangled_cstr),
                      DIERef(cu_offset, die.GetOffset()));
@@ -1035,6 +1089,12 @@ uint32_t DWARFCompileUnit::GetProducerVersionUpdate() {
     ParseProducerInfo();
   return m_producer_version_update;
 }
+
+// Remove this once GOOGLE_RenderScript is available in our LLVM.
+#if !defined(DW_LANG_GOOGLE_RenderScript)
+// HANDLE_DW_LANG(0x8e57, GOOGLE_RenderScript)
+#define DW_LANG_GOOGLE_RenderScript 0x8e57
+#endif
 
 LanguageType DWARFCompileUnit::LanguageTypeFromDWARF(uint64_t val) {
   // Note: user languages between lo_user and hi_user

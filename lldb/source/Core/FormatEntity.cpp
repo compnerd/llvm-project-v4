@@ -11,6 +11,7 @@
 
 #include "lldb/Core/Address.h"
 #include "lldb/Core/AddressRange.h" // for AddressRange
+#include "lldb/Core/ArchSpec.h"     // for ArchSpec
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/RegisterValue.h" // for RegisterValue
@@ -41,7 +42,6 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/AnsiTerminal.h"
-#include "lldb/Utility/ArchSpec.h"    // for ArchSpec
 #include "lldb/Utility/ConstString.h" // for ConstString, oper...
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Log.h"        // for Log
@@ -1303,10 +1303,16 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
       if (thread) {
         StopInfoSP stop_info_sp = thread->GetStopInfo();
         if (stop_info_sp && stop_info_sp->IsValid()) {
-          ValueObjectSP return_valobj_sp =
-              StopInfo::GetReturnValueObject(stop_info_sp);
+          bool is_swift_error_return = false;
+          ValueObjectSP return_valobj_sp = StopInfo::GetReturnValueObject(
+              stop_info_sp, is_swift_error_return);
           if (return_valobj_sp) {
-            return_valobj_sp->Dump(s);
+            DumpValueObjectOptions options;
+            if (return_valobj_sp->IsDynamic())
+              options.SetUseDynamicType(eDynamicCanRunTarget);
+            if (return_valobj_sp->DoesProvideSyntheticValue())
+              options.SetUseSyntheticValue(true);
+            return_valobj_sp->Dump(s, options);
             return true;
           }
         }

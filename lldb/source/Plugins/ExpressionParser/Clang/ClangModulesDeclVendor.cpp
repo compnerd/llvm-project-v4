@@ -13,6 +13,7 @@
 
 // Other libraries and framework includes
 #include "clang/Basic/TargetInfo.h"
+#include "clang/CodeGen/ObjectFilePCHContainerOperations.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Lex/Preprocessor.h"
@@ -85,7 +86,6 @@ public:
   void ForEachMacro(const ModuleVector &modules,
                     std::function<bool(const std::string &)> handler) override;
 
-  clang::ExternalASTMerger::ImporterSource GetImporterSource() override;
 private:
   void
   ReportModuleExportsHelper(std::set<ClangModulesDeclVendor::ModuleID> &exports,
@@ -110,7 +110,6 @@ private:
   typedef std::set<ModuleID> ImportedModuleSet;
   ImportedModuleMap m_imported_modules;
   ImportedModuleSet m_user_imported_modules;
-  const clang::ExternalASTMerger::OriginMap m_origin_map;
 };
 } // anonymous namespace
 
@@ -147,7 +146,7 @@ void StoringDiagnosticConsumer::DumpDiagnostics(Stream &error_stream) {
 static FileSpec GetResourceDir() {
   static FileSpec g_cached_resource_dir;
 
-  static llvm::once_flag g_once_flag;
+  static std::once_flag g_once_flag;
 
   llvm::call_once(g_once_flag, []() {
     HostInfo::GetLLDBPath(lldb::ePathTypeClangDir, g_cached_resource_dir);
@@ -550,12 +549,6 @@ ClangModulesDeclVendorImpl::DoGetModule(clang::ModuleIdPath path,
                                          is_inclusion_directive);
 }
 
-clang::ExternalASTMerger::ImporterSource
-ClangModulesDeclVendorImpl::GetImporterSource() {
-  return {m_compiler_instance->getASTContext(),
-          m_compiler_instance->getFileManager(), m_origin_map};
-}
-
 static const char *ModuleImportBufferName = "LLDBModulesMemoryBuffer";
 
 lldb_private::ClangModulesDeclVendor *
@@ -647,7 +640,14 @@ ClangModulesDeclVendor::Create(Target &target) {
                                                     source_buffer.release());
 
   std::unique_ptr<clang::CompilerInstance> instance(
-      new clang::CompilerInstance);
+      new clang::CompilerInstance());
+
+  std::shared_ptr<clang::PCHContainerOperations> pch_operations =
+      instance->getPCHContainerOperations();
+  pch_operations->registerWriter(
+      llvm::make_unique<clang::ObjectFilePCHContainerWriter>());
+  pch_operations->registerReader(
+      llvm::make_unique<clang::ObjectFilePCHContainerReader>());
 
   instance->setDiagnostics(diagnostics_engine.get());
   instance->setInvocation(invocation);

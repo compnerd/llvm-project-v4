@@ -57,6 +57,11 @@ extern "C" kern_return_t catch_mach_exception_raise_state_identity(
 extern "C" boolean_t mach_exc_server(mach_msg_header_t *InHeadP,
                                      mach_msg_header_t *OutHeadP);
 
+// Any access to the g_message variable should be done by locking the
+// g_message_mutex first, using the g_message variable, then unlocking
+// the g_message_mutex. See MachException::Message::CatchExceptionRaise()
+// for sample code.
+
 static MachException::Data *g_message = NULL;
 
 extern "C" kern_return_t catch_mach_exception_raise_state(
@@ -66,7 +71,7 @@ extern "C" kern_return_t catch_mach_exception_raise_state(
     mach_msg_type_number_t old_stateCnt, thread_state_t new_state,
     mach_msg_type_number_t *new_stateCnt) {
   // TODO change to LIBLLDB_LOG_EXCEPTION
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
   if (log) {
     log->Printf("::%s(exc_port = 0x%4.4x, exc_type = %d (%s), "
                 "exc_data = 0x%llx, exc_data_count = %d)",
@@ -82,7 +87,7 @@ extern "C" kern_return_t catch_mach_exception_raise_state_identity(
     mach_msg_type_number_t exc_data_count, int *flavor,
     thread_state_t old_state, mach_msg_type_number_t old_stateCnt,
     thread_state_t new_state, mach_msg_type_number_t *new_stateCnt) {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
   if (log) {
     log->Printf("::%s(exc_port = 0x%4.4x, thd_port = 0x%4.4x, "
                 "tsk_port = 0x%4.4x, exc_type = %d (%s), exc_data[%d] = "
@@ -103,7 +108,7 @@ catch_mach_exception_raise(mach_port_t exc_port, mach_port_t thread_port,
                            mach_port_t task_port, exception_type_t exc_type,
                            mach_exception_data_t exc_data,
                            mach_msg_type_number_t exc_data_count) {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
   if (log) {
     log->Printf("::%s(exc_port = 0x%4.4x, thd_port = 0x%4.4x, "
                 "tsk_port = 0x%4.4x, exc_type = %d (%s), exc_data[%d] "
@@ -125,6 +130,33 @@ catch_mach_exception_raise(mach_port_t exc_port, mach_port_t thread_port,
   }
   return KERN_FAILURE;
 }
+
+#if 0
+void
+MachException::Message::Dump(Stream &stream) const
+{
+    stream.Printf("exc_msg { bits = 0x%8.8x size = 0x%8.8x remote-port = "
+                  "0x%8.8x local-port = 0x%8.8x reserved = 0x%8.8x "
+                  "id = 0x%8.8x }\n",
+        exc_msg.hdr.msgh_bits,
+        exc_msg.hdr.msgh_size,
+        exc_msg.hdr.msgh_remote_port,
+        exc_msg.hdr.msgh_local_port,
+        exc_msg.hdr.msgh_reserved,
+        exc_msg.hdr.msgh_id);
+
+    stream.Printf("reply_msg { bits = 0x%8.8x size = 0x%8.8x remote-port "
+                  "= 0x%8.8x local-port = 0x%8.8x reserved = 0x%8.8x "
+                  "id = 0x%8.8x }",
+                  reply_msg.hdr.msgh_bits,
+                  reply_msg.hdr.msgh_size,
+                  reply_msg.hdr.msgh_remote_port,
+                  reply_msg.hdr.msgh_local_port,
+                  reply_msg.hdr.msgh_reserved,
+                  reply_msg.hdr.msgh_id);
+    stream.Flush();
+}
+#endif
 
 bool MachException::Data::GetStopInfo(struct ThreadStopInfo *stop_info,
                                       const UnixSignals &signals,
@@ -247,6 +279,9 @@ void MachException::Message::Dump(Stream &stream) const {
 
 bool MachException::Message::CatchExceptionRaise(task_t task) {
   bool success = false;
+  // locker will keep a mutex locked until it goes out of scope
+  //    PThreadMutex::Locker locker(&g_message_mutex);
+  //    DNBLogThreaded("calling  mach_exc_server");
   state.task_port = task;
   g_message = &state;
   // The exc_server function is the MIG generated server handling function
@@ -267,7 +302,7 @@ bool MachException::Message::CatchExceptionRaise(task_t task) {
     success = true;
   } else {
     Log *log(
-        GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+        GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
     if (log)
       log->Printf("MachException::Message::%s(): mach_exc_server "
                   "returned zero...",
@@ -282,7 +317,7 @@ Status MachException::Message::Reply(::pid_t inferior_pid, task_t inferior_task,
   // Reply to the exception...
   Status error;
 
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
 
   // If we had a soft signal, we need to update the thread first so it can
   // continue without signaling
@@ -439,7 +474,7 @@ Status MachException::PortInfo::Save(task_t task) {
 Status MachException::PortInfo::Restore(task_t task) {
   Status error;
 
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
 
   if (log)
     log->Printf("MachException::PortInfo::Restore(task = 0x%4.4x)", task);

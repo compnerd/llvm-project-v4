@@ -9,7 +9,6 @@
 
 #include "Driver.h"
 
-#include <atomic>
 #include <csignal>
 #include <fcntl.h>
 #include <limits.h>
@@ -41,7 +40,9 @@
 #include "lldb/API/SBStringList.h"
 #include "lldb/API/SBTarget.h"
 #include "lldb/API/SBThread.h"
+#if defined(_WIN32)
 #include "llvm/Support/ConvertUTF.h"
+#endif
 #include <thread>
 
 #if !defined(__APPLE__)
@@ -69,7 +70,7 @@ typedef struct {
   uint32_t usage_mask; // Used to mark options that can be used together.  If (1
                        // << n & usage_mask) != 0
                        // then this option belongs to option set n.
-  bool required;       // This option is required (in the current usage level)
+  bool required;
   const char *long_option; // Full name for this option.
   int short_option;        // Single character for this option.
   int option_has_arg; // no_argument, required_argument or optional_argument
@@ -83,6 +84,7 @@ typedef struct {
 
 #define LLDB_3_TO_5 LLDB_OPT_SET_3 | LLDB_OPT_SET_4 | LLDB_OPT_SET_5
 #define LLDB_4_TO_5 LLDB_OPT_SET_4 | LLDB_OPT_SET_5
+#define LLDB_3_AND_7 LLDB_OPT_SET_3 | LLDB_OPT_SET_7
 
 static OptionDefinition g_options[] = {
     {LLDB_OPT_SET_1, true, "help", 'h', no_argument, 0, eArgTypeNone,
@@ -453,6 +455,8 @@ void Driver::OptionData::Clear() {
   m_print_python_path = false;
   m_use_external_editor = false;
   m_wait_for = false;
+  m_repl = false;
+  m_repl_options.erase();
   m_process_name.erase();
   m_batch = false;
   m_after_crash_commands.clear();
@@ -1178,16 +1182,17 @@ void sigwinch_handler(int signo) {
 }
 
 void sigint_handler(int signo) {
-  static std::atomic_flag g_interrupt_sent = ATOMIC_FLAG_INIT;
+  static bool g_interrupt_sent = false;
   if (g_driver) {
-    if (!g_interrupt_sent.test_and_set()) {
+    if (!g_interrupt_sent) {
+      g_interrupt_sent = true;
       g_driver->GetDebugger().DispatchInputInterrupt();
-      g_interrupt_sent.clear();
+      g_interrupt_sent = false;
       return;
     }
   }
 
-  _exit(signo);
+  exit(signo);
 }
 
 void sigtstp_handler(int signo) {

@@ -60,7 +60,6 @@ StateType GDBRemoteClientBase::SendContinuePacketAndWaitForResponse(
         continue;
       if (steady_clock::now() >= m_interrupt_time + kInterruptTimeout)
         return eStateInvalid;
-      break;
     }
     case PacketResult::Success:
       break;

@@ -2,6 +2,7 @@ add_lldb_library(lldbPluginSymbolFileDWARF PLUGIN
   DIERef.cpp
   DWARFAbbreviationDeclaration.cpp
   DWARFASTParserClang.cpp
+  DWARFASTParserSwift.cpp
   DWARFASTParserGo.cpp
   DWARFASTParserJava.cpp
   DWARFASTParserOCaml.cpp
@@ -30,8 +31,6 @@ add_lldb_library(lldbPluginSymbolFileDWARF PLUGIN
   NameToDIE.cpp
   SymbolFileDWARF.cpp
   SymbolFileDWARFDwo.cpp
-  SymbolFileDWARFDwoDwp.cpp
-  SymbolFileDWARFDwp.cpp
   SymbolFileDWARFDebugMap.cpp
   UniqueDWARFASTType.cpp
 
@@ -49,6 +48,5 @@ add_lldb_library(lldbPluginSymbolFileDWARF PLUGIN
     lldbPluginCPlusPlusLanguage
     lldbPluginExpressionParserClang
   LINK_COMPONENTS
-    DebugInfoDWARF
     Support
   )

@@ -12,31 +12,17 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
-
-def execute_command(command):
-    #print('%% %s' % (command))
-    (exit_status, output) = seven.get_command_status_output(command)
-    # if output:
-    #    print(output)
-    #print('status = %u' % (exit_status))
-    return exit_status
-
-
 class ExecTestCase(TestBase):
-
-    NO_DEBUG_INFO_TESTCASE = True
 
     mydir = TestBase.compute_mydir(__file__)
 
     @skipUnlessDarwin
-    @expectedFailureAll(oslist=['macosx'], bugnumber="rdar://36134350") # when building with cmake on green gragon or on ci.swift.org, this test fails.
     @expectedFailureAll(archs=['i386'], bugnumber="rdar://28656532")
     @expectedFailureAll(oslist=["ios", "tvos", "watchos", "bridgeos"], bugnumber="rdar://problem/34559552") # this exec test has problems on ios systems
     def test_hitting_exec (self):
         self.do_test(False)
 
     @skipUnlessDarwin
-    @expectedFailureAll(oslist=['macosx'], bugnumber="rdar://36134350") # when building with cmake on green gragon or on ci.swift.org, this test fails.
     @expectedFailureAll(archs=['i386'], bugnumber="rdar://28656532")
     @expectedFailureAll(oslist=["ios", "tvos", "watchos", "bridgeos"], bugnumber="rdar://problem/34559552") # this exec test has problems on ios systems
     def test_skipping_exec (self):
@@ -46,18 +32,18 @@ class ExecTestCase(TestBase):
         if self.getArchitecture() == 'x86_64':
             source = os.path.join(os.getcwd(), "main.cpp")
             o_file = os.path.join(os.getcwd(), "main.o")
-            execute_command(
+            lldbutil.execute_command(
                 "'%s' -g -O0 -arch i386 -arch x86_64 '%s' -c -o '%s'" %
                 (os.environ["CC"], source, o_file))
-            execute_command(
+            lldbutil.execute_command(
                 "'%s' -g -O0 -arch i386 -arch x86_64 '%s'" %
                 (os.environ["CC"], o_file))
             if self.debug_info != "dsym":
                 dsym_path = os.path.join(os.getcwd(), "a.out.dSYM")
-                execute_command("rm -rf '%s'" % (dsym_path))
+                lldbutil.execute_command("rm -rf '%s'" % (dsym_path))
         else:
             self.build()
-
+            
         exe = os.path.join(os.getcwd(), "a.out")
 
         # Create the target
@@ -74,7 +60,8 @@ class ExecTestCase(TestBase):
         self.assertTrue(process, PROCESS_IS_VALID)
 
         if skip_exec:
-            self.debugger.HandleCommand("settings set target.process.stop-on-exec false")
+            self.dbg.HandleCommand("settings set target.process.stop-on-exec false")
+
             def cleanup():
                 self.runCmd("settings set target.process.stop-on-exec false",
                             check=False)

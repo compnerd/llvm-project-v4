@@ -30,6 +30,7 @@ class RegisterCommandsTestCase(TestBase):
 
     @skipIfiOSSimulator
     @skipIf(archs=no_match(['amd64', 'arm', 'i386', 'x86_64']))
+    @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
     def test_register_commands(self):
         """Test commands related to registers, in particular vector registers."""
         self.build()
@@ -59,6 +60,7 @@ class RegisterCommandsTestCase(TestBase):
     # problem
     @skipIfTargetAndroid(archs=["i386"])
     @skipIf(archs=no_match(['amd64', 'arm', 'i386', 'x86_64']))
+    @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
     def test_fp_register_write(self):
         """Test commands that write to registers, in particular floating-point registers."""
         self.build()
@@ -69,6 +71,8 @@ class RegisterCommandsTestCase(TestBase):
     @expectedFailureAndroid(archs=["i386"])
     @skipIfFreeBSD  # llvm.org/pr25057
     @skipIf(archs=no_match(['amd64', 'i386', 'x86_64']))
+    @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
+    @expectedFailureDarwin(bugnumber="<rdar://problem/34092153>")  # CI bots need to use updated debugserver to match ftag size change in r311579.
     def test_fp_special_purpose_register_read(self):
         """Test commands that read fpu special purpose registers."""
         self.build()
@@ -76,6 +80,7 @@ class RegisterCommandsTestCase(TestBase):
 
     @skipIfiOSSimulator
     @skipIf(archs=no_match(['amd64', 'arm', 'i386', 'x86_64']))
+    @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
     def test_register_expressions(self):
         """Test expression evaluation with commands related to registers."""
         self.build()
@@ -272,18 +277,14 @@ class RegisterCommandsTestCase(TestBase):
         target = self.dbg.CreateTarget(exe)
         self.assertTrue(target, VALID_TARGET)
 
-        # Launch the process, stop at the entry point.
-        error = lldb.SBError()
-        process = target.Launch(
-                lldb.SBListener(),
-                None, None, # argv, envp
-                None, None, None, # stdin/out/err
-                self.get_process_working_directory(),
-                0, # launch flags
-                True, # stop at entry
-                error)
-        self.assertTrue(error.Success(), "Launch succeeds. Error is :" + str(error))
+        lldbutil.run_break_set_by_symbol(
+            self, "main", num_expected_locations=-1)
 
+        # Launch the process, and do not stop at the entry point.
+        process = target.LaunchSimple(
+            None, None, self.get_process_working_directory())
+
+        process = target.GetProcess()
         self.assertTrue(
             process.GetState() == lldb.eStateStopped,
             PROCESS_STOPPED)

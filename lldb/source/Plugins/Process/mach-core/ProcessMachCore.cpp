@@ -468,7 +468,7 @@ Status ProcessMachCore::DoLoadCore() {
   // it to match the core file which is always single arch.
   ArchSpec arch(m_core_module_sp->GetArchitecture());
   if (arch.GetCore() == ArchSpec::eCore_x86_32_i486) {
-    arch = Platform::GetAugmentedArchSpec(GetTarget().GetPlatform().get(), "i386");
+    arch.SetTriple("i386", GetTarget().GetPlatform().get());
   }
   if (arch.IsValid())
     GetTarget().SetArchitecture(arch);
@@ -632,7 +632,7 @@ Status ProcessMachCore::GetMemoryRegionInfo(addr_t load_addr,
 void ProcessMachCore::Clear() { m_thread_list.Clear(); }
 
 void ProcessMachCore::Initialize() {
-  static llvm::once_flag g_once_flag;
+  static std::once_flag g_once_flag;
 
   llvm::call_once(g_once_flag, []() {
     PluginManager::RegisterPlugin(GetPluginNameStatic(),

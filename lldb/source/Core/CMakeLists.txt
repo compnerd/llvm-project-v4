@@ -13,6 +13,7 @@ add_lldb_library(lldbCore
   AddressResolver.cpp
   AddressResolverFileLine.cpp
   AddressResolverName.cpp
+  ArchSpec.cpp
   Broadcaster.cpp
   Communication.cpp
   Debugger.cpp
@@ -57,6 +58,9 @@ add_lldb_library(lldbCore
   ValueObjectVariable.cpp
 
   LINK_LIBS
+    swiftBasic
+    swiftFrontend
+    swiftSerialization
     clangAST
     lldbBreakpoint
     lldbDataFormatters

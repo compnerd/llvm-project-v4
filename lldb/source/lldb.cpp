@@ -8,25 +8,27 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/lldb-private.h"
+#include "llvm/ADT/StringExtras.h"
 
 using namespace lldb;
 using namespace lldb_private;
 
 #include "clang/Basic/Version.h"
+#include "swift/Basic/Version.h"
 
 #ifdef HAVE_SVN_VERSION_INC
-#include "SVNVersion.inc"
+#  include "SVNVersion.inc"
 #endif
 
 #ifdef HAVE_APPLE_VERSION_INC
-#include "AppleVersion.inc"
+#  include "AppleVersion.inc"
 #endif
 
 static const char *GetLLDBRevision() {
 #ifdef LLDB_REVISION
   return LLDB_REVISION;
 #else
-  return NULL;
+  return nullptr;
 #endif
 }
 
@@ -38,6 +40,16 @@ static const char *GetLLDBRepository() {
 #endif
 }
 
+#if LLDB_IS_BUILDBOT_BUILD
+static std::string GetBuildDate() {
+#if defined(LLDB_BUILD_DATE)
+  return std::string(LLDB_BUILD_DATE);
+#else
+  return std::string();
+#endif
+}
+#endif
+
 #define QUOTE(str) #str
 #define EXPAND_AND_QUOTE(str) QUOTE(str)
 
@@ -46,9 +58,13 @@ const char *lldb_private::GetVersion() {
   // as the clang tool.
   static std::string g_version_str;
   if (g_version_str.empty()) {
+
+#ifdef LLDB_VERSION_STRING
+    g_version_str += EXPAND_AND_QUOTE(LLDB_VERSION_STRING);
+#else
     g_version_str += "lldb version ";
     g_version_str += CLANG_VERSION_STRING;
-
+#endif
     const char *lldb_repo = GetLLDBRepository();
     const char *lldb_rev = GetLLDBRevision();
     if (lldb_repo || lldb_rev) {
@@ -60,6 +76,21 @@ const char *lldb_private::GetVersion() {
         g_version_str += lldb_rev;
       }
       g_version_str += ")";
+    }
+    
+#if LLDB_IS_BUILDBOT_BUILD
+    std::string build_date = GetBuildDate();
+    if(!build_date.empty())
+      g_version_str += " (buildbot " + build_date + ")";
+#endif
+
+    auto const swift_version = swift::version::getSwiftNumericVersion();
+    g_version_str += "\n  Swift-";
+    g_version_str += llvm::utostr(swift_version.first) + ".";
+    g_version_str += llvm::utostr(swift_version.second);
+    std::string swift_rev(swift::version::getSwiftRevision());
+    if (swift_rev.length() > 0) {
+      g_version_str += " (revision " + swift_rev + ")";
     }
 
     std::string clang_rev(clang::getClangRevision());

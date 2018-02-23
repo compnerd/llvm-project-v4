@@ -161,9 +161,9 @@ bool DWARFDebugInfoEntry::FastExtract(
           case DW_FORM_strp:
           case DW_FORM_sec_offset:
             if (cu->IsDWARF64())
-              debug_info_data.GetU64(&offset);
+              debug_info_data.GetU64(offset_ptr);
             else
-              debug_info_data.GetU32(&offset);
+              debug_info_data.GetU32(offset_ptr);
             break;
 
           default:
@@ -325,9 +325,9 @@ bool DWARFDebugInfoEntry::Extract(SymbolFileDWARF *dwarf2Data,
               case DW_FORM_strp:
               case DW_FORM_sec_offset:
                 if (cu->IsDWARF64())
-                  debug_info_data.GetU64(&offset);
+                  debug_info_data.GetU64(offset_ptr);
                 else
-                  debug_info_data.GetU32(&offset);
+                  debug_info_data.GetU32(offset_ptr);
                 break;
 
               default:
@@ -960,6 +960,15 @@ uint64_t DWARFDebugInfoEntry::GetAttributeValueAsUnsigned(
   return fail_value;
 }
 
+lldb::LanguageType DWARFDebugInfoEntry::GetLanguageAttributeValue(
+    SymbolFileDWARF *dwarf2Data, const DWARFCompileUnit *cu) const {
+  const uint64_t language = GetAttributeValueAsUnsigned(
+      dwarf2Data, cu, DW_AT_language, lldb::eLanguageTypeUnknown);
+  if (language == llvm::dwarf::DW_LANG_Swift)
+    return lldb::eLanguageTypeSwift;
+  return (lldb::LanguageType)language;
+}
+
 //----------------------------------------------------------------------
 // GetAttributeValueAsSigned
 //
@@ -1309,6 +1318,19 @@ bool DWARFDebugInfoEntry::AppendTypeName(SymbolFileDWARF *dwarf2Data,
         }
         return result;
       }
+    }
+  }
+  return false;
+}
+
+bool DWARFDebugInfoEntry::Contains(const DWARFDebugInfoEntry *die) const {
+  if (die) {
+    const dw_offset_t die_offset = die->GetOffset();
+    if (die_offset > GetOffset()) {
+      const DWARFDebugInfoEntry *sibling = GetSibling();
+      assert(sibling); // TODO: take this out
+      if (sibling)
+        return die_offset < sibling->GetOffset();
     }
   }
   return false;

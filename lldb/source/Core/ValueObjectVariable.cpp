@@ -11,6 +11,7 @@
 
 #include "lldb/Core/Address.h"      // for Address
 #include "lldb/Core/AddressRange.h" // for AddressRange
+#include "lldb/Core/ArchSpec.h"     // for ArchSpec
 #include "lldb/Core/Module.h"
 #include "lldb/Core/RegisterValue.h"
 #include "lldb/Core/Scalar.h" // for Scalar, operator!=
@@ -130,12 +131,22 @@ bool ValueObjectVariable::UpdateValue() {
   if (variable->GetLocationIsConstantValueData()) {
     // expr doesn't contain DWARF bytes, it contains the constant variable
     // value bytes themselves...
-    if (expr.GetExpressionData(m_data))
+    if (expr.GetExpressionData(m_data)) {
+      if (m_data.GetDataStart() && m_data.GetByteSize())
+        m_value.SetBytes(m_data.GetDataStart(), m_data.GetByteSize());
       m_value.SetContext(Value::eContextTypeVariable, variable);
-    else
-      m_error.SetErrorString("empty constant data");
+    } else {
+      CompilerType var_type(GetCompilerTypeImpl());
+      if (var_type.IsValid()) {
+        if (SwiftASTContext::IsPossibleZeroSizeType(var_type))
+          m_value.SetCompilerType(var_type);
+        else
+          m_error.SetErrorString("empty constant data");
+      }
+    }
     // constant bytes can't be edited - sorry
     m_resolved_value.SetContext(Value::eContextTypeInvalid, NULL);
+    SetAddressTypeOfChildren(eAddressTypeInvalid);
   } else {
     lldb::addr_t loclist_base_load_addr = LLDB_INVALID_ADDRESS;
     ExecutionContext exe_ctx(GetExecutionContextRef());
@@ -155,8 +166,9 @@ bool ValueObjectVariable::UpdateValue() {
                 target);
     }
     Value old_value(m_value);
-    if (expr.Evaluate(&exe_ctx, nullptr, loclist_base_load_addr, nullptr,
-                      nullptr, m_value, &m_error)) {
+    if (expr.Evaluate(&exe_ctx, nullptr, nullptr, nullptr,
+                      loclist_base_load_addr, nullptr, nullptr, m_value,
+                      &m_error)) {
       m_resolved_value = m_value;
       m_value.SetContext(Value::eContextTypeVariable, variable);
 
@@ -168,7 +180,8 @@ bool ValueObjectVariable::UpdateValue() {
 
       Process *process = exe_ctx.GetProcessPtr();
       const bool process_is_alive = process && process->IsAlive();
-      const uint32_t type_info = compiler_type.GetTypeInfo();
+      const uint32_t type_info =
+          compiler_type.IsValid() ? compiler_type.GetTypeInfo() : 0;
       const bool is_pointer_or_ref =
           (type_info & (lldb::eTypeIsPointer | lldb::eTypeIsReference)) != 0;
 

@@ -20,7 +20,7 @@
 #define __XPC_PRIVATE_H__
 #include <xpc/xpc.h>
 
-#define LaunchUsingXPCRightName "com.apple.lldb.RootDebuggingXPCService"
+#define LaunchUsingXPCRightName "com.apple.dt.Xcode.RootDebuggingXPCService"
 
 // These XPC messaging keys are used for communication between Host.mm and the
 // XPC service.
@@ -54,6 +54,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/Communication.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
@@ -62,7 +63,6 @@
 #include "lldb/Host/ThreadLauncher.h"
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
-#include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/CleanUp.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
@@ -1655,9 +1655,13 @@ HostThread Host::StartMonitoringChildProcess(
 
   if (source) {
     Host::MonitorChildProcessCallback callback_copy = callback;
+#ifndef __clang_analyzer__
+    // This works around a bug in the static analyzer where it claims
+    // "dispatch_release" isn't a valid identifier.
     ::dispatch_source_set_cancel_handler(source, ^{
       dispatch_release(source);
     });
+#endif
     ::dispatch_source_set_event_handler(source, ^{
 
       int status = 0;

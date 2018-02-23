@@ -425,8 +425,14 @@ Status Variable::GetValuesForVariableExpressionPath(
       llvm::StringRef variable_sub_expr_path =
           variable_expr_path.drop_front(variable_name.size());
       if (!variable_sub_expr_path.empty()) {
+        ValueObject::ExpressionPathScanEndReason reason_to_stop;
+        ValueObject::ExpressionPathEndResultType final_value_type;
+        ValueObject::GetValueForExpressionPathOptions options;
+        ValueObject::ExpressionPathAftermath final_task_on_target;
+
         valobj_sp = variable_valobj_sp->GetValueForExpressionPath(
-            variable_sub_expr_path);
+            variable_sub_expr_path, &reason_to_stop, &final_value_type, options,
+            &final_task_on_target);
         if (!valobj_sp) {
           error.SetErrorStringWithFormat(
               "invalid expression path '%s' for variable '%s'",
@@ -731,7 +737,8 @@ static void PrivateAutoComplete(
               continue;
 
             const char *variable_name = variable->GetName().AsCString();
-            if (strstr(variable_name, token.c_str()) == variable_name) {
+            if (variable_name &&
+                strstr(variable_name, token.c_str()) == variable_name) {
               if (strcmp(variable_name, token.c_str()) == 0) {
                 Type *variable_type = variable->GetType();
                 if (variable_type) {

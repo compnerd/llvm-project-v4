@@ -1,6 +1,10 @@
 from __future__ import print_function
 from __future__ import absolute_import
 
+import lldb
+from lldbsuite.test.lldbtest import *
+import lldbsuite.test.lldbutil as lldbutil
+import lldbsuite.test.test_categories as test_categories
 # System modules
 import os
 
@@ -22,7 +26,8 @@ def source_type(filename):
         '.cxx': 'CXX_SOURCES',
         '.cc': 'CXX_SOURCES',
         '.m': 'OBJC_SOURCES',
-        '.mm': 'OBJCXX_SOURCES'
+        '.mm': 'OBJCXX_SOURCES',
+        '.swift': 'SWIFT_SOURCES'
     }.get(extension, None)
 
 
@@ -134,28 +139,25 @@ class InlineTest(TestBase):
         makefile.flush()
         makefile.close()
 
-    @add_test_categories(["dsym"])
+    @skipUnlessDarwin
     def __test_with_dsym(self):
         self.using_dsym = True
         self.BuildMakefile()
         self.buildDsym()
         self.do_test()
 
-    @add_test_categories(["dwarf"])
     def __test_with_dwarf(self):
         self.using_dsym = False
         self.BuildMakefile()
         self.buildDwarf()
         self.do_test()
 
-    @add_test_categories(["dwo"])
     def __test_with_dwo(self):
         self.using_dsym = False
         self.BuildMakefile()
         self.buildDwo()
         self.do_test()
 
-    @add_test_categories(["gmodules"])
     def __test_with_gmodules(self):
         self.using_dsym = False
         self.BuildMakefile()

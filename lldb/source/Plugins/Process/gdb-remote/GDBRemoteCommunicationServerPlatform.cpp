@@ -128,9 +128,8 @@ Status GDBRemoteCommunicationServerPlatform::LaunchGDBServer(
   llvm::StringRef platform_ip;
   int platform_port;
   llvm::StringRef platform_path;
-  std::string platform_uri = GetConnection()->GetURI();
-  bool ok = UriParser::Parse(platform_uri, platform_scheme, platform_ip,
-                             platform_port, platform_path);
+  bool ok = UriParser::Parse(GetConnection()->GetURI(), platform_scheme,
+                             platform_ip, platform_port, platform_path);
   UNUSED_IF_ASSERT_DISABLED(ok);
   assert(ok);
 
@@ -529,7 +528,7 @@ bool GDBRemoteCommunicationServerPlatform::FreePortForProcess(lldb::pid_t pid) {
 
 const FileSpec &GDBRemoteCommunicationServerPlatform::GetDomainSocketDir() {
   static FileSpec g_domainsocket_dir;
-  static llvm::once_flag g_once_flag;
+  static std::once_flag g_once_flag;
 
   llvm::call_once(g_once_flag, []() {
     const char *domainsocket_dir_env =

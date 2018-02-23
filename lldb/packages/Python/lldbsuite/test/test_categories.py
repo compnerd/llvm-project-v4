@@ -35,8 +35,8 @@ all_categories = {
     'flakey': 'Flakey test cases, i.e. tests that do not reliably pass at each execution',
     'lldb-mi': 'lldb-mi tests',
     'darwin-log': 'Darwin log tests',
-    'watchpoint': 'Watchpoint-related tests',
-}
+    'frame-diagnose': 'Frame diagnose tests',
+    'watchpoints': 'Tests related to watchpoints'}
 
 
 def unique_string_match(yourentry, list):

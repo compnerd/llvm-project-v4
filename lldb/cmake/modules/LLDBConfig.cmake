@@ -22,8 +22,14 @@ elseif(IOS)
   set(LLDB_DEFAULT_DISABLE_PYTHON 1)
 endif()
 
+if(IOS)
+  add_definitions(-DNO_XPC_SERVICES)
+endif()
+
 set(LLDB_DISABLE_PYTHON ${LLDB_DEFAULT_DISABLE_PYTHON} CACHE BOOL
   "Disables the Python scripting integration.")
+set(LLDB_ALLOW_STATIC_BINDINGS FALSE CACHE BOOL
+  "Enable using static/baked language bindings if swig is not present.")
 set(LLDB_DISABLE_CURSES ${LLDB_DEFAULT_DISABLE_CURSES} CACHE BOOL
   "Disables the Curses integration.")
 
@@ -199,6 +205,15 @@ else ()
 endif ()
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/../clang/include")
 
+if(NOT LLDB_BUILT_STANDALONE)
+  if (LLVM_EXTERNAL_SWIFT_SOURCE_DIR)
+    include_directories(${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}/include)
+  else ()
+    include_directories(${CMAKE_SOURCE_DIR}/tools/swift/include)
+  endif ()
+  include_directories("${CMAKE_CURRENT_BINARY_DIR}/../swift/include")
+endif()
+
 # Disable GCC warnings
 check_cxx_compiler_flag("-Wno-deprecated-declarations"
                         CXX_SUPPORTS_NO_DEPRECATED_DECLARATIONS)
@@ -230,12 +245,6 @@ check_cxx_compiler_flag("-Wno-vla-extension"
 if (CXX_SUPPORTS_NO_VLA_EXTENSION)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-vla-extension")
 endif ()
-
-check_cxx_compiler_flag("-Wno-gnu-anonymous-struct"
-                        CXX_SUPPORTS_NO_GNU_ANONYMOUS_STRUCT)
-
-check_cxx_compiler_flag("-Wno-nested-anon-types"
-                        CXX_SUPPORTS_NO_NESTED_ANON_TYPES)
 
 # Disable MSVC warnings
 if( MSVC )
@@ -284,8 +293,6 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN ".svn" EXCLUDE
     PATTERN ".cmake" EXCLUDE
     PATTERN "Config.h" EXCLUDE
-    PATTERN "lldb-*.h" EXCLUDE
-    PATTERN "API/*.h" EXCLUDE
     )
 
   install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/
@@ -295,8 +302,6 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     PATTERN "*.h"
     PATTERN ".svn" EXCLUDE
     PATTERN ".cmake" EXCLUDE
-    PATTERN "lldb-*.h" EXCLUDE
-    PATTERN "API/*.h" EXCLUDE
     )
 endif()
 
@@ -333,6 +338,7 @@ if (APPLE)
        ${SECURITY_LIBRARY}
        ${DEBUG_SYMBOLS_LIBRARY})
 
+  include_directories(AFTER /usr/include/libxml2)
 else()
   if (LIBXML2_FOUND)
     add_definitions( -DLIBXML2_DEFINED )

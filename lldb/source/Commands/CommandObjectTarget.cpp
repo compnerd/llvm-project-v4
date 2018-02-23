@@ -52,7 +52,6 @@
 #include "lldb/Utility/Timer.h"
 
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/FormatAdapters.h"
 
 // C Includes
 // C++ Includes
@@ -134,6 +133,25 @@ static uint32_t DumpTargetList(TargetList &target_list,
     }
   }
   return num_targets;
+}
+
+// TODO: Remove this once llvm can pretty-print time points
+static void DumpTimePoint(llvm::sys::TimePoint<> tp, Stream &s, uint32_t width) {
+#ifndef LLDB_DISABLE_POSIX
+  char time_buf[32];
+  time_t time = llvm::sys::toTimeT(tp);
+  char *time_cstr = ::ctime_r(&time, time_buf);
+  if (time_cstr) {
+    char *newline = ::strpbrk(time_cstr, "\n\r");
+    if (newline)
+      *newline = '\0';
+    if (width > 0)
+      s.Printf("%-*s", width, time_cstr);
+    else
+      s.PutCString(time_cstr);
+  } else if (width > 0)
+    s.Printf("%-*s", width, "");
+#endif
 }
 
 #pragma mark CommandObjectTargetCreate
@@ -1395,14 +1413,15 @@ static size_t DumpModuleObjfileHeaders(Stream &strm, ModuleList &module_list) {
 }
 
 static void DumpModuleSymtab(CommandInterpreter &interpreter, Stream &strm,
-                             Module *module, SortOrder sort_order) {
+                             Module *module, SortOrder sort_order,
+                             Mangled::NamePreference name_preference) {
   if (module) {
     SymbolVendor *sym_vendor = module->GetSymbolVendor();
     if (sym_vendor) {
       Symtab *symtab = sym_vendor->GetSymtab();
       if (symtab)
         symtab->Dump(&strm, interpreter.GetExecutionContext().GetTargetPtr(),
-                     sort_order);
+                     sort_order, name_preference);
     }
   }
 }
@@ -1952,7 +1971,8 @@ static OptionEnumValueElement g_sort_option_enumeration[4] = {
 
 static OptionDefinition g_target_modules_dump_symtab_options[] = {
     // clang-format off
-  { LLDB_OPT_SET_1, false, "sort", 's', OptionParser::eRequiredArgument, nullptr, g_sort_option_enumeration, 0, eArgTypeSortOrder, "Supply a sort order when dumping the symbol table." }
+    { LLDB_OPT_SET_1, false, "sort",               's', OptionParser::eRequiredArgument, nullptr, g_sort_option_enumeration, 0, eArgTypeSortOrder, "Supply a sort order when dumping the symbol table." },
+    { LLDB_OPT_SET_1, false, "show-mangled-names", 'm', OptionParser::eNoArgument,       nullptr, nullptr,                   0, eArgTypeNone,      "Do not demangle symbol names before showing them." },
     // clang-format on
 };
 
@@ -1971,7 +1991,9 @@ public:
 
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options(), m_sort_order(eSortOrderNone) {}
+    CommandOptions()
+        : Options(), m_sort_order(eSortOrderNone),
+          m_prefer_mangled(false, false) {}
 
     ~CommandOptions() override = default;
 
@@ -1981,6 +2003,11 @@ public:
       const int short_option = m_getopt_table[option_idx].val;
 
       switch (short_option) {
+      case 'm':
+        m_prefer_mangled.SetCurrentValue(true);
+        m_prefer_mangled.SetOptionWasSet();
+        break;
+
       case 's':
         m_sort_order = (SortOrder)Args::StringToOptionEnum(
             option_arg, GetDefinitions()[option_idx].enum_values,
@@ -1997,6 +2024,7 @@ public:
 
     void OptionParsingStarting(ExecutionContext *execution_context) override {
       m_sort_order = eSortOrderNone;
+      m_prefer_mangled.Clear();
     }
 
     llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
@@ -2004,6 +2032,7 @@ public:
     }
 
     SortOrder m_sort_order;
+    OptionValueBoolean m_prefer_mangled;
   };
 
 protected:
@@ -2016,6 +2045,10 @@ protected:
       return false;
     } else {
       uint32_t num_dumped = 0;
+
+      Mangled::NamePreference preference =
+          (m_options.m_prefer_mangled ? Mangled::ePreferMangled
+                                      : Mangled::ePreferDemangled);
 
       uint32_t addr_byte_size = target->GetArchitecture().GetAddressByteSize();
       result.GetOutputStream().SetAddressByteSize(addr_byte_size);
@@ -2035,13 +2068,11 @@ protected:
               result.GetOutputStream().EOL();
               result.GetOutputStream().EOL();
             }
-            if (m_interpreter.WasInterrupted())
-              break;
             num_dumped++;
             DumpModuleSymtab(
                 m_interpreter, result.GetOutputStream(),
                 target->GetImages().GetModulePointerAtIndexUnlocked(image_idx),
-                m_options.m_sort_order);
+                m_options.m_sort_order, preference);
           }
         } else {
           result.AppendError("the target has no associated executable images");
@@ -2065,11 +2096,9 @@ protected:
                   result.GetOutputStream().EOL();
                   result.GetOutputStream().EOL();
                 }
-                if (m_interpreter.WasInterrupted())
-                  break;
                 num_dumped++;
                 DumpModuleSymtab(m_interpreter, result.GetOutputStream(),
-                                 module, m_options.m_sort_order);
+                                 module, m_options.m_sort_order, preference);
               }
             }
           } else
@@ -2132,8 +2161,6 @@ protected:
                                           " modules.\n",
                                           (uint64_t)num_modules);
           for (size_t image_idx = 0; image_idx < num_modules; ++image_idx) {
-            if (m_interpreter.WasInterrupted())
-              break;
             num_dumped++;
             DumpModuleSections(
                 m_interpreter, result.GetOutputStream(),
@@ -2155,8 +2182,6 @@ protected:
               FindModulesByName(target, arg_cstr, module_list, true);
           if (num_matches > 0) {
             for (size_t i = 0; i < num_matches; ++i) {
-              if (m_interpreter.WasInterrupted())
-                break;
               Module *module = module_list.GetModulePointerAtIndex(i);
               if (module) {
                 num_dumped++;
@@ -2229,8 +2254,6 @@ protected:
                                           " modules.\n",
                                           (uint64_t)num_modules);
           for (uint32_t image_idx = 0; image_idx < num_modules; ++image_idx) {
-            if (m_interpreter.WasInterrupted())
-              break;
             if (DumpModuleSymbolVendor(
                     result.GetOutputStream(),
                     target_modules.GetModulePointerAtIndexUnlocked(image_idx)))
@@ -2252,8 +2275,6 @@ protected:
               FindModulesByName(target, arg_cstr, module_list, true);
           if (num_matches > 0) {
             for (size_t i = 0; i < num_matches; ++i) {
-              if (m_interpreter.WasInterrupted())
-                break;
               Module *module = module_list.GetModulePointerAtIndex(i);
               if (module) {
                 if (DumpModuleSymbolVendor(result.GetOutputStream(), module))
@@ -2321,8 +2342,6 @@ protected:
         if (num_modules > 0) {
           uint32_t num_dumped = 0;
           for (uint32_t i = 0; i < num_modules; ++i) {
-            if (m_interpreter.WasInterrupted())
-              break;
             if (DumpCompileUnitLineTable(
                     m_interpreter, result.GetOutputStream(),
                     target_modules.GetModulePointerAtIndexUnlocked(i),
@@ -2568,7 +2587,7 @@ public:
                       "Fullpath or basename for module to load.", ""),
         m_load_option(LLDB_OPT_SET_1, false, "load", 'l',
                       "Write file contents to the memory.", false, true),
-        m_pc_option(LLDB_OPT_SET_1, false, "set-pc-to-entry", 'p',
+        m_pc_option(LLDB_OPT_SET_1, false, "--set-pc-to-entry", 'p',
                     "Set PC to the entry point."
                     " Only applicable with '--load' option.",
                     false, true),
@@ -3158,8 +3177,7 @@ protected:
       } break;
 
       case 'm':
-        strm.Format("{0:%c}", llvm::fmt_align(module->GetModificationTime(),
-                                              llvm::AlignStyle::Left, width));
+        DumpTimePoint(module->GetModificationTime(), strm, width);
         break;
 
       case 'p':
@@ -3702,7 +3720,7 @@ public:
       break;
     }
 
-    return true;
+    return false;
   }
 
   bool LookupInModule(CommandInterpreter &interpreter, Module *module,
@@ -3966,8 +3984,7 @@ public:
             "Add a debug symbol file to one of the target's current modules by "
             "specifying a path to a debug symbols file, or using the options "
             "to specify a module to download symbols for.",
-            "target symbols add <cmd-options> [<symfile>]",
-            eCommandRequiresTarget),
+            "target symbols add [<symfile>]", eCommandRequiresTarget),
         m_option_group(),
         m_file_option(
             LLDB_OPT_SET_1, false, "shlib", 's',
@@ -4287,22 +4304,18 @@ protected:
       if (uuid_option_set) {
         result.AppendError("specify either one or more paths to symbol files "
                            "or use the --uuid option without arguments");
+      } else if (file_option_set) {
+        result.AppendError("specify either one or more paths to symbol files "
+                           "or use the --file option without arguments");
       } else if (frame_option_set) {
         result.AppendError("specify either one or more paths to symbol files "
                            "or use the --frame option without arguments");
-      } else if (file_option_set && argc > 1) {
-        result.AppendError("specify at most one symbol file path when "
-                           "--shlib option is set");
       } else {
         PlatformSP platform_sp(target->GetPlatform());
 
         for (auto &entry : args.entries()) {
           if (!entry.ref.empty()) {
             module_spec.GetSymbolFileSpec().SetFile(entry.ref, true);
-            if (file_option_set) {
-              module_spec.GetFileSpec() =
-                  m_file_option.GetOptionValue().GetCurrentValue();
-            }
             if (platform_sp) {
               FileSpec symfile_spec;
               if (platform_sp

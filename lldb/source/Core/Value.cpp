@@ -10,6 +10,7 @@
 #include "lldb/Core/Value.h"
 
 #include "lldb/Core/Address.h"  // for Address
+#include "lldb/Core/ArchSpec.h" // for ArchSpec
 #include "lldb/Core/Module.h"
 #include "lldb/Core/State.h"
 #include "lldb/Symbol/CompilerType.h"
@@ -142,9 +143,6 @@ Type *Value::GetType() {
 }
 
 size_t Value::AppendDataToHostBuffer(const Value &rhs) {
-  if (this == &rhs)
-    return 0;
-
   size_t curr_size = m_data_buffer.GetByteSize();
   Status error;
   switch (rhs.GetValueType()) {
@@ -226,6 +224,8 @@ uint64_t Value::GetValueByteSize(Status *error_ptr, ExecutionContext *exe_ctx) {
     if (ast_type.IsValid())
       byte_size = ast_type.GetByteSize(
           exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr);
+    if (byte_size == 0 && SwiftASTContext::IsPossibleZeroSizeType(ast_type))
+      return 0;
   } break;
   }
 
@@ -381,6 +381,31 @@ Status Value::GetValueAsData(ExecutionContext *exe_ctx, DataExtractor &data,
             } else
               address = LLDB_INVALID_ADDRESS;
           }
+          //                    else
+          //                    {
+          //                        ModuleSP exe_module_sp
+          //                        (target->GetExecutableModule());
+          //                        if (exe_module_sp)
+          //                        {
+          //                            address =
+          //                            m_value.ULongLong(LLDB_INVALID_ADDRESS);
+          //                            if (address != LLDB_INVALID_ADDRESS)
+          //                            {
+          //                                if
+          //                                (exe_module_sp->ResolveFileAddress(address,
+          //                                file_so_addr))
+          //                                {
+          //                                    data.SetByteOrder(target->GetArchitecture().GetByteOrder());
+          //                                    data.SetAddressByteSize(target->GetArchitecture().GetAddressByteSize());
+          //                                    address_type = eAddressTypeFile;
+          //                                }
+          //                                else
+          //                                {
+          //                                    address = LLDB_INVALID_ADDRESS;
+          //                                }
+          //                            }
+          //                        }
+          //                    }
         } else {
           error.SetErrorString("can't read load address (invalid process)");
         }
@@ -519,6 +544,9 @@ Status Value::GetValueAsData(ExecutionContext *exe_ctx, DataExtractor &data,
   // Bail if we encountered any errors getting the byte size
   if (error.Fail())
     return error;
+  else if (byte_size == 0 &&
+           SwiftASTContext::IsPossibleZeroSizeType(GetCompilerType()))
+    return error;
 
   // Make sure we have enough room within "data", and if we don't make
   // something large enough that does
@@ -537,7 +565,7 @@ Status Value::GetValueAsData(ExecutionContext *exe_ctx, DataExtractor &data,
             "trying to read from host address of 0.");
         return error;
       }
-      memcpy(dst, reinterpret_cast<uint8_t *>(address), byte_size);
+      memcpy(dst, (uint8_t *)NULL + address, byte_size);
     } else if ((address_type == eAddressTypeLoad) ||
                (address_type == eAddressTypeFile)) {
       if (file_so_addr.IsValid()) {
