@@ -507,7 +507,8 @@ def ARMv5te   : Architecture<"armv5te",   "ARMv5te",  [HasV5TEOps]>;
 
 def ARMv5tej  : Architecture<"armv5tej",  "ARMv5tej", [HasV5TEOps]>;
 
-def ARMv6     : Architecture<"armv6",     "ARMv6",    [HasV6Ops]>;
+def ARMv6     : Architecture<"armv6",     "ARMv6",    [HasV6Ops,
+                                                       FeatureDSP]>;
 
 def ARMv6t2   : Architecture<"armv6t2",   "ARMv6t2",  [HasV6T2Ops,
                                                        FeatureDSP]>;
@@ -991,6 +992,12 @@ def : ProcNoItin<"exynos-m3",                           [ARMv8a, ProcExynosM1,
                                                          FeatureCrypto,
                                                          FeatureCRC]>;
 
+def : ProcNoItin<"exynos-m4",                           [ARMv8a, ProcExynosM1,
+                                                         FeatureHWDivThumb,
+                                                         FeatureHWDivARM,
+                                                         FeatureCrypto,
+                                                         FeatureCRC]>;
+
 def : ProcNoItin<"kryo",                                [ARMv8a, ProcKryo,
                                                          FeatureHWDivThumb,
                                                          FeatureHWDivARM,
@@ -998,6 +1005,7 @@ def : ProcNoItin<"kryo",                                [ARMv8a, ProcKryo,
                                                          FeatureCRC]>;
 
 def : ProcessorModel<"cortex-r52", CortexR52Model,      [ARMv8r, ProcR52,
+                                                         FeatureUseMISched,
                                                          FeatureFPAO]>;
 
 //===----------------------------------------------------------------------===//
@@ -1042,4 +1050,5 @@ def ARM : Target {
   let AssemblyWriters = [ARMAsmWriter];
   let AssemblyParsers = [ARMAsmParser];
   let AssemblyParserVariants = [ARMAsmParserVariant];
+  let AllowRegisterRenaming = 1;
 }

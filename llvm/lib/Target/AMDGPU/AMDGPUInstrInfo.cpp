@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief Implementation of the TargetInstrInfo class that is common to all
+/// Implementation of the TargetInstrInfo class that is common to all
 /// AMD GPUs.
 //
 //===----------------------------------------------------------------------===//
@@ -16,6 +16,7 @@
 #include "AMDGPUInstrInfo.h"
 #include "AMDGPURegisterInfo.h"
 #include "AMDGPUTargetMachine.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -24,6 +25,16 @@ using namespace llvm;
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "AMDGPUGenInstrInfo.inc"
+
+namespace llvm {
+namespace AMDGPU {
+#define GET_RSRCINTRINSIC_IMPL
+#include "AMDGPUGenSearchableTables.inc"
+
+#define GET_D16IMAGEDIMINTRINSIC_IMPL
+#include "AMDGPUGenSearchableTables.inc"
+}
+}
 
 // Pin the vtable to this file.
 void AMDGPUInstrInfo::anchor() {}
@@ -61,7 +72,8 @@ enum SIEncodingFamily {
   VI = 1,
   SDWA = 2,
   SDWA9 = 3,
-  GFX9 = 4
+  GFX80 = 4,
+  GFX9 = 5
 };
 
 static SIEncodingFamily subtargetEncodingFamily(const AMDGPUSubtarget &ST) {
@@ -94,6 +106,12 @@ int AMDGPUInstrInfo::pseudoToMCOpcode(int Opcode) const {
   if (get(Opcode).TSFlags & SIInstrFlags::SDWA)
     Gen = ST.getGeneration() == AMDGPUSubtarget::GFX9 ? SIEncodingFamily::SDWA9
                                                       : SIEncodingFamily::SDWA;
+  // Adjust the encoding family to GFX80 for D16 buffer instructions when the
+  // subtarget has UnpackedD16VMem feature.
+  // TODO: remove this when we discard GFX80 encoding.
+  if (ST.hasUnpackedD16VMem() && (get(Opcode).TSFlags & SIInstrFlags::D16)
+                              && !(get(Opcode).TSFlags & SIInstrFlags::MIMG))
+    Gen = SIEncodingFamily::GFX80;
 
   int MCOp = AMDGPU::getMCOpcode(Opcode, Gen);
 
@@ -118,6 +136,9 @@ bool AMDGPUInstrInfo::isUniformMMO(const MachineMemOperand *MMO) {
   // PseudoSourceValue like GOT.
   if (!Ptr || isa<UndefValue>(Ptr) ||
       isa<Constant>(Ptr) || isa<GlobalValue>(Ptr))
+    return true;
+
+  if (MMO->getAddrSpace() == AMDGPUAS::CONSTANT_ADDRESS_32BIT)
     return true;
 
   if (const Argument *Arg = dyn_cast<Argument>(Ptr))

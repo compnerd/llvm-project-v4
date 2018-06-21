@@ -30,6 +30,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
+#include "AllocationState.h"
 #include <climits>
 #include <utility>
 
@@ -45,7 +46,8 @@ enum AllocationFamily {
   AF_CXXNew,
   AF_CXXNewArray,
   AF_IfNameIndex,
-  AF_Alloca
+  AF_Alloca,
+  AF_InternalBuffer
 };
 
 class RefState {
@@ -134,10 +136,10 @@ enum ReallocPairKind {
 };
 
 /// \class ReallocPair
-/// \brief Stores information about the symbol being reallocated by a call to
+/// Stores information about the symbol being reallocated by a call to
 /// 'realloc' to allow modeling failed reallocation later in the path.
 struct ReallocPair {
-  // \brief The symbol which realloc reallocated.
+  // The symbol which realloc reallocated.
   SymbolRef ReallocatedSym;
   ReallocPairKind Kind;
 
@@ -256,20 +258,20 @@ private:
 
   void initIdentifierInfo(ASTContext &C) const;
 
-  /// \brief Determine family of a deallocation expression.
+  /// Determine family of a deallocation expression.
   AllocationFamily getAllocationFamily(CheckerContext &C, const Stmt *S) const;
 
-  /// \brief Print names of allocators and deallocators.
+  /// Print names of allocators and deallocators.
   ///
   /// \returns true on success.
   bool printAllocDeallocName(raw_ostream &os, CheckerContext &C,
                              const Expr *E) const;
 
-  /// \brief Print expected name of an allocator based on the deallocator's
+  /// Print expected name of an allocator based on the deallocator's
   /// family derived from the DeallocExpr.
   void printExpectedAllocName(raw_ostream &os, CheckerContext &C,
                               const Expr *DeallocExpr) const;
-  /// \brief Print expected name of a deallocator based on the allocator's
+  /// Print expected name of a deallocator based on the allocator's
   /// family.
   void printExpectedDeallocName(raw_ostream &os, AllocationFamily Family) const;
 
@@ -284,12 +286,12 @@ private:
   bool isStandardNewDelete(const FunctionDecl *FD, ASTContext &C) const;
   ///@}
 
-  /// \brief Process C++ operator new()'s allocation, which is the part of C++
+  /// Process C++ operator new()'s allocation, which is the part of C++
   /// new-expression that goes before the constructor.
   void processNewAllocation(const CXXNewExpr *NE, CheckerContext &C,
                             SVal Target) const;
 
-  /// \brief Perform a zero-allocation check.
+  /// Perform a zero-allocation check.
   /// The optional \p RetVal parameter specifies the newly allocated pointer
   /// value; if unspecified, the value of expression \p E is used.
   ProgramStateRef ProcessZeroAllocation(CheckerContext &C, const Expr *E,
@@ -351,7 +353,7 @@ private:
   static ProgramStateRef CallocMem(CheckerContext &C, const CallExpr *CE,
                                    ProgramStateRef State);
 
-  ///\brief Check if the memory associated with this symbol was released.
+  ///Check if the memory associated with this symbol was released.
   bool isReleased(SymbolRef Sym, CheckerContext &C) const;
 
   bool checkUseAfterFree(SymbolRef Sym, CheckerContext &C, const Stmt *S) const;
@@ -1233,7 +1235,8 @@ MallocChecker::MallocMemReturnsAttr(CheckerContext &C, const CallExpr *CE,
 
   OwnershipAttr::args_iterator I = Att->args_begin(), E = Att->args_end();
   if (I != E) {
-    return MallocMemAux(C, CE, CE->getArg(*I), UndefinedVal(), State);
+    return MallocMemAux(C, CE, CE->getArg(I->getASTIndex()), UndefinedVal(),
+                        State);
   }
   return MallocMemAux(C, CE, UnknownVal(), UndefinedVal(), State);
 }
@@ -1272,7 +1275,7 @@ ProgramStateRef MallocChecker::MallocMemAux(CheckerContext &C,
   State = State->BindExpr(CE, C.getLocationContext(), RetVal);
 
   // Fill the region with the initialization value.
-  State = State->bindDefault(RetVal, Init, LCtx);
+  State = State->bindDefaultInitial(RetVal, Init, LCtx);
 
   // Set the region's extent equal to the Size parameter.
   const SymbolicRegion *R =
@@ -1331,9 +1334,9 @@ ProgramStateRef MallocChecker::FreeMemAttr(CheckerContext &C,
   bool ReleasedAllocated = false;
 
   for (const auto &Arg : Att->args()) {
-    ProgramStateRef StateI = FreeMemAux(C, CE, State, Arg,
-                               Att->getOwnKind() == OwnershipAttr::Holds,
-                               ReleasedAllocated);
+    ProgramStateRef StateI = FreeMemAux(
+        C, CE, State, Arg.getASTIndex(),
+        Att->getOwnKind() == OwnershipAttr::Holds, ReleasedAllocated);
     if (StateI)
       State = StateI;
   }
@@ -1466,6 +1469,7 @@ void MallocChecker::printExpectedAllocName(raw_ostream &os, CheckerContext &C,
     case AF_CXXNew: os << "'new'"; return;
     case AF_CXXNewArray: os << "'new[]'"; return;
     case AF_IfNameIndex: os << "'if_nameindex()'"; return;
+    case AF_InternalBuffer: os << "container-specific allocator"; return;
     case AF_Alloca:
     case AF_None: llvm_unreachable("not a deallocation expression");
   }
@@ -1478,6 +1482,7 @@ void MallocChecker::printExpectedDeallocName(raw_ostream &os,
     case AF_CXXNew: os << "'delete'"; return;
     case AF_CXXNewArray: os << "'delete[]'"; return;
     case AF_IfNameIndex: os << "'if_freenameindex()'"; return;
+    case AF_InternalBuffer: os << "container-specific deallocator"; return;
     case AF_Alloca:
     case AF_None: llvm_unreachable("suspicious argument");
   }
@@ -1652,7 +1657,9 @@ MallocChecker::getCheckIfTracked(AllocationFamily Family,
     return Optional<MallocChecker::CheckKind>();
   }
   case AF_CXXNew:
-  case AF_CXXNewArray: {
+  case AF_CXXNewArray:
+  // FIXME: Add new CheckKind for AF_InternalBuffer.
+  case AF_InternalBuffer: {
     if (IsALeakCheck) {
       if (ChecksEnabled[CK_NewDeleteLeaksChecker])
         return CK_NewDeleteLeaksChecker;
@@ -2989,6 +2996,20 @@ void MallocChecker::printState(raw_ostream &Out, ProgramStateRef State,
     }
   }
 }
+
+namespace clang {
+namespace ento {
+namespace allocation_state {
+
+ProgramStateRef
+markReleased(ProgramStateRef State, SymbolRef Sym, const Expr *Origin) {
+  AllocationFamily Family = AF_InternalBuffer;
+  return State->set<RegionState>(Sym, RefState::getReleased(Family, Origin));
+}
+
+} // end namespace allocation_state
+} // end namespace ento
+} // end namespace clang
 
 void ento::registerNewDeleteLeaksChecker(CheckerManager &mgr) {
   registerCStringCheckerBasic(mgr);

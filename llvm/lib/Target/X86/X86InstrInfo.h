@@ -18,6 +18,7 @@
 #include "X86InstrFMA3Info.h"
 #include "X86RegisterInfo.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 
 #define GET_INSTRINFO_HEADER
@@ -29,6 +30,12 @@ class X86RegisterInfo;
 class X86Subtarget;
 
 namespace X86 {
+
+enum AsmComments {
+  // For instr that was compressed from EVEX to VEX.
+  AC_EVEX_2_VEX = MachineInstr::TAsmComments
+};
+
 // X86 specific condition code. These correspond to X86_*_COND in
 // X86InstrInfo.td. They must be kept in synch.
 enum CondCode {
@@ -64,18 +71,24 @@ enum CondCode {
 // Turn condition code into conditional branch opcode.
 unsigned GetCondBranchFromCond(CondCode CC);
 
-/// \brief Return a pair of condition code for the given predicate and whether
+/// Return a pair of condition code for the given predicate and whether
 /// the instruction operands should be swaped to match the condition code.
 std::pair<CondCode, bool> getX86ConditionCode(CmpInst::Predicate Predicate);
 
-/// \brief Return a set opcode for the given condition and whether it has
+/// Return a set opcode for the given condition and whether it has
 /// a memory operand.
 unsigned getSETFromCond(CondCode CC, bool HasMemoryOperand = false);
 
-/// \brief Return a cmov opcode for the given condition, register size in
+/// Return a cmov opcode for the given condition, register size in
 /// bytes, and operand type.
 unsigned getCMovFromCond(CondCode CC, unsigned RegBytes,
                          bool HasMemoryOperand = false);
+
+// Turn jCC opcode into condition code.
+CondCode getCondFromBranchOpc(unsigned Opc);
+
+// Turn setCC opcode into condition code.
+CondCode getCondFromSETOpc(unsigned Opc);
 
 // Turn CMov opcode into condition code.
 CondCode getCondFromCMovOpc(unsigned Opc);
@@ -83,6 +96,16 @@ CondCode getCondFromCMovOpc(unsigned Opc);
 /// GetOppositeBranchCondition - Return the inverse of the specified cond,
 /// e.g. turning COND_E to COND_NE.
 CondCode GetOppositeBranchCondition(CondCode CC);
+
+/// Get the VPCMP immediate for the given condition.
+unsigned getVPCMPImmForCond(ISD::CondCode CC);
+
+/// Get the VPCMP immediate if the opcodes are swapped.
+unsigned getSwappedVPCMPImm(unsigned Imm);
+
+/// Get the VPCOM immediate if the opcodes are swapped.
+unsigned getSwappedVPCOMImm(unsigned Imm);
+
 } // namespace X86
 
 /// isGlobalStubReference - Return true if the specified TargetFlag operand is
@@ -219,6 +242,9 @@ public:
 
   unsigned isLoadFromStackSlot(const MachineInstr &MI,
                                int &FrameIndex) const override;
+  unsigned isLoadFromStackSlot(const MachineInstr &MI,
+                               int &FrameIndex,
+                               unsigned &MemBytes) const override;
   /// isLoadFromStackSlotPostFE - Check for post-frame ptr elimination
   /// stack locations as well.  This uses a heuristic so it isn't
   /// reliable for correctness.
@@ -227,6 +253,9 @@ public:
 
   unsigned isStoreToStackSlot(const MachineInstr &MI,
                               int &FrameIndex) const override;
+  unsigned isStoreToStackSlot(const MachineInstr &MI,
+                              int &FrameIndex,
+                              unsigned &MemBytes) const override;
   /// isStoreToStackSlotPostFE - Check for post-frame ptr elimination
   /// stack locations as well.  This uses a heuristic so it isn't
   /// reliable for correctness.
@@ -369,6 +398,8 @@ public:
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
                    const DebugLoc &DL, unsigned DestReg, unsigned SrcReg,
                    bool KillSrc) const override;
+  bool isCopyInstr(const MachineInstr &MI, const MachineOperand *&Src,
+                   const MachineOperand *&Dest) const override;
   void storeRegToStackSlot(MachineBasicBlock &MBB,
                            MachineBasicBlock::iterator MI, unsigned SrcReg,
                            bool isKill, int FrameIndex,
@@ -490,7 +521,11 @@ public:
   std::pair<uint16_t, uint16_t>
   getExecutionDomain(const MachineInstr &MI) const override;
 
+  uint16_t getExecutionDomainCustom(const MachineInstr &MI) const;
+
   void setExecutionDomain(MachineInstr &MI, unsigned Domain) const override;
+
+  bool setExecutionDomainCustom(MachineInstr &MI, unsigned Domain) const;
 
   unsigned
   getPartialRegUpdateClearance(const MachineInstr &MI, unsigned OpNum,
@@ -562,27 +597,22 @@ public:
   /// X86 supports the MachineOutliner.
   bool useMachineOutliner() const override { return true; }
 
-  virtual MachineOutlinerInfo getOutlininingCandidateInfo(
-      std::vector<
-          std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
-          &RepeatedSequenceLocs) const override;
+  virtual outliner::TargetCostInfo getOutlininingCandidateInfo(
+      std::vector<outliner::Candidate> &RepeatedSequenceLocs) const override;
 
   bool isFunctionSafeToOutlineFrom(MachineFunction &MF,
                                    bool OutlineFromLinkOnceODRs) const override;
 
-  llvm::X86GenInstrInfo::MachineOutlinerInstrType
+  outliner::InstrType
   getOutliningType(MachineBasicBlock::iterator &MIT, unsigned Flags) const override;
 
-  void insertOutlinerEpilogue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              const MachineOutlinerInfo &MInfo) const override;
-
-  void insertOutlinerPrologue(MachineBasicBlock &MBB, MachineFunction &MF,
-                              const MachineOutlinerInfo &MInfo) const override;
+  void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
+                            const outliner::TargetCostInfo &TCI) const override;
 
   MachineBasicBlock::iterator
   insertOutlinedCall(Module &M, MachineBasicBlock &MBB,
                      MachineBasicBlock::iterator &It, MachineFunction &MF,
-                     const MachineOutlinerInfo &MInfo) const override;
+                     const outliner::TargetCostInfo &TCI) const override;
 
 protected:
   /// Commutes the operands in the given instruction by changing the operands

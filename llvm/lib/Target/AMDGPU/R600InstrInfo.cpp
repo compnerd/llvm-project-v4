@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 /// \file
-/// \brief R600 Implementation of TargetInstrInfo.
+/// R600 Implementation of TargetInstrInfo.
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,6 +19,7 @@
 #include "R600Defines.h"
 #include "R600FrameLowering.h"
 #include "R600RegisterInfo.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/SmallSet.h"
@@ -72,7 +73,7 @@ void R600InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   if (VectorComponents > 0) {
     for (unsigned I = 0; I < VectorComponents; I++) {
-      unsigned SubRegIndex = RI.getSubRegFromChannel(I);
+      unsigned SubRegIndex = AMDGPURegisterInfo::getSubRegFromChannel(I);
       buildDefaultInstruction(MBB, MI, AMDGPU::MOV,
                               RI.getSubReg(DestReg, SubRegIndex),
                               RI.getSubReg(SrcReg, SubRegIndex))
@@ -1082,7 +1083,8 @@ bool R600InstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 }
 
 void R600InstrInfo::reserveIndirectRegisters(BitVector &Reserved,
-                                             const MachineFunction &MF) const {
+                                             const MachineFunction &MF,
+                                             const R600RegisterInfo &TRI) const {
   const R600Subtarget &ST = MF.getSubtarget<R600Subtarget>();
   const R600FrameLowering *TFL = ST.getFrameLowering();
 
@@ -1093,11 +1095,9 @@ void R600InstrInfo::reserveIndirectRegisters(BitVector &Reserved,
     return;
 
   for (int Index = getIndirectIndexBegin(MF); Index <= End; ++Index) {
-    unsigned SuperReg = AMDGPU::R600_Reg128RegClass.getRegister(Index);
-    Reserved.set(SuperReg);
     for (unsigned Chan = 0; Chan < StackWidth; ++Chan) {
       unsigned Reg = AMDGPU::R600_TReg32RegClass.getRegister((4 * Index) + Chan);
-      Reserved.set(Reg);
+      TRI.reserveRegisterTuples(Reserved, Reg);
     }
   }
 }

@@ -19,7 +19,6 @@
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IntrinsicInst.h"
 
 using namespace llvm;
 
@@ -71,8 +70,7 @@ DILocation *DILocation::getImpl(LLVMContext &Context, unsigned Line,
 
 const DILocation *DILocation::getMergedLocation(const DILocation *LocA,
                                                 const DILocation *LocB,
-                                                bool GenerateLocation,
-                                                Instruction *ForInst) {
+                                                bool GenerateLocation) {
   if (!LocA || !LocB)
     return nullptr;
 
@@ -81,11 +79,6 @@ const DILocation *DILocation::getMergedLocation(const DILocation *LocA,
 
   if (!GenerateLocation)
     return nullptr;
-
-  // We cannot change the scope for debug info intrinsics.
-  if (isa<DbgInfoIntrinsic>(ForInst))
-    return DILocation::get(LocA->getContext(), 0, 0, LocA->getScope(),
-                           LocA->getInlinedAt());
 
   SmallPtrSet<DILocation *, 5> InlinedLocationsA;
   for (DILocation *L = LocA->getInlinedAt(); L; L = L->getInlinedAt())
@@ -270,12 +263,12 @@ DISubrange *DISubrange::getImpl(LLVMContext &Context, Metadata *CountNode,
 }
 
 DIEnumerator *DIEnumerator::getImpl(LLVMContext &Context, int64_t Value,
-                                    MDString *Name, StorageType Storage,
-                                    bool ShouldCreate) {
+                                    bool IsUnsigned, MDString *Name,
+                                    StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(DIEnumerator, (Value, Name));
+  DEFINE_GETIMPL_LOOKUP(DIEnumerator, (Value, IsUnsigned, Name));
   Metadata *Ops[] = {Name};
-  DEFINE_GETIMPL_STORE(DIEnumerator, (Value), Ops);
+  DEFINE_GETIMPL_STORE(DIEnumerator, (Value, IsUnsigned), Ops);
 }
 
 DIBasicType *DIBasicType::getImpl(LLVMContext &Context, unsigned Tag,
@@ -401,34 +394,39 @@ DISubroutineType *DISubroutineType::getImpl(LLVMContext &Context, DIFlags Flags,
 
 // FIXME: Implement this string-enum correspondence with a .def file and macros,
 // so that the association is explicit rather than implied.
-static const char *ChecksumKindName[DIFile::CSK_Last + 1] = {
-  "CSK_None",
+static const char *ChecksumKindName[DIFile::CSK_Last] = {
   "CSK_MD5",
   "CSK_SHA1"
 };
 
-DIFile::ChecksumKind DIFile::getChecksumKind(StringRef CSKindStr) {
-  return StringSwitch<DIFile::ChecksumKind>(CSKindStr)
-      .Case("CSK_MD5", DIFile::CSK_MD5)
-      .Case("CSK_SHA1", DIFile::CSK_SHA1)
-      .Default(DIFile::CSK_None);
+StringRef DIFile::getChecksumKindAsString(ChecksumKind CSKind) {
+  assert(CSKind <= DIFile::CSK_Last && "Invalid checksum kind");
+  // The first space was originally the CSK_None variant, which is now
+  // obsolete, but the space is still reserved in ChecksumKind, so we account
+  // for it here.
+  return ChecksumKindName[CSKind - 1];
 }
 
-StringRef DIFile::getChecksumKindAsString() const {
-  assert(CSKind <= DIFile::CSK_Last && "Invalid checksum kind");
-  return ChecksumKindName[CSKind];
+Optional<DIFile::ChecksumKind> DIFile::getChecksumKind(StringRef CSKindStr) {
+  return StringSwitch<Optional<DIFile::ChecksumKind>>(CSKindStr)
+      .Case("CSK_MD5", DIFile::CSK_MD5)
+      .Case("CSK_SHA1", DIFile::CSK_SHA1)
+      .Default(None);
 }
 
 DIFile *DIFile::getImpl(LLVMContext &Context, MDString *Filename,
-                        MDString *Directory, DIFile::ChecksumKind CSKind,
-                        MDString *Checksum, StorageType Storage,
+                        MDString *Directory,
+                        Optional<DIFile::ChecksumInfo<MDString *>> CS,
+                        Optional<MDString *> Source, StorageType Storage,
                         bool ShouldCreate) {
   assert(isCanonical(Filename) && "Expected canonical MDString");
   assert(isCanonical(Directory) && "Expected canonical MDString");
-  assert(isCanonical(Checksum) && "Expected canonical MDString");
-  DEFINE_GETIMPL_LOOKUP(DIFile, (Filename, Directory, CSKind, Checksum));
-  Metadata *Ops[] = {Filename, Directory, Checksum};
-  DEFINE_GETIMPL_STORE(DIFile, (CSKind), Ops);
+  assert((!CS || isCanonical(CS->Value)) && "Expected canonical MDString");
+  assert((!Source || isCanonical(*Source)) && "Expected canonical MDString");
+  DEFINE_GETIMPL_LOOKUP(DIFile, (Filename, Directory, CS, Source));
+  Metadata *Ops[] = {Filename, Directory, CS ? CS->Value : nullptr,
+                     Source.getValueOr(nullptr)};
+  DEFINE_GETIMPL_STORE(DIFile, (CS, Source), Ops);
 }
 
 DICompileUnit *DICompileUnit::getImpl(
@@ -491,7 +489,7 @@ DISubprogram *DISubprogram::getImpl(
     bool IsLocalToUnit, bool IsDefinition, unsigned ScopeLine,
     Metadata *ContainingType, unsigned Virtuality, unsigned VirtualIndex,
     int ThisAdjustment, DIFlags Flags, bool IsOptimized, Metadata *Unit,
-    Metadata *TemplateParams, Metadata *Declaration, Metadata *Variables,
+    Metadata *TemplateParams, Metadata *Declaration, Metadata *RetainedNodes,
     Metadata *ThrownTypes, StorageType Storage, bool ShouldCreate) {
   assert(isCanonical(Name) && "Expected canonical MDString");
   assert(isCanonical(LinkageName) && "Expected canonical MDString");
@@ -499,10 +497,10 @@ DISubprogram *DISubprogram::getImpl(
       DISubprogram, (Scope, Name, LinkageName, File, Line, Type, IsLocalToUnit,
                      IsDefinition, ScopeLine, ContainingType, Virtuality,
                      VirtualIndex, ThisAdjustment, Flags, IsOptimized, Unit,
-                     TemplateParams, Declaration, Variables, ThrownTypes));
+                     TemplateParams, Declaration, RetainedNodes, ThrownTypes));
   SmallVector<Metadata *, 11> Ops = {
-      File,        Scope,     Name,           LinkageName,    Type,       Unit,
-      Declaration, Variables, ContainingType, TemplateParams, ThrownTypes};
+      File,        Scope,         Name,           LinkageName,    Type,       Unit,
+      Declaration, RetainedNodes, ContainingType, TemplateParams, ThrownTypes};
   if (!ThrownTypes) {
     Ops.pop_back();
     if (!TemplateParams) {
@@ -655,6 +653,18 @@ Optional<uint64_t> DIVariable::getSizeInBits() const {
   return None;
 }
 
+DILabel *DILabel::getImpl(LLVMContext &Context, Metadata *Scope,
+                          MDString *Name, Metadata *File, unsigned Line,
+                          StorageType Storage,
+                          bool ShouldCreate) {
+  assert(Scope && "Expected scope");
+  assert(isCanonical(Name) && "Expected canonical MDString");
+  DEFINE_GETIMPL_LOOKUP(DILabel,
+                        (Scope, Name, File, Line));
+  Metadata *Ops[] = {Scope, Name, File};
+  DEFINE_GETIMPL_STORE(DILabel, (Line), Ops);
+}
+
 DIExpression *DIExpression::getImpl(LLVMContext &Context,
                                     ArrayRef<uint64_t> Elements,
                                     StorageType Storage, bool ShouldCreate) {
@@ -787,12 +797,12 @@ DIExpression *DIExpression::prepend(const DIExpression *Expr, bool DerefBefore,
   if (DerefAfter)
     Ops.push_back(dwarf::DW_OP_deref);
 
-  return doPrepend(Expr, Ops, StackValue);
+  return prependOpcodes(Expr, Ops, StackValue);
 }
 
-DIExpression *DIExpression::doPrepend(const DIExpression *Expr,
-                                      SmallVectorImpl<uint64_t> &Ops,
-                                      bool StackValue) {
+DIExpression *DIExpression::prependOpcodes(const DIExpression *Expr,
+                                           SmallVectorImpl<uint64_t> &Ops,
+                                           bool StackValue) {
   if (Expr)
     for (auto Op : Expr->expr_ops()) {
       // A DW_OP_stack_value comes at the end, but before a DW_OP_LLVM_fragment.
@@ -832,9 +842,9 @@ Optional<DIExpression *> DIExpression::createFragmentExpression(
       case dwarf::DW_OP_LLVM_fragment: {
         // Make the new offset point into the existing fragment.
         uint64_t FragmentOffsetInBits = Op.getArg(0);
-        // Op.getArg(0) is FragmentOffsetInBits.
-        // Op.getArg(1) is FragmentSizeInBits.
-        assert((OffsetInBits + SizeInBits <= Op.getArg(0) + Op.getArg(1)) &&
+        uint64_t FragmentSizeInBits = Op.getArg(1);
+        (void)FragmentSizeInBits;
+        assert((OffsetInBits + SizeInBits <= FragmentSizeInBits) &&
                "new fragment outside of original fragment");
         OffsetInBits += FragmentOffsetInBits;
         continue;
@@ -915,4 +925,3 @@ DIMacroFile *DIMacroFile::getImpl(LLVMContext &Context, unsigned MIType,
   Metadata *Ops[] = { File, Elements };
   DEFINE_GETIMPL_STORE(DIMacroFile, (MIType, Line), Ops);
 }
-

@@ -13,6 +13,8 @@
 #include <memory>
 #include <system_error>
 
+#include "llvm/ADT/StringRef.h"
+
 namespace llvm {
 namespace object {
 class COFFImportFile;
@@ -41,13 +43,16 @@ public:
   virtual void printDynamicTable() { }
   virtual void printNeededLibraries() { }
   virtual void printProgramHeaders() { }
+  virtual void printSectionAsString(StringRef SectionName) {}
   virtual void printHashTable() { }
   virtual void printGnuHashTable() { }
   virtual void printLoadName() {}
   virtual void printVersionInfo() {}
   virtual void printGroupSections() {}
   virtual void printHashHistogram() {}
+  virtual void printCGProfile() {}
   virtual void printNotes() {}
+  virtual void printELFLinkerOptions() {}
 
   // Only implemented for ARM ELF at this time.
   virtual void printAttributes() { }
@@ -101,7 +106,8 @@ std::error_code createWasmDumper(const object::ObjectFile *Obj,
                                  ScopedPrinter &Writer,
                                  std::unique_ptr<ObjDumper> &Result);
 
-void dumpCOFFImportFile(const object::COFFImportFile *File);
+void dumpCOFFImportFile(const object::COFFImportFile *File,
+                        ScopedPrinter &Writer);
 
 void dumpCodeViewMergedTypes(
     ScopedPrinter &Writer, llvm::codeview::MergingTypeTableBuilder &IDTable,

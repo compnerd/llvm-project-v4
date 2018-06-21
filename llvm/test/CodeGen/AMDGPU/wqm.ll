@@ -657,17 +657,17 @@ break:
 ; CHECK: buffer_store_dwordx4
 define amdgpu_ps void @test_alloca(float %data, i32 %a, i32 %idx) nounwind {
 entry:
-  %array = alloca [32 x i32], align 4
+  %array = alloca [32 x i32], align 4, addrspace(5)
 
   call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 0, i32 0, i1 0, i1 0)
 
-  %s.gep = getelementptr [32 x i32], [32 x i32]* %array, i32 0, i32 0
-  store volatile i32 %a, i32* %s.gep, align 4
+  %s.gep = getelementptr [32 x i32], [32 x i32] addrspace(5)* %array, i32 0, i32 0
+  store volatile i32 %a, i32 addrspace(5)* %s.gep, align 4
 
   call void @llvm.amdgcn.buffer.store.f32(float %data, <4 x i32> undef, i32 1, i32 0, i1 0, i1 0)
 
-  %c.gep = getelementptr [32 x i32], [32 x i32]* %array, i32 0, i32 %idx
-  %c = load i32, i32* %c.gep, align 4
+  %c.gep = getelementptr [32 x i32], [32 x i32] addrspace(5)* %array, i32 0, i32 %idx
+  %c = load i32, i32 addrspace(5)* %c.gep, align 4
   %c.bc = bitcast i32 %c to float
   %t = call <4 x float> @llvm.amdgcn.image.sample.v4f32.f32.v8i32(float %c.bc, <8 x i32> undef, <4 x i32> undef, i32 15, i1 false, i1 false, i1 false, i1 false, i1 false) #0
   call void @llvm.amdgcn.buffer.store.v4f32(<4 x float> %t, <4 x i32> undef, i32 0, i32 0, i1 0, i1 0)
@@ -746,6 +746,36 @@ end:
   ret <4 x float> %r
 }
 
+; Check a case of a block being entirely WQM except for a bit of WWM.
+; There was a bug where it forgot to enter and leave WWM.
+;
+;CHECK-LABEL: {{^}}test_wwm_within_wqm:
+;CHECK: %IF
+;CHECK: s_or_saveexec_b64 {{.*}}, -1
+;CHECK: ds_swizzle
+;
+define amdgpu_ps float @test_wwm_within_wqm(<8 x i32> inreg %rsrc, <4 x i32> inreg %sampler, i32 %c, i32 %z, float %data) {
+main_body:
+  %c.bc = bitcast i32 %c to float
+  %tex = call <4 x float> @llvm.amdgcn.image.sample.v4f32.f32.v8i32(float %c.bc, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i1 false, i1 false, i1 false, i1 false, i1 false) #0
+  %dtex = call <4 x float> @llvm.amdgcn.image.sample.v4f32.v4f32.v8i32(<4 x float> %tex, <8 x i32> %rsrc, <4 x i32> %sampler, i32 15, i1 false, i1 false, i1 false, i1 false, i1 false) #0
+  %cmp = icmp eq i32 %z, 0
+  br i1 %cmp, label %IF, label %ENDIF
+
+IF:
+  %dataf = extractelement <4 x float> %dtex, i32 0
+  %data1 = fptosi float %dataf to i32
+  %data2 = call i32 @llvm.amdgcn.set.inactive.i32(i32 %data1, i32 0)
+  %data3 = call i32 @llvm.amdgcn.ds.swizzle(i32 %data2, i32 2079)
+  %data4 = call i32 @llvm.amdgcn.wwm.i32(i32 %data3)
+  %data4f = sitofp i32 %data4 to float
+  br label %ENDIF
+
+ENDIF:
+  %r = phi float [ %data4f, %IF ], [ 0.0, %main_body ]
+  ret float %r
+}
+
 declare void @llvm.amdgcn.exp.f32(i32, i32, float, float, float, float, i1, i1) #1
 declare void @llvm.amdgcn.image.store.v4f32.v4i32.v8i32(<4 x float>, <4 x i32>, <8 x i32>, i32, i1, i1, i1, i1) #1
 declare void @llvm.amdgcn.buffer.store.f32(float, <4 x i32>, i32, i32, i1, i1) #2
@@ -767,6 +797,7 @@ declare <2 x half> @llvm.amdgcn.cvt.pkrtz(float, float) #3
 declare void @llvm.amdgcn.exp.compr.v2f16(i32, i32, <2 x half>, <2 x half>, i1, i1) #1
 declare float @llvm.amdgcn.interp.p1(float, i32, i32, i32) #2
 declare float @llvm.amdgcn.interp.p2(float, float, i32, i32, i32) #2
+declare i32 @llvm.amdgcn.ds.swizzle(i32, i32)
 
 attributes #1 = { nounwind }
 attributes #2 = { nounwind readonly }

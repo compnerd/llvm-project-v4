@@ -175,7 +175,7 @@ bool darwin::Linker::NeedsTempPath(const InputInfoList &Inputs) const {
   return false;
 }
 
-/// \brief Pass -no_deduplicate to ld64 under certain conditions:
+/// Pass -no_deduplicate to ld64 under certain conditions:
 ///
 /// - Either -O0 or -O1 is explicitly specified
 /// - No -O option is specified *and* this is a compile+link (implicit -O0)
@@ -409,7 +409,7 @@ void darwin::Linker::AddLinkArgs(Compilation &C, const ArgList &Args,
   Args.AddLastArg(CmdArgs, options::OPT_Mach);
 }
 
-/// \brief Determine whether we are linking the ObjC runtime.
+/// Determine whether we are linking the ObjC runtime.
 static bool isObjCRuntimeLinked(const ArgList &Args) {
   if (isObjCAutoRefCount(Args)) {
     Args.ClaimAllArgs(options::OPT_fobjc_link_runtime);
@@ -456,7 +456,8 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   // we follow suite for ease of comparison.
   AddLinkArgs(C, Args, CmdArgs, Inputs);
 
-  // For LTO, pass the name of the optimization record file.
+  // For LTO, pass the name of the optimization record file and other
+  // opt-remarks flags.
   if (Args.hasFlag(options::OPT_fsave_optimization_record,
                    options::OPT_fno_save_optimization_record, false)) {
     CmdArgs.push_back("-mllvm");
@@ -471,6 +472,14 @@ void darwin::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     if (getLastProfileUseArg(Args)) {
       CmdArgs.push_back("-mllvm");
       CmdArgs.push_back("-lto-pass-remarks-with-hotness");
+
+      if (const Arg *A =
+              Args.getLastArg(options::OPT_fdiagnostics_hotness_threshold_EQ)) {
+        CmdArgs.push_back("-mllvm");
+        std::string Opt =
+            std::string("-lto-pass-remarks-hotness-threshold=") + A->getValue();
+        CmdArgs.push_back(Args.MakeArgString(Opt));
+      }
     }
   }
 
@@ -1192,6 +1201,11 @@ struct DarwinPlatform {
 
   DarwinEnvironmentKind getEnvironment() const { return Environment; }
 
+  void setEnvironment(DarwinEnvironmentKind Kind) {
+    Environment = Kind;
+    InferSimulatorFromArch = false;
+  }
+
   StringRef getOSVersion() const {
     if (Kind == OSVersionArg)
       return Argument->getValue();
@@ -1209,7 +1223,7 @@ struct DarwinPlatform {
   bool isExplicitlySpecified() const { return Kind <= DeploymentTargetEnv; }
 
   /// Returns true if the simulator environment can be inferred from the arch.
-  bool canInferSimulatorFromArch() const { return Kind != InferredFromSDK; }
+  bool canInferSimulatorFromArch() const { return InferSimulatorFromArch; }
 
   /// Adds the -m<os>-version-min argument to the compiler invocation.
   void addOSVersionMinArgument(DerivedArgList &Args, const OptTable &Opts) {
@@ -1285,6 +1299,7 @@ struct DarwinPlatform {
     DarwinPlatform Result(InferredFromSDK, Platform, Value);
     if (IsSimulator)
       Result.Environment = DarwinEnvironmentKind::Simulator;
+    Result.InferSimulatorFromArch = false;
     return Result;
   }
   static DarwinPlatform createFromArch(llvm::Triple::OSType OS,
@@ -1319,7 +1334,7 @@ private:
   DarwinPlatformKind Platform;
   DarwinEnvironmentKind Environment = DarwinEnvironmentKind::NativeEnvironment;
   std::string OSVersion;
-  bool HasOSVersion = true;
+  bool HasOSVersion = true, InferSimulatorFromArch = true;
   Arg *Argument;
   StringRef EnvVarName;
 };
@@ -1588,9 +1603,16 @@ void Darwin::AddDeploymentTarget(DerivedArgList &Args) const {
     OSTarget = getDeploymentTargetFromOSVersionArg(Args, getDriver());
     // If no deployment target was specified on the command line, check for
     // environment defines.
-    if (!OSTarget)
+    if (!OSTarget) {
       OSTarget =
           getDeploymentTargetFromEnvironmentVariables(getDriver(), getTriple());
+      if (OSTarget) {
+        // Don't infer simulator from the arch when the SDK is also specified.
+        Optional<DarwinPlatform> SDKTarget = inferDeploymentTargetFromSDK(Args);
+        if (SDKTarget)
+          OSTarget->setEnvironment(SDKTarget->getEnvironment());
+      }
+    }
     // If there is no command-line argument to specify the Target version and
     // no environment variable defined, see if we can set the default based
     // on -isysroot.

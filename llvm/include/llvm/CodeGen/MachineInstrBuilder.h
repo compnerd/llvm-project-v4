@@ -20,6 +20,7 @@
 #define LLVM_CODEGEN_MACHINEINSTRBUILDER_H
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -219,6 +220,9 @@ public:
     assert((MI->isDebugValue() ? static_cast<bool>(MI->getDebugVariable())
                                : true) &&
            "first MDNode argument of a DBG_VALUE not a variable");
+    assert((MI->isDebugLabel() ? static_cast<bool>(MI->getDebugLabel())
+                               : true) &&
+           "first MDNode argument of a DBG_LABEL not a label");
     return *this;
   }
 
@@ -282,6 +286,12 @@ public:
   copyImplicitOps(const MachineInstr &OtherMI) const {
     MI->copyImplicitOps(*MF, OtherMI);
     return *this;
+  }
+
+  bool constrainAllUses(const TargetInstrInfo &TII,
+                        const TargetRegisterInfo &TRI,
+                        const RegisterBankInfo &RBI) const {
+    return constrainSelectedInstRegOperands(*MI, TII, TRI, RBI);
   }
 };
 

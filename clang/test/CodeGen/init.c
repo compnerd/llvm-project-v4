@@ -72,6 +72,16 @@ struct a7 {
 struct a7 test7 = { .b = 0, .v = "bar" };
 
 
+// CHECK-DAG: @huge_array = global {{.*}} <{ i32 1, i32 0, i32 2, i32 0, i32 3, [999999995 x i32] zeroinitializer }>
+int huge_array[1000000000] = {1, 0, 2, 0, 3, 0, 0, 0};
+
+// CHECK-DAG: @huge_struct = global {{.*}} { i32 1, <{ i32, [999999999 x i32] }> <{ i32 2, [999999999 x i32] zeroinitializer }> }
+struct Huge {
+  int a;
+  int arr[1000 * 1000 * 1000];
+} huge_struct = {1, {2, 0, 0, 0}};
+
+
 // PR279 comment #3
 char test8(int X) {
   char str[100000] = "abc"; // tail should be memset.
@@ -159,7 +169,7 @@ struct S14 { int a[16]; };
 
 void test14(struct S14 *s14) {
 // CHECK-LABEL: @test14
-// CHECK: call void @llvm.memcpy.p0i8.p0i8.i32(i8* {{.*}}, i8* {{.*}} [[INIT14]] {{.*}}, i32 64, i32 4, i1 false)
+// CHECK: call void @llvm.memcpy.p0i8.p0i8.i32(i8* align 4 {{.*}}, i8* align 4 {{.*}} [[INIT14]] {{.*}}, i32 64, i1 false)
 // CHECK-NOT: store
 // CHECK: ret void
   *s14 = (struct S14) { { [5 ... 11] = 17 } };

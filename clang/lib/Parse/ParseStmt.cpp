@@ -27,7 +27,7 @@ using namespace clang;
 // C99 6.8: Statements and Blocks.
 //===----------------------------------------------------------------------===//
 
-/// \brief Parse a standalone statement (for instance, as the body of an 'if',
+/// Parse a standalone statement (for instance, as the body of an 'if',
 /// 'while', or 'for').
 StmtResult Parser::ParseStatement(SourceLocation *TrailingElseLoc,
                                   bool AllowOpenMPStandalone) {
@@ -402,7 +402,7 @@ Retry:
   return Res;
 }
 
-/// \brief Parse an expression statement.
+/// Parse an expression statement.
 StmtResult Parser::ParseExprStatement() {
   // If a case keyword is missing, this is where it should be inserted.
   Token OldToken = Tok;
@@ -954,7 +954,7 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
   if (T.consumeOpen())
     return StmtError();
 
-  Sema::CompoundScopeRAII CompoundScope(Actions);
+  Sema::CompoundScopeRAII CompoundScope(Actions, isStmtExpr);
 
   // Parse any pragmas at the beginning of the compound statement.
   ParseCompoundStatementLeadingPragmas();
