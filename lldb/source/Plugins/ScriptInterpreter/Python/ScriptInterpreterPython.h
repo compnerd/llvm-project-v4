@@ -445,8 +445,6 @@ public:
 
   static const char *GetPluginDescriptionStatic();
 
-  static FileSpec GetPythonDir();
-
   //------------------------------------------------------------------
   // PluginInterface protocol
   //------------------------------------------------------------------
@@ -510,10 +508,6 @@ protected:
   enum class AddLocation { Beginning, End };
 
   static void AddToSysPath(AddLocation location, std::string path);
-
-  static void ComputePythonDirForApple(llvm::SmallVectorImpl<char> &path);
-  static void ComputePythonDirForPosix(llvm::SmallVectorImpl<char> &path);
-  static void ComputePythonDirForWindows(llvm::SmallVectorImpl<char> &path);
 
   bool EnterSession(uint16_t on_entry_flags, FILE *in, FILE *out, FILE *err);
 
