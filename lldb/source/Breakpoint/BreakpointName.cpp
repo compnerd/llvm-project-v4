@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "llvm/Support/Casting.h"
 
+// Project includes
 #include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Breakpoint/BreakpointOptions.h"
 #include "lldb/Breakpoint/BreakpointLocationCollection.h"

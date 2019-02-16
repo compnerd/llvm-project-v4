@@ -50,8 +50,7 @@ Variable::Variable(
       m_symfile_type_sp(symfile_type_sp), m_scope(scope),
       m_owner_scope(context), m_scope_range(scope_range),
       m_declaration(decl_ptr), m_location(location), m_external(external),
-      m_artificial(artificial), m_loc_is_const_data(false),
-      m_static_member(static_member) {}
+      m_artificial(artificial), m_static_member(static_member) {}
 
 //----------------------------------------------------------------------
 // Destructor
@@ -731,7 +730,8 @@ static void PrivateAutoComplete(
               continue;
 
             const char *variable_name = variable->GetName().AsCString();
-            if (strstr(variable_name, token.c_str()) == variable_name) {
+            if (variable_name &&
+                strstr(variable_name, token.c_str()) == variable_name) {
               if (strcmp(variable_name, token.c_str()) == 0) {
                 Type *variable_type = variable->GetType();
                 if (variable_type) {

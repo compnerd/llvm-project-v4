@@ -13,11 +13,11 @@
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/lldb-forward.h"
+#include "lldb/lldb-forward.h" // for DataBufferSP
 
-#include <memory>
+#include <memory> // for make_shared
 
-#include <inttypes.h>
+#include <inttypes.h> // for PRIx64
 
 using namespace lldb;
 using namespace lldb_private;

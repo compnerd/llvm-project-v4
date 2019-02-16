@@ -28,7 +28,7 @@ public:
   SystemInitializerCommon();
   ~SystemInitializerCommon() override;
 
-  llvm::Error Initialize(const InitializerOptions &options) override;
+  void Initialize() override;
   void Terminate() override;
 };
 

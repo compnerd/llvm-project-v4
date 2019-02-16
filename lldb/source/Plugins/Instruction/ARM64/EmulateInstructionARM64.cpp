@@ -13,10 +13,10 @@
 
 #include "lldb/Core/Address.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/RegisterValue.h"
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/RegisterValue.h"
 #include "lldb/Utility/Stream.h"
 
 #include "Plugins/Process/Utility/ARMDefines.h"
@@ -41,7 +41,8 @@
 #include "Plugins/Process/Utility/RegisterInfos_arm64.h"
 
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/MathExtras.h" // for SignExtend32 template function
+                                     // and CountTrailingZeros_32 function
 
 #include "Plugins/Process/Utility/InstructionUtils.h"
 
@@ -436,7 +437,7 @@ bool EmulateInstructionARM64::EvaluateInstruction(uint32_t evaluate_options) {
 
   // Only return false if we are unable to read the CPSR if we care about
   // conditions
-  if (!success && !m_ignore_conditions)
+  if (success == false && m_ignore_conditions == false)
     return false;
 
   uint32_t orig_pc_value = 0;
@@ -546,8 +547,11 @@ bool EmulateInstructionARM64::BranchTo(const Context &context, uint32_t N,
   } else
     return false;
 
-  return WriteRegisterUnsigned(context, eRegisterKindGeneric,
-                               LLDB_REGNUM_GENERIC_PC, addr);
+  if (!WriteRegisterUnsigned(context, eRegisterKindGeneric,
+                             LLDB_REGNUM_GENERIC_PC, addr))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionARM64::ConditionHolds(const uint32_t cond) {
@@ -1093,7 +1097,9 @@ bool EmulateInstructionARM64::EmulateB(const uint32_t opcode) {
     return false;
   }
 
-  return BranchTo(context, 64, target);
+  if (!BranchTo(context, 64, target))
+    return false;
+  return true;
 }
 
 bool EmulateInstructionARM64::EmulateBcond(const uint32_t opcode) {

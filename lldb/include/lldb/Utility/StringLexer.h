@@ -10,9 +10,9 @@
 #ifndef utility_StringLexer_h_
 #define utility_StringLexer_h_
 
-#include <initializer_list>
-#include <string>
-#include <utility>
+#include <initializer_list> // for initializer_list
+#include <string>           // for string
+#include <utility>          // for pair
 
 namespace lldb_utility {
 

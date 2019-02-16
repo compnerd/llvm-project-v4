@@ -79,6 +79,10 @@ public:
 
   SBValue GetStopReturnValue();
 
+  SBValue GetStopErrorValue();
+
+  SBValue GetStopReturnOrErrorValue(bool &is_swift_error_value);
+
   lldb::tid_t GetThreadID() const;
 
   uint32_t GetIndexID() const;
@@ -197,10 +201,6 @@ public:
   SBThread GetExtendedBacktraceThread(const char *type);
 
   uint32_t GetExtendedBacktraceOriginatingIndexID();
-
-  SBValue GetCurrentException();
-
-  SBThread GetCurrentExceptionBacktrace();
 
   bool SafeToCallFunctions();
 

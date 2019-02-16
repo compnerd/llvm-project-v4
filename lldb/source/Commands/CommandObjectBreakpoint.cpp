@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "CommandObjectBreakpoint.h"
 #include "CommandObjectBreakpointCommand.h"
 #include "lldb/Breakpoint/Breakpoint.h"
@@ -304,11 +308,11 @@ static constexpr OptionDefinition g_breakpoint_set_options[] = {
   "options, on throw but not catch.)" },
   { LLDB_OPT_SET_10,               false, "on-throw",               'w', OptionParser::eRequiredArgument, nullptr, {}, 0,                                         eArgTypeBoolean,             "Set the breakpoint on exception throW." },
   { LLDB_OPT_SET_10,               false, "on-catch",               'h', OptionParser::eRequiredArgument, nullptr, {}, 0,                                         eArgTypeBoolean,             "Set the breakpoint on exception catcH." },
-
-  //  Don't add this option till it actually does something useful...
-  //    { LLDB_OPT_SET_10, false, "exception-typename", 'O', OptionParser::eRequiredArgument, nullptr, nullptr, 0, eArgTypeTypeName,
-  //        "The breakpoint will only stop if an exception Object of this type is thrown.  Can be repeated multiple times to stop for multiple object types" },
-
+  { LLDB_OPT_SET_10,               false, "exception-typename",     'O', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeTypeName,
+    "The breakpoint will only stop if an exception Object of this type is thrown.  Can be repeated multiple times to stop "
+    "for multiple object types.  If you just specify the type's base name it will match against that type in all modules,"
+    " or you can specify the full type name including modules.  Other submatches are not supported at present."
+    "Only supported for Swift at present."},
   { LLDB_OPT_EXPR_LANGUAGE,        false, "language",               'L', OptionParser::eRequiredArgument, nullptr, {}, 0,                                         eArgTypeLanguage,            "Specifies the Language to use when interpreting the breakpoint's expression "
   "(note: currently only implemented for setting breakpoints on identifiers).  "
   "If not set the target.language setting is used." },
@@ -421,6 +425,9 @@ public:
           error.SetErrorStringWithFormat(
               "Set exception breakpoints separately for c++ and objective-c");
           break;
+        case eLanguageTypeSwift:
+          m_exception_language = eLanguageTypeSwift;
+          break;
         case eLanguageTypeUnknown:
           error.SetErrorStringWithFormat(
               "Unknown language type: '%s' for exception breakpoint",
@@ -434,7 +441,7 @@ public:
       } break;
 
       case 'f':
-        m_filenames.AppendIfUnique(FileSpec(option_arg));
+        m_filenames.AppendIfUnique(FileSpec(option_arg, false));
         break;
 
       case 'F':
@@ -553,7 +560,7 @@ public:
         break;
 
       case 's':
-        m_modules.AppendIfUnique(FileSpec(option_arg));
+        m_modules.AppendIfUnique(FileSpec(option_arg, false));
         break;
 
       case 'S':
@@ -607,6 +614,7 @@ public:
       m_catch_bp = false;
       m_throw_bp = true;
       m_hardware = false;
+      m_language = eLanguageTypeUnknown;
       m_exception_language = eLanguageTypeUnknown;
       m_language = lldb::eLanguageTypeUnknown;
       m_skip_prologue = eLazyBoolCalculate;
@@ -632,7 +640,7 @@ public:
     uint32_t m_column;
     std::vector<std::string> m_func_names;
     std::vector<std::string> m_breakpoint_names;
-    lldb::FunctionNameType m_func_name_type_mask;
+    uint32_t m_func_name_type_mask;
     std::string m_func_regexp;
     std::string m_source_text_regexp;
     FileSpecList m_modules;
@@ -761,7 +769,7 @@ protected:
     }
     case eSetTypeFunctionName: // Breakpoint by function name
     {
-      FunctionNameType name_type_mask = m_options.m_func_name_type_mask;
+      uint32_t name_type_mask = m_options.m_func_name_type_mask;
 
       if (name_type_mask == 0)
         name_type_mask = eFunctionNameTypeAuto;
@@ -2366,8 +2374,7 @@ protected:
     std::unique_lock<std::recursive_mutex> lock;
     target->GetBreakpointList().GetListMutex(lock);
 
-    FileSpec input_spec(m_options.m_filename);
-    FileSystem::Instance().Resolve(input_spec);
+    FileSpec input_spec(m_options.m_filename, true);
     BreakpointIDList new_bps;
     Status error = target->CreateBreakpointsFromFile(
         input_spec, m_options.m_names, new_bps);
@@ -2501,10 +2508,8 @@ protected:
         return false;
       }
     }
-    FileSpec file_spec(m_options.m_filename);
-    FileSystem::Instance().Resolve(file_spec);
-    Status error = target->SerializeBreakpointsToFile(file_spec, valid_bp_ids,
-                                                      m_options.m_append);
+    Status error = target->SerializeBreakpointsToFile(
+        FileSpec(m_options.m_filename, true), valid_bp_ids, m_options.m_append);
     if (!error.Success()) {
       result.AppendErrorWithFormat("error serializing breakpoints: %s.",
                                    error.AsCString());

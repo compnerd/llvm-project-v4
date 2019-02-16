@@ -48,7 +48,7 @@ function(add_lldb_library name)
                                 ${PARAM_LINK_LIBS}
                                 DEPENDS ${PARAM_DEPENDS})
 
-    if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY OR ${name} STREQUAL "liblldb")
+    if (${name} STREQUAL "liblldb")
       if (PARAM_SHARED)
         set(out_dir lib${LLVM_LIBDIR_SUFFIX})
         if(${name} STREQUAL "liblldb" AND LLDB_BUILD_FRAMEWORK)
@@ -79,7 +79,7 @@ function(add_lldb_library name)
         # framework, so it must rely on the framework being fully built first.
         if (LLDB_BUILD_FRAMEWORK AND ${name} STREQUAL "liblldb")
           add_dependencies(install-${name} lldb-framework)
-          add_dependencies(install-${name}-stripped lldb-framework)
+          add_dependencies(install-lldb-framework-stripped lldb-framework)
         endif()
       endif()
     endif()

@@ -135,8 +135,31 @@ public:
     size_t
     GetStopDescription (char *dst, size_t dst_len);
 
+    %feature("autodoc", "
+    If the last stop on this thread was a thread plan that gathered a return value from the stop,
+    this function will fetch that stop result.  At present only the \"step-out\" thread plan gathers
+    stop return values.
+    ") GetStopReturnValue;
     SBValue
     GetStopReturnValue ();
+
+    %feature("autodoc", "
+    If the last stop on this thread was a thread plan that gathered an error value from the stop,
+    this function will fetch that stop result.  At present only the \"step-out\" thread plan gathers
+    stop error values, and that only for stepping out of Swift functions.
+    ") GetStopErrorValue;
+    SBValue
+    GetStopErrorValue ();
+
+//    FIXME: THis is a useful API, but our typemaps don't handle out bool types correctly.  We'll have to fix
+//    the typemaps before we can make this real.
+//    %feature("autodoc", "
+//    If the last stop on this thread was a thread plan that gathered a return or error value from the stop,
+//    this function will fetch that stop result.  Furthermore, the bool passed in will be set to whether it
+//    was an error or a return value.
+//    ") GetStopReturnOrErrorValue;
+//    SBValue
+//    GetStopReturnOrErrorValue (bool &is_swift_error_value);
 
     %feature("autodoc", "
     Returns a unique thread identifier (type lldb::tid_t, typically a 64-bit type)
@@ -397,24 +420,6 @@ public:
     ") GetExtendedBacktraceOriginatingIndexID;
     uint32_t
     GetExtendedBacktraceOriginatingIndexID();
-    
-    %feature("autodoc","
-    Returns an SBValue object represeting the current exception for the thread,
-    if there is any. Currently, this works for Obj-C code and returns an SBValue
-    representing the NSException object at the throw site or that's currently
-    being processes.
-    ") GetCurrentException;
-    lldb::SBValue
-    GetCurrentException();
-
-    %feature("autodoc","
-    Returns a historical (fake) SBThread representing the stack trace of an
-    exception, if there is one for the thread. Currently, this works for Obj-C
-    code, and can retrieve the throw-site backtrace of an NSException object
-    even when the program is no longer at the throw site.
-    ") GetCurrentExceptionBacktrace;
-    lldb::SBThread
-    GetCurrentExceptionBacktrace();
 
     %feature("autodoc","
     Takes no arguments, returns a bool.

@@ -11,7 +11,6 @@
 
 // C includes
 #include <dirent.h>
-#include <fcntl.h>
 #include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/stat.h>
@@ -48,7 +47,7 @@ Status FileSystem::Readlink(const FileSpec &src, FileSpec &dst) {
     error.SetErrorToErrno();
   else {
     buf[count] = '\0'; // Success
-    dst.SetFile(buf, FileSpec::Style::native);
+    dst.SetFile(buf, false, FileSpec::Style::native);
   }
   return error;
 }
@@ -66,15 +65,11 @@ Status FileSystem::ResolveSymbolicLink(const FileSpec &src, FileSpec &dst) {
     return err;
   }
 
-  dst = FileSpec(real_path);
+  dst = FileSpec(real_path, false);
 
   return Status();
 }
 
 FILE *FileSystem::Fopen(const char *path, const char *mode) {
   return ::fopen(path, mode);
-}
-
-int FileSystem::Open(const char *path, int flags, int mode) {
-  return ::open(path, flags, mode);
 }

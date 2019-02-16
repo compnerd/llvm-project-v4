@@ -47,20 +47,20 @@ SBType::SBType(const SBType &rhs) : m_opaque_sp() {
 //{}
 //
 bool SBType::operator==(SBType &rhs) {
-  if (!IsValid())
+  if (IsValid() == false)
     return !rhs.IsValid();
 
-  if (!rhs.IsValid())
+  if (rhs.IsValid() == false)
     return false;
 
   return *m_opaque_sp.get() == *rhs.m_opaque_sp.get();
 }
 
 bool SBType::operator!=(SBType &rhs) {
-  if (!IsValid())
+  if (IsValid() == false)
     return rhs.IsValid();
 
-  if (!rhs.IsValid())
+  if (rhs.IsValid() == false)
     return true;
 
   return *m_opaque_sp.get() != *rhs.m_opaque_sp.get();
@@ -131,6 +131,18 @@ bool SBType::IsVectorType() {
 bool SBType::IsReferenceType() {
   if (!IsValid())
     return false;
+  // FIXME: Swift class types are really like references, they are
+  // accessed by the same operator as Values, but their value is the
+  // location of the type.  But reporting true from the Compiler Type
+  // was causing problems that I couldn't unwind this time around.  So
+  // I'll work around that here.  The only Swift types that have a value
+  // are reference types.  All other Swift types are complex.  So use that
+  // as the discriminator.
+  CompilerType type = m_opaque_sp->GetCompilerType(true); 
+  uint32_t flags = type.GetTypeInfo();
+  if (flags & eTypeIsSwift)
+    return flags & eTypeHasValue;
+
   return m_opaque_sp->GetCompilerType(true).IsReferenceType();
 }
 
@@ -451,7 +463,7 @@ SBTypeList::SBTypeList(const SBTypeList &rhs)
     Append(const_cast<SBTypeList &>(rhs).GetTypeAtIndex(i));
 }
 
-bool SBTypeList::IsValid() { return (m_opaque_ap != NULL); }
+bool SBTypeList::IsValid() { return (m_opaque_ap.get() != NULL); }
 
 SBTypeList &SBTypeList::operator=(const SBTypeList &rhs) {
   if (this != &rhs) {
@@ -469,7 +481,7 @@ void SBTypeList::Append(SBType type) {
 }
 
 SBType SBTypeList::GetTypeAtIndex(uint32_t index) {
-  if (m_opaque_ap)
+  if (m_opaque_ap.get())
     return SBType(m_opaque_ap->GetTypeAtIndex(index));
   return SBType();
 }
@@ -500,39 +512,39 @@ lldb::SBTypeMember &SBTypeMember::operator=(const lldb::SBTypeMember &rhs) {
 bool SBTypeMember::IsValid() const { return m_opaque_ap.get(); }
 
 const char *SBTypeMember::GetName() {
-  if (m_opaque_ap)
+  if (m_opaque_ap.get())
     return m_opaque_ap->GetName().GetCString();
   return NULL;
 }
 
 SBType SBTypeMember::GetType() {
   SBType sb_type;
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     sb_type.SetSP(m_opaque_ap->GetTypeImpl());
   }
   return sb_type;
 }
 
 uint64_t SBTypeMember::GetOffsetInBytes() {
-  if (m_opaque_ap)
+  if (m_opaque_ap.get())
     return m_opaque_ap->GetBitOffset() / 8u;
   return 0;
 }
 
 uint64_t SBTypeMember::GetOffsetInBits() {
-  if (m_opaque_ap)
+  if (m_opaque_ap.get())
     return m_opaque_ap->GetBitOffset();
   return 0;
 }
 
 bool SBTypeMember::IsBitfield() {
-  if (m_opaque_ap)
+  if (m_opaque_ap.get())
     return m_opaque_ap->GetIsBitfield();
   return false;
 }
 
 uint32_t SBTypeMember::GetBitfieldSizeInBits() {
-  if (m_opaque_ap)
+  if (m_opaque_ap.get())
     return m_opaque_ap->GetBitfieldBitSize();
   return 0;
 }
@@ -541,7 +553,7 @@ bool SBTypeMember::GetDescription(lldb::SBStream &description,
                                   lldb::DescriptionLevel description_level) {
   Stream &strm = description.ref();
 
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     const uint32_t bit_offset = m_opaque_ap->GetBitOffset();
     const uint32_t byte_offset = bit_offset / 8u;
     const uint32_t byte_bit_offset = bit_offset % 8u;
@@ -571,12 +583,12 @@ void SBTypeMember::reset(TypeMemberImpl *type_member_impl) {
 }
 
 TypeMemberImpl &SBTypeMember::ref() {
-  if (m_opaque_ap == NULL)
+  if (m_opaque_ap.get() == NULL)
     m_opaque_ap.reset(new TypeMemberImpl());
-  return *m_opaque_ap;
+  return *m_opaque_ap.get();
 }
 
-const TypeMemberImpl &SBTypeMember::ref() const { return *m_opaque_ap; }
+const TypeMemberImpl &SBTypeMember::ref() const { return *m_opaque_ap.get(); }
 
 SBTypeMemberFunction::SBTypeMemberFunction() : m_opaque_sp() {}
 

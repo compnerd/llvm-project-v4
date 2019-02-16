@@ -18,6 +18,9 @@ class DisassemblyTestCase(TestBase):
     mydir = TestBase.compute_mydir(__file__)
     NO_DEBUG_INFO_TESTCASE = True
 
+    @expectedFailureAll(
+        oslist=["windows"],
+        bugnumber="function names print fully demangled instead of name-only")
     def test(self):
         self.build()
         target, _, _, bkpt = lldbutil.run_to_source_breakpoint(self,

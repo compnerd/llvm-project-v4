@@ -17,8 +17,6 @@
 #include "lldb/Host/Socket.h"
 #include "lldb/Host/common/TCPSocket.h"
 #include "lldb/Host/common/UDPSocket.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Path.h"
 
 #ifndef LLDB_DISABLE_POSIX
 #include "lldb/Host/posix/DomainSocket.h"
@@ -43,6 +41,7 @@ public:
 
 protected:
   static void AcceptThread(Socket *listen_socket,
+                           const char *listen_remote_address,
                            bool child_processes_inherit, Socket **accept_socket,
                            Status *error) {
     *error = listen_socket->Accept(*accept_socket);
@@ -50,7 +49,7 @@ protected:
 
   template <typename SocketType>
   void CreateConnectedSockets(
-      llvm::StringRef listen_remote_address,
+      const char *listen_remote_address,
       const std::function<std::string(const SocketType &)> &get_connect_addr,
       std::unique_ptr<SocketType> *a_up, std::unique_ptr<SocketType> *b_up) {
     bool child_processes_inherit = false;
@@ -65,8 +64,8 @@ protected:
     Status accept_error;
     Socket *accept_socket;
     std::thread accept_thread(AcceptThread, listen_socket_up.get(),
-                              child_processes_inherit, &accept_socket,
-                              &accept_error);
+                              listen_remote_address, child_processes_inherit,
+                              &accept_socket, &accept_error);
 
     std::string connect_remote_address = get_connect_addr(*listen_socket_up);
     std::unique_ptr<SocketType> connect_socket_up(
@@ -159,15 +158,15 @@ TEST_F(SocketTest, DecodeHostAndPort) {
 
 #ifndef LLDB_DISABLE_POSIX
 TEST_F(SocketTest, DomainListenConnectAccept) {
-  llvm::SmallString<64> Path;
-  std::error_code EC = llvm::sys::fs::createUniqueDirectory("DomainListenConnectAccept", Path);
-  ASSERT_FALSE(EC);
-  llvm::sys::path::append(Path, "test");
+  char *file_name_str = tempnam(nullptr, nullptr);
+  EXPECT_NE(nullptr, file_name_str);
+  const std::string file_name(file_name_str);
+  free(file_name_str);
 
   std::unique_ptr<DomainSocket> socket_a_up;
   std::unique_ptr<DomainSocket> socket_b_up;
   CreateConnectedSockets<DomainSocket>(
-      Path, [=](const DomainSocket &) { return Path.str().str(); },
+      file_name.c_str(), [=](const DomainSocket &) { return file_name; },
       &socket_a_up, &socket_b_up);
 }
 #endif

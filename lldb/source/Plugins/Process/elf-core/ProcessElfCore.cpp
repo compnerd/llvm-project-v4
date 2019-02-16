@@ -7,21 +7,25 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
 #include <stdlib.h>
 
+// C++ Includes
 #include <mutex>
 
+// Other libraries and framework includes
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Core/State.h"
 #include "lldb/Target/DynamicLoader.h"
 #include "lldb/Target/MemoryRegionInfo.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/UnixSignals.h"
 #include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/Utility/DataBufferLLVM.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/State.h"
 
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Threading.h"
@@ -57,8 +61,8 @@ lldb::ProcessSP ProcessElfCore::CreateInstance(lldb::TargetSP target_sp,
     // the header extension.
     const size_t header_size = sizeof(llvm::ELF::Elf64_Ehdr);
 
-    auto data_sp = FileSystem::Instance().CreateDataBuffer(
-        crash_file->GetPath(), header_size, 0);
+    auto data_sp = DataBufferLLVM::CreateSliceFromPath(crash_file->GetPath(),
+                                                       header_size, 0);
     if (data_sp && data_sp->GetByteSize() == header_size &&
         elf::ELFHeader::MagicBytesMatch(data_sp->GetBytes())) {
       elf::ELFHeader elf_header;
@@ -77,7 +81,7 @@ lldb::ProcessSP ProcessElfCore::CreateInstance(lldb::TargetSP target_sp,
 bool ProcessElfCore::CanDebug(lldb::TargetSP target_sp,
                               bool plugin_specified_by_name) {
   // For now we are just making sure the file exists for a given module
-  if (!m_core_module_sp && FileSystem::Instance().Exists(m_core_file)) {
+  if (!m_core_module_sp && m_core_file.Exists()) {
     ModuleSpec core_module_spec(m_core_file, target_sp->GetArchitecture());
     Status error(ModuleList::GetSharedModule(core_module_spec, m_core_module_sp,
                                              NULL, NULL, NULL));
@@ -118,10 +122,10 @@ ConstString ProcessElfCore::GetPluginName() { return GetPluginNameStatic(); }
 uint32_t ProcessElfCore::GetPluginVersion() { return 1; }
 
 lldb::addr_t ProcessElfCore::AddAddressRangeFromLoadSegment(
-    const elf::ELFProgramHeader &header) {
-  const lldb::addr_t addr = header.p_vaddr;
-  FileRange file_range(header.p_offset, header.p_filesz);
-  VMRangeToFileOffset::Entry range_entry(addr, header.p_memsz, file_range);
+    const elf::ELFProgramHeader *header) {
+  const lldb::addr_t addr = header->p_vaddr;
+  FileRange file_range(header->p_offset, header->p_filesz);
+  VMRangeToFileOffset::Entry range_entry(addr, header->p_memsz, file_range);
 
   VMRangeToFileOffset::Entry *last_entry = m_core_aranges.Back();
   if (last_entry && last_entry->GetRangeEnd() == range_entry.GetRangeBase() &&
@@ -136,12 +140,12 @@ lldb::addr_t ProcessElfCore::AddAddressRangeFromLoadSegment(
   // Keep a separate map of permissions that that isn't coalesced so all ranges
   // are maintained.
   const uint32_t permissions =
-      ((header.p_flags & llvm::ELF::PF_R) ? lldb::ePermissionsReadable : 0u) |
-      ((header.p_flags & llvm::ELF::PF_W) ? lldb::ePermissionsWritable : 0u) |
-      ((header.p_flags & llvm::ELF::PF_X) ? lldb::ePermissionsExecutable : 0u);
+      ((header->p_flags & llvm::ELF::PF_R) ? lldb::ePermissionsReadable : 0u) |
+      ((header->p_flags & llvm::ELF::PF_W) ? lldb::ePermissionsWritable : 0u) |
+      ((header->p_flags & llvm::ELF::PF_X) ? lldb::ePermissionsExecutable : 0u);
 
   m_core_range_infos.Append(
-      VMRangeToPermissions::Entry(addr, header.p_memsz, permissions));
+      VMRangeToPermissions::Entry(addr, header->p_memsz, permissions));
 
   return addr;
 }
@@ -162,8 +166,8 @@ Status ProcessElfCore::DoLoadCore() {
     return error;
   }
 
-  llvm::ArrayRef<elf::ELFProgramHeader> segments = core->ProgramHeaders();
-  if (segments.size() == 0) {
+  const uint32_t num_segments = core->GetProgramHeaderCount();
+  if (num_segments == 0) {
     error.SetErrorString("core file has no segments");
     return error;
   }
@@ -177,17 +181,20 @@ Status ProcessElfCore::DoLoadCore() {
   /// Walk through segments and Thread and Address Map information.
   /// PT_NOTE - Contains Thread and Register information
   /// PT_LOAD - Contains a contiguous range of Process Address Space
-  for (const elf::ELFProgramHeader &H : segments) {
-    DataExtractor data = core->GetSegmentData(H);
+  for (uint32_t i = 1; i <= num_segments; i++) {
+    const elf::ELFProgramHeader *header = core->GetProgramHeaderByIndex(i);
+    assert(header != NULL);
+
+    DataExtractor data = core->GetSegmentDataByIndex(i);
 
     // Parse thread contexts and auxv structure
-    if (H.p_type == llvm::ELF::PT_NOTE) {
-      if (llvm::Error error = ParseThreadContextsFromNoteSegment(H, data))
+    if (header->p_type == llvm::ELF::PT_NOTE) {
+      if (llvm::Error error = ParseThreadContextsFromNoteSegment(header, data))
         return Status(std::move(error));
     }
     // PT_LOAD segments contains address map
-    if (H.p_type == llvm::ELF::PT_LOAD) {
-      lldb::addr_t last_addr = AddAddressRangeFromLoadSegment(H);
+    if (header->p_type == llvm::ELF::PT_LOAD) {
+      lldb::addr_t last_addr = AddAddressRangeFromLoadSegment(header);
       if (vm_addr > last_addr)
         ranges_are_sorted = false;
       vm_addr = last_addr;
@@ -242,7 +249,8 @@ Status ProcessElfCore::DoLoadCore() {
       ModuleSpec exe_module_spec;
       exe_module_spec.GetArchitecture() = arch;
       exe_module_spec.GetFileSpec().SetFile(
-          m_nt_file_entries[0].path.GetCString(), FileSpec::Style::native);
+          m_nt_file_entries[0].path.GetCString(), false,
+          FileSpec::Style::native);
       if (exe_module_spec.GetFileSpec()) {
         exe_module_sp = GetTarget().GetSharedModule(exe_module_spec);
         if (exe_module_sp)
@@ -397,7 +405,7 @@ void ProcessElfCore::Clear() {
 }
 
 void ProcessElfCore::Initialize() {
-  static llvm::once_flag g_once_flag;
+  static std::once_flag g_once_flag;
 
   llvm::call_once(g_once_flag, []() {
     PluginManager::RegisterPlugin(GetPluginNameStatic(),
@@ -707,8 +715,8 @@ llvm::Error ProcessElfCore::parseLinuxNotes(llvm::ArrayRef<CoreNote> notes) {
 /// A note segment consists of one or more NOTE entries, but their types and
 /// meaning differ depending on the OS.
 llvm::Error ProcessElfCore::ParseThreadContextsFromNoteSegment(
-    const elf::ELFProgramHeader &segment_header, DataExtractor segment_data) {
-  assert(segment_header.p_type == llvm::ELF::PT_NOTE);
+    const elf::ELFProgramHeader *segment_header, DataExtractor segment_data) {
+  assert(segment_header && segment_header->p_type == llvm::ELF::PT_NOTE);
 
   auto notes_or_error = parseSegment(segment_data);
   if(!notes_or_error)
@@ -736,7 +744,8 @@ uint32_t ProcessElfCore::GetNumThreadContexts() {
 }
 
 ArchSpec ProcessElfCore::GetArchitecture() {
-  ArchSpec arch = m_core_module_sp->GetObjectFile()->GetArchitecture();
+  ArchSpec arch;
+  m_core_module_sp->GetObjectFile()->GetArchitecture(arch);
 
   ArchSpec target_arch = GetTarget().GetArchitecture();
   arch.MergeFrom(target_arch);

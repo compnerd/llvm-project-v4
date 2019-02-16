@@ -1,3 +1,8 @@
+set(LLVM_NO_RTTI 1)
+
+include(AddLLVM)
+include(SwiftAddCustomCommandTarget)
+
 if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
   add_definitions( -DEXPORT_LIBLLDB )
 endif()
@@ -29,7 +34,6 @@ add_lldb_library(liblldb SHARED
   SBFrame.cpp
   SBFunction.cpp
   SBHostOS.cpp
-  SBInitializerOptions.cpp
   SBInstruction.cpp
   SBInstructionList.cpp
   SBLanguageRuntime.cpp
@@ -88,6 +92,7 @@ add_lldb_library(liblldb SHARED
     lldbTarget
     lldbUtility
     ${LLDB_ALL_PLUGINS}
+    ${SWIFT_ALL_LIBS}
   LINK_COMPONENTS
     Support
   )
@@ -147,7 +152,6 @@ endif()
 if (LLDB_BUILD_FRAMEWORK)
   set_target_properties(liblldb
     PROPERTIES
-    SOVERSION "1.0.0"
     OUTPUT_NAME LLDB
     FRAMEWORK On
     FRAMEWORK_VERSION ${LLDB_FRAMEWORK_VERSION}
@@ -159,3 +163,26 @@ endif()
 if (LLDB_WRAP_PYTHON)
   add_dependencies(liblldb swig_wrapper)
 endif()
+
+set(lib_dir "${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX}")
+set(CLANG_RESOURCE_PATH "${LLDB_PATH_TO_SWIFT_BUILD}/lib${LLVM_LIBDIR_SUFFIX}/swift/clang")
+set(clang_headers_target ${CLANG_RESOURCE_PATH}/include)
+if(NOT LLDB_BUILT_STANDALONE)
+  set(clang_headers_target symlink_clang_headers)
+endif()
+
+# Copy the clang resource directory.
+add_custom_command_target(
+    unused_var
+    COMMAND "${CMAKE_COMMAND}" "-E" "copy_directory" "${CLANG_RESOURCE_PATH}" "${lib_dir}/lldb/clang/"
+    OUTPUT "${lib_dir}/lldb/clang/"
+    VERBATIM
+    ALL
+    DEPENDS ${clang_headers_target})
+
+install(
+  CODE "file(MAKE_DIRECTORY ${lib_dir}/lldb)")
+
+install(
+  DIRECTORY "${lib_dir}/lldb/clang"
+  DESTINATION lib${LLVM_LIBDIR_SUFFIX}/lldb/)

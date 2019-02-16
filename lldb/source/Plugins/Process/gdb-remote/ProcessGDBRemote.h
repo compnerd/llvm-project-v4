@@ -10,12 +10,15 @@
 #ifndef liblldb_ProcessGDBRemote_h_
 #define liblldb_ProcessGDBRemote_h_
 
+// C Includes
+// C++ Includes
 #include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include "lldb/Core/Broadcaster.h"
 #include "lldb/Core/LoadedModuleInfoList.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/ThreadSafeValue.h"
@@ -23,7 +26,6 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/ArchSpec.h"
-#include "lldb/Utility/Broadcaster.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StreamGDBRemote.h"
@@ -34,15 +36,11 @@
 #include "lldb/lldb-private-forward.h"
 
 #include "GDBRemoteCommunicationClient.h"
-#include "GDBRemoteCommunicationReplayServer.h"
 #include "GDBRemoteRegisterContext.h"
 
 #include "llvm/ADT/DenseMap.h"
 
 namespace lldb_private {
-namespace repro {
-class Loader;
-}
 namespace process_gdb_remote {
 
 class ThreadGDBRemote;
@@ -266,7 +264,6 @@ protected:
   };
 
   GDBRemoteCommunicationClient m_gdb_comm;
-  GDBRemoteCommunicationReplayServer m_gdb_replay_server;
   std::atomic<lldb::pid_t> m_debugserver_pid;
   std::vector<StringExtractorGDBRemote> m_stop_packet_stack; // The stop packet
                                                              // stack replaces
@@ -307,7 +304,6 @@ protected:
   int64_t m_breakpoint_pc_offset;
   lldb::tid_t m_initial_tid; // The initial thread ID, given by stub on attach
 
-  bool m_replay_mode;
   bool m_allow_flash_writes;
   using FlashRangeVector = lldb_private::RangeVector<lldb::addr_t, size_t>;
   using FlashRange = FlashRangeVector::Entry;
@@ -334,8 +330,6 @@ protected:
 
   bool UpdateThreadList(ThreadList &old_thread_list,
                         ThreadList &new_thread_list) override;
-
-  Status ConnectToReplayServer(repro::Loader *loader);
 
   Status EstablishConnectionIfNeeded(const ProcessInfo &process_info);
 

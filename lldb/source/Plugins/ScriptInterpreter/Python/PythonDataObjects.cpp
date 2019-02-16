@@ -222,7 +222,9 @@ PythonBytes::~PythonBytes() {}
 bool PythonBytes::Check(PyObject *py_obj) {
   if (!py_obj)
     return false;
-  return PyBytes_Check(py_obj);
+  if (PyBytes_Check(py_obj))
+    return true;
+  return false;
 }
 
 void PythonBytes::Reset(PyRefType type, PyObject *py_obj) {
@@ -292,7 +294,9 @@ PythonByteArray::~PythonByteArray() {}
 bool PythonByteArray::Check(PyObject *py_obj) {
   if (!py_obj)
     return false;
-  return PyByteArray_Check(py_obj);
+  if (PyByteArray_Check(py_obj))
+    return true;
+  return false;
 }
 
 void PythonByteArray::Reset(PyRefType type, PyObject *py_obj) {
@@ -935,8 +939,7 @@ PythonFile::PythonFile() : PythonObject() {}
 PythonFile::PythonFile(File &file, const char *mode) { Reset(file, mode); }
 
 PythonFile::PythonFile(const char *path, const char *mode) {
-  lldb_private::File file;
-  FileSystem::Instance().Open(file, FileSpec(path), GetOptionsFromMode(mode));
+  lldb_private::File file(path, GetOptionsFromMode(mode));
   Reset(file, mode);
 }
 

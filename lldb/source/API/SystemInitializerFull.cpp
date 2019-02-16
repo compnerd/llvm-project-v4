@@ -24,6 +24,7 @@
 #include "lldb/Initialization/SystemInitializerCommon.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Symbol/ClangASTContext.h"
+#include "lldb/Symbol/SwiftASTContext.h"
 #include "lldb/Utility/Timer.h"
 
 #include "Plugins/ABI/MacOSX-arm/ABIMacOSX_arm.h"
@@ -40,7 +41,6 @@
 #include "Plugins/ABI/SysV-s390x/ABISysV_s390x.h"
 #include "Plugins/ABI/SysV-x86_64/ABISysV_x86_64.h"
 #include "Plugins/Architecture/Arm/ArchitectureArm.h"
-#include "Plugins/Architecture/Mips/ArchitectureMips.h"
 #include "Plugins/Architecture/PPC64/ArchitecturePPC64.h"
 #include "Plugins/Disassembler/llvm/DisassemblerLLVMC.h"
 #include "Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.h"
@@ -54,6 +54,7 @@
 #include "Plugins/InstrumentationRuntime/MainThreadChecker/MainThreadCheckerRuntime.h"
 #include "Plugins/InstrumentationRuntime/TSan/TSanRuntime.h"
 #include "Plugins/InstrumentationRuntime/UBSan/UBSanRuntime.h"
+#include "Plugins/InstrumentationRuntime/SwiftRuntimeReporting/SwiftRuntimeReporting.h"
 #include "Plugins/JITLoader/GDB/JITLoaderGDB.h"
 #include "Plugins/Language/CPlusPlus/CPlusPlusLanguage.h"
 #include "Plugins/Language/ObjC/ObjCLanguage.h"
@@ -63,7 +64,6 @@
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntimeV2.h"
 #include "Plugins/LanguageRuntime/RenderScript/RenderScriptRuntime/RenderScriptRuntime.h"
 #include "Plugins/MemoryHistory/asan/MemoryHistoryASan.h"
-#include "Plugins/ObjectFile/Breakpad/ObjectFileBreakpad.h"
 #include "Plugins/ObjectFile/ELF/ObjectFileELF.h"
 #include "Plugins/ObjectFile/Mach-O/ObjectFileMachO.h"
 #include "Plugins/ObjectFile/PECOFF/ObjectFilePECOFF.h"
@@ -113,6 +113,11 @@
 #if defined(_WIN32)
 #include "Plugins/Process/Windows/Common/ProcessWindows.h"
 #include "lldb/Host/windows/windows.h"
+#endif
+
+#if defined(__APPLE__) || defined(__linux__)
+#include "Plugins/Language/Swift/SwiftLanguage.h"
+#include "lldb/Target/SwiftLanguageRuntime.h"
 #endif
 
 #include "llvm/Support/TargetSelect.h"
@@ -170,7 +175,7 @@ extern "C" void *LLDBSwigPythonCreateScriptedThreadPlan(
 extern "C" bool LLDBSWIGPythonCallThreadPlan(void *implementor,
                                              const char *method_name,
                                              Event *event_sp, bool &got_error);
-
+                                             
 extern "C" void *LLDBSwigPythonCreateScriptedBreakpointResolver(
     const char *python_class_name,
     const char *session_dictionary_name,
@@ -265,12 +270,23 @@ SystemInitializerFull::SystemInitializerFull() {}
 
 SystemInitializerFull::~SystemInitializerFull() {}
 
-llvm::Error
-SystemInitializerFull::Initialize(const InitializerOptions &options) {
-  if (auto e = SystemInitializerCommon::Initialize(options))
-    return e;
+static void SwiftInitialize() {
+#if defined(__APPLE__) || defined(__linux__)
+  SwiftLanguage::Initialize();
+  SwiftLanguageRuntime::Initialize();
+#endif
+}
 
-  breakpad::ObjectFileBreakpad::Initialize();
+static void SwiftTerminate() {
+#if defined(__APPLE__) || defined(__linux__)
+  SwiftLanguage::Terminate();
+  SwiftLanguageRuntime::Terminate();
+#endif
+}
+
+void SystemInitializerFull::Initialize() {
+  SystemInitializerCommon::Initialize();
+
   ObjectFileELF::Initialize();
   ObjectFileMachO::Initialize();
   ObjectFilePECOFF::Initialize();
@@ -311,6 +327,7 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   llvm::InitializeAllDisassemblers();
 
   ClangASTContext::Initialize();
+  SwiftASTContext::Initialize();
 
   ABIMacOSX_i386::Initialize();
   ABIMacOSX_arm::Initialize();
@@ -327,7 +344,6 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   ABISysV_s390x::Initialize();
 
   ArchitectureArm::Initialize();
-  ArchitectureMips::Initialize();
   ArchitecturePPC64::Initialize();
 
   DisassemblerLLVMC::Initialize();
@@ -341,6 +357,7 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   ThreadSanitizerRuntime::Initialize();
   UndefinedBehaviorSanitizerRuntime::Initialize();
   MainThreadCheckerRuntime::Initialize();
+  SwiftRuntimeReporting::Initialize();
 
   SymbolVendorELF::Initialize();
   SymbolFileDWARF::Initialize();
@@ -360,6 +377,7 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   CPlusPlusLanguage::Initialize();
   ObjCLanguage::Initialize();
   ObjCPlusPlusLanguage::Initialize();
+  ::SwiftInitialize();
 
 #if defined(_WIN32)
   ProcessWindows::Initialize();
@@ -402,8 +420,6 @@ SystemInitializerFull::Initialize(const InitializerOptions &options) {
   // AFTER PluginManager::Initialize is called.
 
   Debugger::SettingsInitialize();
-
-  return llvm::Error::success();
 }
 
 void SystemInitializerFull::InitializeSWIG() {
@@ -441,10 +457,7 @@ void SystemInitializerFull::Terminate() {
   PluginManager::Terminate();
 
   ClangASTContext::Terminate();
-
-  ArchitectureArm::Terminate();
-  ArchitectureMips::Terminate();
-  ArchitecturePPC64::Terminate();
+  SwiftASTContext::Terminate();
 
   ABIMacOSX_i386::Terminate();
   ABIMacOSX_arm::Terminate();
@@ -470,6 +483,7 @@ void SystemInitializerFull::Terminate() {
   ThreadSanitizerRuntime::Terminate();
   UndefinedBehaviorSanitizerRuntime::Terminate();
   MainThreadCheckerRuntime::Terminate();
+  SwiftRuntimeReporting::Terminate();
   SymbolVendorELF::Terminate();
   SymbolFileDWARF::Terminate();
   SymbolFilePDB::Terminate();
@@ -484,6 +498,8 @@ void SystemInitializerFull::Terminate() {
   AppleObjCRuntimeV1::Terminate();
   SystemRuntimeMacOSX::Terminate();
   RenderScriptRuntime::Terminate();
+
+  ::SwiftTerminate();
 
   CPlusPlusLanguage::Terminate();
   ObjCLanguage::Terminate();
@@ -533,7 +549,6 @@ void SystemInitializerFull::Terminate() {
   PlatformDarwinKernel::Terminate();
 #endif
 
-  breakpad::ObjectFileBreakpad::Terminate();
   ObjectFileELF::Terminate();
   ObjectFileMachO::Terminate();
   ObjectFilePECOFF::Terminate();

@@ -9,13 +9,17 @@
 
 #include "GDBRemoteRegisterContext.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/StreamString.h"
+// Project includes
 #include "ProcessGDBRemote.h"
 #include "ProcessGDBRemoteLog.h"
 #include "ThreadGDBRemote.h"
@@ -458,7 +462,7 @@ bool GDBRemoteRegisterContext::ReadAllRegisterValues(
       ((ProcessGDBRemote *)process)->GetGDBRemote());
 
   const bool use_g_packet =
-      !gdb_comm.AvoidGPackets((ProcessGDBRemote *)process);
+      gdb_comm.AvoidGPackets((ProcessGDBRemote *)process) == false;
 
   GDBRemoteClientBase::Lock lock(gdb_comm, false);
   if (lock) {
@@ -521,7 +525,7 @@ bool GDBRemoteRegisterContext::WriteAllRegisterValues(
       ((ProcessGDBRemote *)process)->GetGDBRemote());
 
   const bool use_g_packet =
-      !gdb_comm.AvoidGPackets((ProcessGDBRemote *)process);
+      gdb_comm.AvoidGPackets((ProcessGDBRemote *)process) == false;
 
   GDBRemoteClientBase::Lock lock(gdb_comm, false);
   if (lock) {

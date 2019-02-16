@@ -102,7 +102,6 @@ private:
 
   const lldb_private::MemoryRegionInfo &ref() const;
 
-  // Unused.
   SBMemoryRegionInfo(const lldb_private::MemoryRegionInfo *lldb_object_ptr);
 
   lldb::MemoryRegionInfoUP m_opaque_ap;

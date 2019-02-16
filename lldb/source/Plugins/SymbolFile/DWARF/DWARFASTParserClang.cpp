@@ -307,7 +307,14 @@ TypeSP DWARFASTParserClang::ParseTypeFromDWARF(const SymbolContext &sc,
                 decl.SetColumn(form_value.Unsigned());
                 break;
               case DW_AT_name:
+
                 type_name_cstr = form_value.AsCString();
+                // Work around a bug in llvm-gcc where they give a name to a
+                // reference type which doesn't include the "&"...
+                if (tag == DW_TAG_reference_type) {
+                  if (strchr(type_name_cstr, '&') == NULL)
+                    type_name_cstr = NULL;
+                }
                 if (type_name_cstr)
                   type_name_const_str.SetCString(type_name_cstr);
                 break;
@@ -551,9 +558,16 @@ TypeSP DWARFASTParserClang::ParseTypeFromDWARF(const SymbolContext &sc,
             if (attributes.ExtractFormValueAtIndex(i, form_value)) {
               switch (attr) {
               case DW_AT_decl_file:
-                decl.SetFile(
-                   sc.comp_unit->GetSupportFiles().GetFileSpecAtIndex(
-                      form_value.Unsigned()));
+                if (die.GetCU()->DW_AT_decl_file_attributes_are_invalid()) {
+                  // llvm-gcc outputs invalid DW_AT_decl_file attributes that
+                  // always point to the compile unit file, so we clear this
+                  // invalid value so that we can still unique types
+                  // efficiently.
+                  decl.SetFile(FileSpec("<invalid>", false));
+                } else
+                  decl.SetFile(
+                      sc.comp_unit->GetSupportFiles().GetFileSpecAtIndex(
+                          form_value.Unsigned()));
                 break;
 
               case DW_AT_decl_line:
@@ -657,7 +671,7 @@ TypeSP DWARFASTParserClang::ParseTypeFromDWARF(const SymbolContext &sc,
         }
 
         if (byte_size_valid && byte_size == 0 && type_name_cstr &&
-            !die.HasChildren() &&
+            die.HasChildren() == false &&
             sc.comp_unit->GetLanguage() == eLanguageTypeObjC) {
           // Work around an issue with clang at the moment where forward
           // declarations for objective C classes are emitted as:
@@ -895,7 +909,7 @@ TypeSP DWARFASTParserClang::ParseTypeFromDWARF(const SymbolContext &sc,
           // has child classes or types that require the class to be created
           // for use as their decl contexts the class will be ready to accept
           // these child definitions.
-          if (!die.HasChildren()) {
+          if (die.HasChildren() == false) {
             // No children for this struct/union/class, lets finish it
             if (ClangASTContext::StartTagDeclarationDefinition(clang_type)) {
               ClangASTContext::CompleteTagDeclarationDefinition(clang_type);
@@ -1746,7 +1760,7 @@ TypeSP DWARFASTParserClang::ParseTypeFromDWARF(const SymbolContext &sc,
                 element_type->GetForwardCompilerType();
 
             if (ClangASTContext::IsCXXClassType(array_element_type) &&
-                !array_element_type.GetCompleteType()) {
+                array_element_type.GetCompleteType() == false) {
               ModuleSP module_sp = die.GetModule();
               if (module_sp) {
                 if (die.GetCU()->GetProducer() == eProducerClang)
@@ -2098,6 +2112,95 @@ bool DWARFASTParserClang::ParseTemplateParameterInfos(
   return template_param_infos.args.size() == template_param_infos.names.size();
 }
 
+// Checks whether m1 is an overload of m2 (as opposed to an override). This is
+// called by addOverridesForMethod to distinguish overrides (which share a
+// vtable entry) from overloads (which require distinct entries).
+static bool isOverload(clang::CXXMethodDecl *m1, clang::CXXMethodDecl *m2) {
+  // FIXME: This should detect covariant return types, but currently doesn't.
+  lldbassert(&m1->getASTContext() == &m2->getASTContext() &&
+             "Methods should have the same AST context");
+  clang::ASTContext &context = m1->getASTContext();
+
+  const auto *m1Type =
+    llvm::cast<clang::FunctionProtoType>(
+      context.getCanonicalType(m1->getType()));
+
+  const auto *m2Type =
+    llvm::cast<clang::FunctionProtoType>(
+      context.getCanonicalType(m2->getType()));
+
+  auto compareArgTypes =
+    [&context](const clang::QualType &m1p, const clang::QualType &m2p) {
+      return context.hasSameType(m1p.getUnqualifiedType(),
+                                 m2p.getUnqualifiedType());
+    };
+
+  // FIXME: In C++14 and later, we can just pass m2Type->param_type_end()
+  //        as a fourth parameter to std::equal().
+  return (m1->getNumParams() != m2->getNumParams()) ||
+         !std::equal(m1Type->param_type_begin(), m1Type->param_type_end(),
+                     m2Type->param_type_begin(), compareArgTypes);
+}
+
+// If decl is a virtual method, walk the base classes looking for methods that
+// decl overrides. This table of overridden methods is used by IRGen to
+// determine the vtable layout for decl's parent class.
+static void addOverridesForMethod(clang::CXXMethodDecl *decl) {
+  if (!decl->isVirtual())
+    return;
+
+  clang::CXXBasePaths paths;
+
+  auto find_overridden_methods =
+    [decl](const clang::CXXBaseSpecifier *specifier, clang::CXXBasePath &path) {
+      if (auto *base_record =
+          llvm::dyn_cast<clang::CXXRecordDecl>(
+            specifier->getType()->getAs<clang::RecordType>()->getDecl())) {
+
+        clang::DeclarationName name = decl->getDeclName();
+
+        // If this is a destructor, check whether the base class destructor is
+        // virtual.
+        if (name.getNameKind() == clang::DeclarationName::CXXDestructorName)
+          if (auto *baseDtorDecl = base_record->getDestructor()) {
+            if (baseDtorDecl->isVirtual()) {
+              path.Decls = baseDtorDecl;
+              return true;
+            } else
+              return false;
+          }
+
+        // Otherwise, search for name in the base class.
+        for (path.Decls = base_record->lookup(name); !path.Decls.empty();
+             path.Decls = path.Decls.slice(1)) {
+          if (auto *method_decl =
+                llvm::dyn_cast<clang::CXXMethodDecl>(path.Decls.front()))
+            if (method_decl->isVirtual() && !isOverload(decl, method_decl)) {
+              path.Decls = method_decl;
+              return true;
+            }
+        }
+      }
+
+      return false;
+    };
+
+  if (decl->getParent()->lookupInBases(find_overridden_methods, paths)) {
+    for (auto *overridden_decl : paths.found_decls())
+      decl->addOverriddenMethod(
+        llvm::cast<clang::CXXMethodDecl>(overridden_decl));
+  }
+}
+
+// If clang_type is a CXXRecordDecl, builds the method override list for each
+// of its virtual methods.
+static void addMethodOverrides(ClangASTContext &ast, CompilerType &clang_type) {
+  if (auto *record =
+      ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType()))
+    for (auto *method : record->methods())
+      addOverridesForMethod(method);
+}
+
 bool DWARFASTParserClang::CompleteTypeFromDWARF(const DWARFDIE &die,
                                                 lldb_private::Type *type,
                                                 CompilerType &clang_type) {
@@ -2188,14 +2291,14 @@ bool DWARFASTParserClang::CompleteTypeFromDWARF(const DWARFDIE &die,
         }
 
         SymbolContext sc(die.GetLLDBCompileUnit());
-        std::vector<std::unique_ptr<clang::CXXBaseSpecifier>> bases;
+        std::vector<clang::CXXBaseSpecifier *> base_classes;
         std::vector<int> member_accessibilities;
         bool is_a_class = false;
         // Parse members and base classes first
         DWARFDIECollection member_function_dies;
 
         DelayedPropertyList delayed_properties;
-        ParseChildMembers(sc, die, clang_type, class_language, bases,
+        ParseChildMembers(sc, die, clang_type, class_language, base_classes,
                           member_accessibilities, member_function_dies,
                           delayed_properties, default_accessibility, is_a_class,
                           layout_info);
@@ -2259,17 +2362,17 @@ bool DWARFASTParserClang::CompleteTypeFromDWARF(const DWARFDIE &die,
               &member_accessibilities.front(), member_accessibilities.size());
         }
 
-        if (!bases.empty()) {
+        if (!base_classes.empty()) {
           // Make sure all base classes refer to complete types and not forward
           // declarations. If we don't do this, clang will crash with an
-          // assertion in the call to clang_type.TransferBaseClasses()
-          for (const auto &base_class : bases) {
+          // assertion in the call to clang_type.SetBaseClassesForClassType()
+          for (auto &base_class : base_classes) {
             clang::TypeSourceInfo *type_source_info =
                 base_class->getTypeSourceInfo();
             if (type_source_info) {
               CompilerType base_class_type(
                   &m_ast, type_source_info->getType().getAsOpaquePtr());
-              if (!base_class_type.GetCompleteType()) {
+              if (base_class_type.GetCompleteType() == false) {
                 auto module = dwarf->GetObjectFile()->GetModule();
                 module->ReportError(":: Class '%s' has a base class '%s' which "
                                     "does not have a complete definition.",
@@ -2282,7 +2385,7 @@ bool DWARFASTParserClang::CompleteTypeFromDWARF(const DWARFDIE &die,
                 // We have no choice other than to pretend that the base class
                 // is complete. If we don't do this, clang will crash when we
                 // call setBases() inside of
-                // "clang_type.TransferBaseClasses()" below. Since we
+                // "clang_type.SetBaseClassesForClassType()" below. Since we
                 // provide layout assistance, all ivars in this class and other
                 // classes will be fine, this is the best we can do short of
                 // crashing.
@@ -2294,14 +2397,19 @@ bool DWARFASTParserClang::CompleteTypeFromDWARF(const DWARFDIE &die,
               }
             }
           }
+          m_ast.SetBaseClassesForClassType(clang_type.GetOpaqueQualType(),
+                                           &base_classes.front(),
+                                           base_classes.size());
 
-          m_ast.TransferBaseClasses(clang_type.GetOpaqueQualType(),
-                                    std::move(bases));
+          // Clang will copy each CXXBaseSpecifier in "base_classes" so we have
+          // to free them all.
+          ClangASTContext::DeleteBaseClassSpecifiers(&base_classes.front(),
+                                                     base_classes.size());
         }
       }
     }
 
-    m_ast.AddMethodOverridesForCXXRecordType(clang_type.GetOpaqueQualType());
+    addMethodOverrides(m_ast, clang_type);
     ClangASTContext::BuildIndirectFields(clang_type);
     ClangASTContext::CompleteTagDeclarationDefinition(clang_type);
 
@@ -2672,7 +2780,7 @@ Function *DWARFASTParserClang::ParseFunctionFromDWARF(const SymbolContext &sc,
 bool DWARFASTParserClang::ParseChildMembers(
     const SymbolContext &sc, const DWARFDIE &parent_die,
     CompilerType &class_clang_type, const LanguageType class_language,
-    std::vector<std::unique_ptr<clang::CXXBaseSpecifier>> &base_classes,
+    std::vector<clang::CXXBaseSpecifier *> &base_classes,
     std::vector<int> &member_accessibilities,
     DWARFDIECollection &member_function_dies,
     DelayedPropertyList &delayed_properties, AccessType &default_accessibility,
@@ -2871,6 +2979,15 @@ bool DWARFASTParserClang::ParseChildMembers(
             class_language == eLanguageTypeObjC_plus_plus)
           accessibility = eAccessNone;
 
+        if (member_idx == 0 && !is_artificial && name &&
+            (strstr(name, "_vptr$") == name)) {
+          // Not all compilers will mark the vtable pointer member as
+          // artificial (llvm-gcc). We can't have the virtual members in our
+          // classes otherwise it throws off all child offsets since we end up
+          // having and extra pointer sized member in our class layouts.
+          is_artificial = true;
+        }
+
         // Handle static members
         if (is_external && member_byte_offset == UINT32_MAX) {
           Type *var_type = die.ResolveTypeUID(DIERef(encoding_form));
@@ -2885,7 +3002,7 @@ bool DWARFASTParserClang::ParseChildMembers(
           break;
         }
 
-        if (!is_artificial) {
+        if (is_artificial == false) {
           Type *member_type = die.ResolveTypeUID(DIERef(encoding_form));
 
           clang::FieldDecl *field_decl = NULL;
@@ -3026,7 +3143,7 @@ bool DWARFASTParserClang::ParseChildMembers(
                   if (anon_field_info.IsValid()) {
                     clang::FieldDecl *unnamed_bitfield_decl =
                         ClangASTContext::AddFieldToRecordType(
-                            class_clang_type, llvm::StringRef(),
+                            class_clang_type, NULL,
                             m_ast.GetBuiltinTypeForEncodingAndBitSize(
                                 eEncodingSint, word_width),
                             accessibility, anon_field_info.bit_size);
@@ -3083,7 +3200,7 @@ bool DWARFASTParserClang::ParseChildMembers(
               }
 
               if (ClangASTContext::IsCXXClassType(member_clang_type) &&
-                  !member_clang_type.GetCompleteType()) {
+                  member_clang_type.GetCompleteType() == false) {
                 if (die.GetCU()->GetProducer() == eProducerClang)
                   module_sp->ReportError(
                       "DWARF DIE at 0x%8.8x (class %s) has a member variable "
@@ -3268,14 +3385,9 @@ bool DWARFASTParserClang::ParseChildMembers(
         if (class_language == eLanguageTypeObjC) {
           ast->SetObjCSuperClass(class_clang_type, base_class_clang_type);
         } else {
-          std::unique_ptr<clang::CXXBaseSpecifier> result =
-              ast->CreateBaseClassSpecifier(
-                  base_class_clang_type.GetOpaqueQualType(), accessibility,
-                  is_virtual, is_base_of_class);
-          if (!result)
-            break;
-
-          base_classes.push_back(std::move(result));
+          base_classes.push_back(ast->CreateBaseClassSpecifier(
+              base_class_clang_type.GetOpaqueQualType(), accessibility,
+              is_virtual, is_base_of_class));
 
           if (is_virtual) {
             // Do not specify any offset for virtual inheritance. The DWARF
@@ -3407,9 +3519,8 @@ size_t DWARFASTParserClang::ParseChildParameters(
             function_param_types.push_back(type->GetForwardCompilerType());
 
             clang::ParmVarDecl *param_var_decl =
-                m_ast.CreateParameterDeclaration(containing_decl_ctx, name,
-                                                 type->GetForwardCompilerType(),
-                                                 storage);
+                m_ast.CreateParameterDeclaration(
+                    name, type->GetForwardCompilerType(), storage);
             assert(param_var_decl);
             function_param_decls.push_back(param_var_decl);
 

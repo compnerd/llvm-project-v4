@@ -166,7 +166,10 @@ bool MachVMRegion::GetRegionForAddress(nub_addr_t addr) {
   // doesn't mean that "addr" is in the range. The data in this object will
   // be valid though, so you could see where the next region begins. So we
   // return false, yet leave "m_err" with a successfull return code.
-  return !((addr < m_start) || (addr >= (m_start + m_size)));
+  if ((addr < m_start) || (addr >= (m_start + m_size)))
+    return false;
+
+  return true;
 }
 
 uint32_t MachVMRegion::GetDNBPermissions() const {

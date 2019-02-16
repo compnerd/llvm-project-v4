@@ -13,6 +13,10 @@
 #include "lldb/DataFormatters/FormatClasses.h"
 #include "lldb/Utility/Log.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 
 using namespace lldb;
 using namespace lldb_private;
@@ -118,7 +122,8 @@ void TypeCategoryMap::EnableAllCategories() {
 
 void TypeCategoryMap::DisableAllCategories() {
   std::lock_guard<std::recursive_mutex> guard(m_map_mutex);
-  for (Position p = First; !m_active_categories.empty(); p++) {
+  Position p = First;
+  for (; false == m_active_categories.empty(); p++) {
     m_active_categories.front()->SetEnabledPosition(p);
     Disable(m_active_categories.front());
   }

@@ -9,12 +9,12 @@
 
 #include "lldb/Core/ValueObjectCast.h"
 
+#include "lldb/Core/Scalar.h" // for operator!=, Scalar
 #include "lldb/Core/Value.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/ExecutionContext.h"
-#include "lldb/Utility/Scalar.h"
-#include "lldb/Utility/Status.h"
+#include "lldb/Utility/Status.h" // for Status
 
 namespace lldb_private {
 class ConstString;

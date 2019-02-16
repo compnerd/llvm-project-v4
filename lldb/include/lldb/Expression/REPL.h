@@ -10,8 +10,12 @@
 #ifndef lldb_REPL_h
 #define lldb_REPL_h
 
+// C Includes
+// C++ Includes
 #include <string>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/../../source/Commands/CommandObjectExpression.h"
 #include "lldb/Interpreter/OptionGroupFormat.h"
 #include "lldb/Interpreter/OptionGroupValueObjectDisplay.h"
@@ -113,7 +117,7 @@ public:
   int IOHandlerComplete(IOHandler &io_handler, const char *current_line,
                         const char *cursor, const char *last_char,
                         int skip_first_n_matches, int max_matches,
-                        StringList &matches, StringList &descriptions) override;
+                        StringList &matches) override;
 
 protected:
   static int CalculateActualIndentation(const StringList &lines);

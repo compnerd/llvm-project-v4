@@ -10,6 +10,10 @@
 #ifndef liblldb_PlatformMacOSX_h_
 #define liblldb_PlatformMacOSX_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "PlatformDarwin.h"
 
 class PlatformMacOSX : public PlatformDarwin {

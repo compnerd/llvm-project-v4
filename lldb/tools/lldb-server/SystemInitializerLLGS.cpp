@@ -22,14 +22,9 @@ using HostObjectFile = ObjectFileELF;
 
 using namespace lldb_private;
 
-llvm::Error
-SystemInitializerLLGS::Initialize(const InitializerOptions &options) {
-  if (auto e = SystemInitializerCommon::Initialize(options))
-    return e;
-
+void SystemInitializerLLGS::Initialize() {
+  SystemInitializerCommon::Initialize();
   HostObjectFile::Initialize();
-
-  return llvm::Error::success();
 }
 
 void SystemInitializerLLGS::Terminate() {

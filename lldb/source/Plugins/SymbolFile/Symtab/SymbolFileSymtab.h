@@ -10,9 +10,13 @@
 #ifndef liblldb_SymbolFileSymtab_h_
 #define liblldb_SymbolFileSymtab_h_
 
+// C Includes
+// C++ Includes
 #include <map>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/Symtab.h"
 
@@ -83,11 +87,11 @@ public:
   bool CompleteType(lldb_private::CompilerType &compiler_type) override;
 
   uint32_t ResolveSymbolContext(const lldb_private::Address &so_addr,
-                                lldb::SymbolContextItem resolve_scope,
+                                uint32_t resolve_scope,
                                 lldb_private::SymbolContext &sc) override;
 
   size_t GetTypes(lldb_private::SymbolContextScope *sc_scope,
-                  lldb::TypeClass type_mask,
+                  uint32_t type_mask,
                   lldb_private::TypeList &type_list) override;
 
   //------------------------------------------------------------------

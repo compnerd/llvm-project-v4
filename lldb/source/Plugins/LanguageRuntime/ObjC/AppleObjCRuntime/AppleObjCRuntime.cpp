@@ -17,15 +17,13 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/ValueObject.h"
-#include "lldb/Core/ValueObjectConstResult.h"
-#include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/FunctionCaller.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/ObjectFile.h"
-#include "lldb/Target/CPPLanguageRuntime.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
@@ -34,12 +32,8 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StreamString.h"
-
-#include "Plugins/Process/Utility/HistoryThread.h"
-#include "Plugins/Language/ObjC/NSString.h"
 
 #include <vector>
 
@@ -239,10 +233,17 @@ Address *AppleObjCRuntime::GetPrintForDebuggerAddr() {
 }
 
 bool AppleObjCRuntime::CouldHaveDynamicValue(ValueObject &in_value) {
+  return CouldHaveDynamicValue(in_value,
+                               /* allow_swift = */ false);
+}
+
+bool AppleObjCRuntime::CouldHaveDynamicValue(ValueObject &in_value,
+                                             bool allow_swift) {
   return in_value.GetCompilerType().IsPossibleDynamicType(
       NULL,
       false, // do not check C++
-      true); // check ObjC
+      true,  // check ObjC
+      allow_swift);
 }
 
 bool AppleObjCRuntime::GetDynamicTypeAndAddress(
@@ -280,6 +281,17 @@ AppleObjCRuntime::FixUpDynamicType(const TypeAndOrName &type_and_or_name,
     ret.SetName(corrected_name.c_str());
   }
   return ret;
+}
+
+bool AppleObjCRuntime::GetDynamicTypeAndAddress(
+    ValueObject &in_value, lldb::DynamicValueType use_dynamic,
+    TypeAndOrName &class_type_or_name, Address &address,
+    Value::ValueType &value_type, bool allow_swift) {
+  if (!allow_swift)
+    return GetDynamicTypeAndAddress(in_value, use_dynamic, class_type_or_name,
+                                    address, value_type);
+  else
+    return false;
 }
 
 bool AppleObjCRuntime::AppleIsModuleObjCLibrary(const ModuleSP &module_sp) {
@@ -447,10 +459,13 @@ bool AppleObjCRuntime::CalculateHasNewLiteralsAndIndexing() {
 
   SymbolContextList sc_list;
 
-  return target.GetImages().FindSymbolsWithNameAndType(
-             s_method_signature, eSymbolTypeCode, sc_list) ||
-         target.GetImages().FindSymbolsWithNameAndType(
-             s_arclite_method_signature, eSymbolTypeCode, sc_list);
+  if (target.GetImages().FindSymbolsWithNameAndType(s_method_signature,
+                                                    eSymbolTypeCode, sc_list) ||
+      target.GetImages().FindSymbolsWithNameAndType(s_arclite_method_signature,
+                                                    eSymbolTypeCode, sc_list))
+    return true;
+  else
+    return false;
 }
 
 lldb::SearchFilterSP AppleObjCRuntime::CreateExceptionSearchFilter() {
@@ -458,113 +473,11 @@ lldb::SearchFilterSP AppleObjCRuntime::CreateExceptionSearchFilter() {
 
   if (target.GetArchitecture().GetTriple().getVendor() == llvm::Triple::Apple) {
     FileSpecList filter_modules;
-    filter_modules.Append(std::get<0>(GetExceptionThrowLocation()));
+    filter_modules.Append(FileSpec("libobjc.A.dylib", false));
     return target.GetSearchFilterForModuleList(&filter_modules);
   } else {
     return LanguageRuntime::CreateExceptionSearchFilter();
   }
-}
-
-ValueObjectSP AppleObjCRuntime::GetExceptionObjectForThread(
-    ThreadSP thread_sp) {
-  auto cpp_runtime = m_process->GetCPPLanguageRuntime();
-  if (!cpp_runtime) return ValueObjectSP();
-  auto cpp_exception = cpp_runtime->GetExceptionObjectForThread(thread_sp);
-  if (!cpp_exception) return ValueObjectSP();
-  
-  auto descriptor = GetClassDescriptor(*cpp_exception.get());
-  if (!descriptor || !descriptor->IsValid()) return ValueObjectSP();
-  
-  while (descriptor) {
-    ConstString class_name(descriptor->GetClassName());
-    if (class_name == ConstString("NSException")) return cpp_exception;
-    descriptor = descriptor->GetSuperclass();
-  }
-
-  return ValueObjectSP();
-}
-
-ThreadSP AppleObjCRuntime::GetBacktraceThreadFromException(
-    lldb::ValueObjectSP exception_sp) {
-  ValueObjectSP reserved_dict =
-      exception_sp->GetChildMemberWithName(ConstString("reserved"), true);
-  if (!reserved_dict) return ThreadSP();
-
-  reserved_dict = reserved_dict->GetSyntheticValue();
-  if (!reserved_dict) return ThreadSP();
-
-  CompilerType objc_id =
-      exception_sp->GetTargetSP()->GetScratchClangASTContext()->GetBasicType(
-          lldb::eBasicTypeObjCID);
-  ValueObjectSP return_addresses;
-
-  auto objc_object_from_address = [&exception_sp, &objc_id](uint64_t addr,
-                                                            const char *name) {
-    Value value(addr);
-    value.SetCompilerType(objc_id);
-    auto object = ValueObjectConstResult::Create(
-        exception_sp->GetTargetSP().get(), value, ConstString(name));
-    object = object->GetDynamicValue(eDynamicDontRunTarget);
-    return object;
-  };
-
-  for (size_t idx = 0; idx < reserved_dict->GetNumChildren(); idx++) {
-    ValueObjectSP dict_entry = reserved_dict->GetChildAtIndex(idx, true);
-
-    DataExtractor data;
-    data.SetAddressByteSize(dict_entry->GetProcessSP()->GetAddressByteSize());
-    Status error;
-    dict_entry->GetData(data, error);
-    if (error.Fail()) return ThreadSP();
-
-    lldb::offset_t data_offset = 0;
-    auto dict_entry_key = data.GetPointer(&data_offset);
-    auto dict_entry_value = data.GetPointer(&data_offset);
-
-    auto key_nsstring = objc_object_from_address(dict_entry_key, "key");
-    StreamString key_summary;
-    if (lldb_private::formatters::NSStringSummaryProvider(
-            *key_nsstring, key_summary, TypeSummaryOptions()) &&
-        !key_summary.Empty()) {
-      if (key_summary.GetString() == "\"callStackReturnAddresses\"") {
-        return_addresses = objc_object_from_address(dict_entry_value,
-                                                    "callStackReturnAddresses");
-        break;
-      }
-    }
-  }
-
-  if (!return_addresses) return ThreadSP();
-  auto frames_value =
-      return_addresses->GetChildMemberWithName(ConstString("_frames"), true);
-  addr_t frames_addr = frames_value->GetValueAsUnsigned(0);
-  auto count_value =
-      return_addresses->GetChildMemberWithName(ConstString("_cnt"), true);
-  size_t count = count_value->GetValueAsUnsigned(0);
-  auto ignore_value =
-      return_addresses->GetChildMemberWithName(ConstString("_ignore"), true);
-  size_t ignore = ignore_value->GetValueAsUnsigned(0);
-
-  size_t ptr_size = m_process->GetAddressByteSize();
-  std::vector<lldb::addr_t> pcs;
-  for (size_t idx = 0; idx < count; idx++) {
-    Status error;
-    addr_t pc = m_process->ReadPointerFromMemory(
-        frames_addr + (ignore + idx) * ptr_size, error);
-    pcs.push_back(pc);
-  }
-
-  if (pcs.empty()) return ThreadSP();
-
-  ThreadSP new_thread_sp(new HistoryThread(*m_process, 0, pcs, 0, false));
-  m_process->GetExtendedThreadList().AddThread(new_thread_sp);
-  return new_thread_sp;
-}
-
-std::tuple<FileSpec, ConstString>
-AppleObjCRuntime::GetExceptionThrowLocation() {
-  return std::make_tuple(
-      FileSpec("libobjc.A.dylib"), ConstString("objc_exception_throw"));
 }
 
 void AppleObjCRuntime::ReadObjCLibraryIfNeeded(const ModuleList &module_list) {

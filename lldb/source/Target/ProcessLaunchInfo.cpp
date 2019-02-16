@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <climits>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/Debugger.h"
 #include "lldb/Host/Config.h"
 #include "lldb/Host/FileSystem.h"
@@ -104,7 +108,8 @@ bool ProcessLaunchInfo::AppendOpenFileAction(int fd, const FileSpec &file_spec,
 bool ProcessLaunchInfo::AppendSuppressFileAction(int fd, bool read,
                                                  bool write) {
   FileAction file_action;
-  if (file_action.Open(fd, FileSpec(FileSystem::DEV_NULL), read, write)) {
+  if (file_action.Open(fd, FileSpec{FileSystem::DEV_NULL, false}, read,
+                       write)) {
     AppendFileAction(file_action);
     return true;
   }
@@ -146,7 +151,7 @@ const FileSpec &ProcessLaunchInfo::GetShell() const { return m_shell; }
 void ProcessLaunchInfo::SetShell(const FileSpec &shell) {
   m_shell = shell;
   if (m_shell) {
-    FileSystem::Instance().ResolveExecutableLocation(m_shell);
+    m_shell.ResolveExecutableLocation();
     m_flags.Set(lldb::eLaunchFlagLaunchInShell);
   } else
     m_flags.Clear(lldb::eLaunchFlagLaunchInShell);
@@ -301,7 +306,8 @@ void ProcessLaunchInfo::FinalizeFileActions(Target *target,
         open_flags |= O_CLOEXEC;
 #endif
         if (m_pty->OpenFirstAvailableMaster(open_flags, nullptr, 0)) {
-          const FileSpec slave_file_spec(m_pty->GetSlaveName(nullptr, 0));
+          const FileSpec slave_file_spec{m_pty->GetSlaveName(nullptr, 0),
+                                         false};
 
           // Only use the slave tty if we don't have anything specified for
           // input and don't have an action for stdin
@@ -353,7 +359,7 @@ bool ProcessLaunchInfo::ConvertArgumentsForLaunchingInShell(
         // Add a modified PATH environment variable in case argv[0] is a
         // relative path.
         const char *argv0 = argv[0];
-        FileSpec arg_spec(argv0);
+        FileSpec arg_spec(argv0, false);
         if (arg_spec.IsRelative()) {
           // We have a relative path to our executable which may not work if we
           // just try to run "a.out" (without it being converted to "./a.out")

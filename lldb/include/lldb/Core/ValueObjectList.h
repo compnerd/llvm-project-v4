@@ -10,12 +10,12 @@
 #ifndef liblldb_ValueObjectList_h_
 #define liblldb_ValueObjectList_h_
 
-#include "lldb/lldb-forward.h"
-#include "lldb/lldb-types.h"
+#include "lldb/lldb-forward.h" // for ValueObjectSP
+#include "lldb/lldb-types.h"   // for user_id_t
 
 #include <vector>
 
-#include <stddef.h>
+#include <stddef.h> // for size_t
 
 namespace lldb_private {
 class ValueObject;

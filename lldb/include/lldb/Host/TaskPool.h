@@ -11,12 +11,12 @@
 #define utility_TaskPool_h_
 
 #include "llvm/ADT/STLExtras.h"
-#include <functional>
+#include <functional> // for bind, function
 #include <future>
 #include <list>
-#include <memory>
-#include <mutex>
-#include <type_traits>
+#include <memory>      // for make_shared
+#include <mutex>       // for mutex, unique_lock, condition_variable
+#include <type_traits> // for forward, result_of, move
 
 namespace lldb_private {
 

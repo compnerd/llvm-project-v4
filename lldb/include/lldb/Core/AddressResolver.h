@@ -12,9 +12,9 @@
 
 #include "lldb/Core/AddressRange.h"
 #include "lldb/Core/SearchFilter.h"
-#include "lldb/lldb-defines.h"
+#include "lldb/lldb-defines.h" // for DISALLOW_COPY_AND_ASSIGN
 
-#include <stddef.h>
+#include <stddef.h> // for size_t
 #include <vector>
 
 namespace lldb_private {

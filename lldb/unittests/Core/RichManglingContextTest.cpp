@@ -57,29 +57,6 @@ TEST(RichManglingContextTest, FromCxxMethodName) {
   ItaniumRMC.ParseFullName();
   CxxMethodRMC.ParseFullName();
   EXPECT_TRUE(ItaniumRMC.GetBufferRef() == CxxMethodRMC.GetBufferRef());
-
-  // Construct with a random name.
-  {
-    RichManglingContext CxxMethodRMC;
-    EXPECT_TRUE(CxxMethodRMC.FromCxxMethodName(ConstString("X")));
-
-    // We expect it is not a function.
-    EXPECT_FALSE(CxxMethodRMC.IsFunction());
-  }
-
-  // Construct with a function without a context.
-  {
-    RichManglingContext CxxMethodRMC;
-    EXPECT_TRUE(CxxMethodRMC.FromCxxMethodName(
-        ConstString("void * operator new(unsigned __int64)")));
-
-    // We expect it is a function.
-    EXPECT_TRUE(CxxMethodRMC.IsFunction());
-
-    // We expect its context is empty.
-    CxxMethodRMC.ParseFunctionDeclContextName();
-    EXPECT_TRUE(CxxMethodRMC.GetBufferRef().empty());
-  }
 }
 
 TEST(RichManglingContextTest, SwitchProvider) {
@@ -102,10 +79,10 @@ TEST(RichManglingContextTest, SwitchProvider) {
 
 TEST(RichManglingContextTest, IPDRealloc) {
   // The demangled name should fit into the Itanium default buffer.
-  const char *ShortMangled = "_ZN3foo3barEv";
+  const char *short_mangled = "_ZN3foo3barEv";
 
   // The demangled name for this will certainly not fit into the default buffer.
-  const char *LongMangled =
+  const char *long_mangled =
       "_ZNK3shk6detail17CallbackPublisherIZNS_5ThrowERKNSt15__exception_"
       "ptr13exception_ptrEEUlOT_E_E9SubscribeINS0_9ConcatMapINS0_"
       "18CallbackSubscriberIZNS_6GetAllIiNS1_IZZNS_9ConcatMapIZNS_6ConcatIJNS1_"
@@ -123,18 +100,15 @@ TEST(RichManglingContextTest, IPDRealloc) {
 
   RichManglingContext RMC;
 
-  // Demangle the short one.
-  EXPECT_TRUE(RMC.FromItaniumName(ConstString(ShortMangled)));
+  // Demangle the short one and remember the buffer address.
+  EXPECT_TRUE(RMC.FromItaniumName(ConstString(short_mangled)));
   RMC.ParseFullName();
-  const char *ShortDemangled = RMC.GetBufferRef().data();
+  const char *short_demangled_ptr = RMC.GetBufferRef().data();
 
-  // Demangle the long one.
-  EXPECT_TRUE(RMC.FromItaniumName(ConstString(LongMangled)));
+  // Demangle the long one and make sure the buffer address changed.
+  EXPECT_TRUE(RMC.FromItaniumName(ConstString(long_mangled)));
   RMC.ParseFullName();
-  const char *LongDemangled = RMC.GetBufferRef().data();
+  const char *long_demangled_ptr = RMC.GetBufferRef().data();
 
-  // Make sure a new buffer was allocated or the default buffer was extended.
-  bool AllocatedNewBuffer = (ShortDemangled != LongDemangled);
-  bool ExtendedExistingBuffer = (strlen(LongDemangled) > 2048);
-  EXPECT_TRUE(AllocatedNewBuffer || ExtendedExistingBuffer);
+  EXPECT_TRUE(short_demangled_ptr != long_demangled_ptr);
 }

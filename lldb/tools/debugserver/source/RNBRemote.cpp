@@ -44,7 +44,7 @@
 
 #include <compression.h>
 
-#include <TargetConditionals.h>
+#include <TargetConditionals.h> // for endianness predefines
 #include <iomanip>
 #include <sstream>
 #include <unordered_set>
@@ -1825,18 +1825,18 @@ rnb_err_t RNBRemote::HandlePacket_qRcmd(const char *p) {
   }
   if (*c == '\0') {
     std::string command = get_identifier(line);
-    if (command == "set") {
+    if (command.compare("set") == 0) {
       std::string variable = get_identifier(line);
       std::string op = get_operator(line);
       std::string value = get_value(line);
-      if (variable == "logfile") {
+      if (variable.compare("logfile") == 0) {
         FILE *log_file = fopen(value.c_str(), "w");
         if (log_file) {
           DNBLogSetLogCallback(FileLogCallback, log_file);
           return SendPacket("OK");
         }
         return SendPacket("E71");
-      } else if (variable == "logmask") {
+      } else if (variable.compare("logmask") == 0) {
         char *end;
         errno = 0;
         uint32_t logmask =
@@ -3427,7 +3427,10 @@ static bool RNBRemoteShouldCancelCallback(void *not_used) {
   RNBRemoteSP remoteSP(g_remoteSP);
   if (remoteSP.get() != NULL) {
     RNBRemote *remote = remoteSP.get();
-    return !remote->Comm().IsConnected();
+    if (remote->Comm().IsConnected())
+      return false;
+    else
+      return true;
   }
   return true;
 }
@@ -3691,7 +3694,7 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
           return HandlePacket_ILLFORMED(
               __FILE__, __LINE__, p, "Could not parse signal in vCont packet");
       // Fall through to next case...
-        [[clang::fallthrough]];
+
       case 'c':
         // Continue
         thread_action.state = eStateRunning;
@@ -3704,7 +3707,7 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
           return HandlePacket_ILLFORMED(
               __FILE__, __LINE__, p, "Could not parse signal in vCont packet");
       // Fall through to next case...
-        [[clang::fallthrough]];
+
       case 's':
         // Step
         thread_action.state = eStateStepping;
@@ -3818,7 +3821,7 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
             attach_failed_due_to_sip = true;
           }
 
-          if (!attach_failed_due_to_sip) {
+          if (attach_failed_due_to_sip == false) {
             int csops_flags = 0;
             int retval = ::csops(pid_attaching_to, CS_OPS_STATUS, &csops_flags,
                                  sizeof(csops_flags));
@@ -4231,7 +4234,7 @@ rnb_err_t RNBRemote::HandlePacket_GetProfileData(const char *p) {
   std::string name;
   std::string value;
   while (packet.GetNameColonValue(name, value)) {
-    if (name == "scan_type") {
+    if (name.compare("scan_type") == 0) {
       std::istringstream iss(value);
       uint32_t int_value = 0;
       if (iss >> std::hex >> int_value) {
@@ -4261,11 +4264,11 @@ rnb_err_t RNBRemote::HandlePacket_SetEnableAsyncProfiling(const char *p) {
   std::string name;
   std::string value;
   while (packet.GetNameColonValue(name, value)) {
-    if (name == "enable") {
+    if (name.compare("enable") == 0) {
       enable = strtoul(value.c_str(), NULL, 10) > 0;
-    } else if (name == "interval_usec") {
+    } else if (name.compare("interval_usec") == 0) {
       interval_usec = strtoul(value.c_str(), NULL, 10);
-    } else if (name == "scan_type") {
+    } else if (name.compare("scan_type") == 0) {
       std::istringstream iss(value);
       uint32_t int_value = 0;
       if (iss >> std::hex >> int_value) {
@@ -5291,7 +5294,7 @@ RNBRemote::GetJSONThreadsInfo(bool threads_with_valid_stop_info_only) {
 
       thread_dict_sp->AddStringItem("reason", reason_value);
 
-      if (!threads_with_valid_stop_info_only) {
+      if (threads_with_valid_stop_info_only == false) {
         const char *thread_name = DNBThreadGetName(pid, tid);
         if (thread_name && thread_name[0])
           thread_dict_sp->AddStringItem("name", thread_name);
@@ -5479,7 +5482,7 @@ rnb_err_t RNBRemote::HandlePacket_jThreadExtendedInfo(const char *p) {
 
       bool need_to_print_comma = false;
 
-      if (thread_activity_sp && !timed_out) {
+      if (thread_activity_sp && timed_out == false) {
         const Genealogy::Activity *activity =
             &thread_activity_sp->current_activity;
         bool need_vouchers_comma_sep = false;

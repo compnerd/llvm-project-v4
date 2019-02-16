@@ -12,27 +12,27 @@
 #include "lldb/Core/Address.h"
 #include "lldb/Core/DumpRegisterValue.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/RegisterValue.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
-#include "lldb/Target/StackFrame.h"
-#include "lldb/Utility/ConstString.h"
+#include "lldb/Target/StackFrame.h"   // for StackFrame
+#include "lldb/Utility/ConstString.h" // for ConstString
 #include "lldb/Utility/DataExtractor.h"
-#include "lldb/Utility/RegisterValue.h"
 #include "lldb/Utility/Status.h"
-#include "lldb/Utility/Stream.h"
+#include "lldb/Utility/Stream.h" // for Stream, Stream::::eBinary
 #include "lldb/Utility/StreamString.h"
-#include "lldb/lldb-forward.h"
-#include "lldb/lldb-private-interfaces.h"
+#include "lldb/lldb-forward.h"            // for ProcessSP
+#include "lldb/lldb-private-interfaces.h" // for EmulateInstructionCreateIn...
 
-#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringRef.h" // for StringRef
 
 #include <cstring>
-#include <memory>
+#include <memory> // for shared_ptr
 
-#include <inttypes.h>
-#include <stdio.h>
+#include <inttypes.h> // for PRIx64, PRId64, PRIu64
+#include <stdio.h>    // for stdout
 
 namespace lldb_private {
 class Target;

@@ -516,27 +516,29 @@ bool CMIDriverMgr::ParseArgs(const int argc, const char *argv[],
       const CMIUtilString strArg(argv[i]);
 
       // Argument "--executable" is also check for in CMIDriver::ParseArgs()
-      if (("--interpreter" == strArg) || // Given by the client such as Eclipse
-          ("--executable" == strArg))    // Used to specify that there
-                                         // is executable argument also
-                                         // on the command line
-      {                                  // See fn description.
+      if ((0 ==
+           strArg.compare(
+               "--interpreter")) || // Given by the client such as Eclipse
+          (0 == strArg.compare("--executable"))) // Used to specify that there
+                                                 // is executable argument also
+                                                 // on the command line
+      {                                          // See fn description.
         bHaveArgInterpret = true;
       }
-      if ("--version" == strArg) {
+      if (0 == strArg.compare("--version")) {
         bHaveArgVersion = true;
       }
-      if ("--versionLong" == strArg) {
+      if (0 == strArg.compare("--versionLong")) {
         bHaveArgVersionLong = true;
       }
-      if ("--log" == strArg) {
+      if (0 == strArg.compare("--log")) {
         bHaveArgLog = true;
       }
       if (0 == strArg.compare(0, 10, "--log-dir=")) {
         strLogDir = strArg.substr(10, CMIUtilString::npos);
         bHaveArgLogDir = true;
       }
-      if (("--help" == strArg) || ("-h" == strArg)) {
+      if ((0 == strArg.compare("--help")) || (0 == strArg.compare("-h"))) {
         bHaveArgHelp = true;
       }
     }

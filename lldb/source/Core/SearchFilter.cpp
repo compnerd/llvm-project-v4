@@ -9,27 +9,31 @@
 
 #include "lldb/Core/SearchFilter.h"
 
-#include "lldb/Breakpoint/Breakpoint.h"
+#include "lldb/Breakpoint/Breakpoint.h" // for Breakpoint
 #include "lldb/Core/Module.h"
-#include "lldb/Core/ModuleList.h"
+#include "lldb/Core/ModuleList.h" // for ModuleList
 #include "lldb/Symbol/CompileUnit.h"
-#include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Symbol/SymbolContext.h" // for SymbolContext
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/Status.h"
-#include "lldb/Utility/Stream.h"
-#include "lldb/lldb-enumerations.h"
 
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "lldb/Utility/FileSpec.h"
+#include "lldb/lldb-private.h"
 
-#include <memory>
-#include <mutex>
-#include <string>
+#include "lldb/Utility/ConstString.h" // for ConstString
+#include "lldb/Utility/Status.h"      // for Status
+#include "lldb/Utility/Stream.h"      // for Stream
+#include "lldb/lldb-enumerations.h"   // for SymbolContextItem::eSymbolCo...
 
-#include <inttypes.h>
-#include <string.h>
+#include "llvm/ADT/StringRef.h"         // for StringRef
+#include "llvm/Support/ErrorHandling.h" // for llvm_unreachable
+
+#include <memory> // for shared_ptr
+#include <mutex>  // for recursive_mutex, lock_guard
+#include <string> // for string
+
+#include <inttypes.h> // for PRIu64
+#include <string.h>   // for size_t, strcmp
 
 namespace lldb_private {
 class Address;
@@ -388,7 +392,10 @@ SearchFilterForUnconstrainedSearches::SerializeToStructuredData() {
 
 bool SearchFilterForUnconstrainedSearches::ModulePasses(
     const FileSpec &module_spec) {
-  return !m_target_sp->ModuleIsExcludedForUnconstrainedSearches(module_spec);
+  if (m_target_sp->ModuleIsExcludedForUnconstrainedSearches(module_spec))
+    return false;
+  else
+    return true;
 }
 
 bool SearchFilterForUnconstrainedSearches::ModulePasses(
@@ -521,7 +528,7 @@ SearchFilterSP SearchFilterByModule::CreateFromStructuredData(
     error.SetErrorString("SFBM::CFSD: filter module item not a string.");
     return nullptr;
   }
-  FileSpec module_spec(module);
+  FileSpec module_spec(module, false);
 
   return std::make_shared<SearchFilterByModule>(target.shared_from_this(),
                                                 module_spec);
@@ -567,15 +574,22 @@ bool SearchFilterByModuleList::ModulePasses(const ModuleSP &module_sp) {
   if (m_module_spec_list.GetSize() == 0)
     return true;
 
-  return module_sp && m_module_spec_list.FindFileIndex(
-                          0, module_sp->GetFileSpec(), false) != UINT32_MAX;
+  if (module_sp &&
+      m_module_spec_list.FindFileIndex(0, module_sp->GetFileSpec(), false) !=
+          UINT32_MAX)
+    return true;
+  else
+    return false;
 }
 
 bool SearchFilterByModuleList::ModulePasses(const FileSpec &spec) {
   if (m_module_spec_list.GetSize() == 0)
     return true;
 
-  return m_module_spec_list.FindFileIndex(0, spec, true) != UINT32_MAX;
+  if (m_module_spec_list.FindFileIndex(0, spec, true) != UINT32_MAX)
+    return true;
+  else
+    return false;
 }
 
 bool SearchFilterByModuleList::AddressPasses(Address &address) {
@@ -670,7 +684,7 @@ SearchFilterSP SearchFilterByModuleList::CreateFromStructuredData(
             "SFBM::CFSD: filter module item %zu not a string.", i);
         return nullptr;
       }
-      modules.Append(FileSpec(module));
+      modules.Append(FileSpec(module, false));
     }
   }
 
@@ -735,7 +749,7 @@ lldb::SearchFilterSP SearchFilterByModuleListAndCU::CreateFromStructuredData(
             "SFBM::CFSD: filter module item %zu not a string.", i);
         return result_sp;
       }
-      modules.Append(FileSpec(module));
+      modules.Append(FileSpec(module, false));
     }
   }
 
@@ -757,7 +771,7 @@ lldb::SearchFilterSP SearchFilterByModuleListAndCU::CreateFromStructuredData(
           "SFBM::CFSD: filter cu item %zu not a string.", i);
       return nullptr;
     }
-    cus.Append(FileSpec(cu));
+    cus.Append(FileSpec(cu, false));
   }
 
   return std::make_shared<SearchFilterByModuleListAndCU>(
@@ -789,17 +803,20 @@ bool SearchFilterByModuleListAndCU::CompUnitPasses(FileSpec &fileSpec) {
 }
 
 bool SearchFilterByModuleListAndCU::CompUnitPasses(CompileUnit &compUnit) {
+  // If it comes from "<stdin>" then we should check it
+  static ConstString g_stdin_filename("<stdin>");
   bool in_cu_list =
-      m_cu_spec_list.FindFileIndex(0, compUnit, false) != UINT32_MAX;
+      (m_cu_spec_list.FindFileIndex(0, compUnit, false) != UINT32_MAX) ||
+      (compUnit.GetFilename() == g_stdin_filename);
   if (in_cu_list) {
     ModuleSP module_sp(compUnit.GetModule());
     if (module_sp) {
-      bool module_passes = SearchFilterByModuleList::ModulePasses(module_sp);
+      bool module_passes = ModulePasses(module_sp);
       return module_passes;
     } else
       return true;
-  } else
-    return false;
+  }
+  return false;
 }
 
 void SearchFilterByModuleListAndCU::Search(Searcher &searcher) {
@@ -816,7 +833,6 @@ void SearchFilterByModuleListAndCU::Search(Searcher &searcher) {
   // filespec that passes.  Otherwise, we need to go through all modules and
   // find the ones that match the file name.
 
-  ModuleList matching_modules;
   const ModuleList &target_images = m_target_sp->GetImages();
   std::lock_guard<std::recursive_mutex> guard(target_images.GetMutex());
 
@@ -824,7 +840,7 @@ void SearchFilterByModuleListAndCU::Search(Searcher &searcher) {
   bool no_modules_in_filter = m_module_spec_list.GetSize() == 0;
   for (size_t i = 0; i < num_modules; i++) {
     lldb::ModuleSP module_sp = target_images.GetModuleAtIndexUnlocked(i);
-    if (no_modules_in_filter ||
+    if (no_modules_in_filter || ModulePasses(module_sp) ||
         m_module_spec_list.FindFileIndex(0, module_sp->GetFileSpec(), false) !=
             UINT32_MAX) {
       SymbolContext matchingContext(m_target_sp, module_sp);

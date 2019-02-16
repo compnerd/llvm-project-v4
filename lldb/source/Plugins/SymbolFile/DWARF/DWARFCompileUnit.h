@@ -13,6 +13,8 @@
 #include "DWARFUnit.h"
 
 class DWARFCompileUnit : public DWARFUnit {
+  friend class DWARFUnit;
+
 public:
   static DWARFUnitSP Extract(SymbolFileDWARF *dwarf2Data,
                              const lldb_private::DWARFDataExtractor &debug_info,
@@ -35,7 +37,9 @@ public:
   /// @return
   ///     Byte size of the compile unit header
   //------------------------------------------------------------------
-  uint32_t GetHeaderByteSize() const override;
+  uint32_t GetHeaderByteSize() const override {
+    return m_is_dwarf64 ? 23 : 11;
+  }
 
 private:
   DWARFCompileUnit(SymbolFileDWARF *dwarf2Data);

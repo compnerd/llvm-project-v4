@@ -35,9 +35,6 @@ EnumClass EnumClassVar;
 enum struct EnumStruct { red, blue, black };
 EnumStruct EnumStructVar;
 
-typedef signed char SCharTypedef;
-SCharTypedef SCVar;
-
 typedef char16_t WChar16Typedef;
 WChar16Typedef WC16Var;
 

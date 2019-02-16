@@ -10,42 +10,6 @@
 #ifndef LLDB_lldb_enumerations_h_
 #define LLDB_lldb_enumerations_h_
 
-#include <type_traits>
-
-#ifndef SWIG
-// Macro to enable bitmask operations on an enum.  Without this, Enum | Enum
-// gets promoted to an int, so you have to say Enum a = Enum(eFoo | eBar).  If
-// you mark Enum with LLDB_MARK_AS_BITMASK_ENUM(Enum), however, you can simply
-// write Enum a = eFoo | eBar.
-// Unfortunately, swig<3.0 doesn't recognise the constexpr keyword, so remove
-// this entire block, as it is not necessary for swig processing.
-#define LLDB_MARK_AS_BITMASK_ENUM(Enum)                                        \
-  constexpr Enum operator|(Enum a, Enum b) {                                   \
-    return static_cast<Enum>(                                                  \
-        static_cast<std::underlying_type<Enum>::type>(a) |                     \
-        static_cast<std::underlying_type<Enum>::type>(b));                     \
-  }                                                                            \
-  constexpr Enum operator&(Enum a, Enum b) {                                   \
-    return static_cast<Enum>(                                                  \
-        static_cast<std::underlying_type<Enum>::type>(a) &                     \
-        static_cast<std::underlying_type<Enum>::type>(b));                     \
-  }                                                                            \
-  constexpr Enum operator~(Enum a) {                                           \
-    return static_cast<Enum>(                                                  \
-        ~static_cast<std::underlying_type<Enum>::type>(a));                    \
-  }                                                                            \
-  inline Enum &operator|=(Enum &a, Enum b) {                                   \
-    a = a | b;                                                                 \
-    return a;                                                                  \
-  }                                                                            \
-  inline Enum &operator&=(Enum &a, Enum b) {                                   \
-    a = a & b;                                                                 \
-    return a;                                                                  \
-  }
-#else
-#define LLDB_MARK_AS_BITMASK_ENUM(Enum)
-#endif
-
 #ifndef SWIG
 // With MSVC, the default type of an enum is always signed, even if one of the
 // enumerator values is too large to fit into a signed integer but would
@@ -93,7 +57,7 @@ enum StateType {
   eStateSuspended, ///< Process or thread is in a suspended state as far
                    ///< as the debugger is concerned while other processes
                    ///< or threads get the chance to run.
-  kLastStateType = eStateSuspended
+  kLastStateType = eStateSuspended  
 };
 
 //----------------------------------------------------------------------
@@ -363,45 +327,43 @@ enum InputReaderGranularity {
 //------------------------------------------------------------------
 FLAGS_ENUM(SymbolContextItem){
     eSymbolContextTarget = (1u << 0), ///< Set when \a target is requested from
-                                      /// a query, or was located in query
-                                      /// results
+                                      ///a query, or was located in query
+                                      ///results
     eSymbolContextModule = (1u << 1), ///< Set when \a module is requested from
-                                      /// a query, or was located in query
-                                      /// results
+                                      ///a query, or was located in query
+                                      ///results
     eSymbolContextCompUnit = (1u << 2), ///< Set when \a comp_unit is requested
-                                        /// from a query, or was located in
-                                        /// query results
+                                        ///from a query, or was located in query
+                                        ///results
     eSymbolContextFunction = (1u << 3), ///< Set when \a function is requested
-                                        /// from a query, or was located in
-                                        /// query results
+                                        ///from a query, or was located in query
+                                        ///results
     eSymbolContextBlock = (1u << 4),    ///< Set when the deepest \a block is
-                                     /// requested from a query, or was located
-                                     /// in query results
+                                     ///requested from a query, or was located
+                                     ///in query results
     eSymbolContextLineEntry = (1u << 5), ///< Set when \a line_entry is
-                                         /// requested from a query, or was
-                                         /// located in query results
+                                         ///requested from a query, or was
+                                         ///located in query results
     eSymbolContextSymbol = (1u << 6), ///< Set when \a symbol is requested from
-                                      /// a query, or was located in query
-                                      /// results
+                                      ///a query, or was located in query
+                                      ///results
     eSymbolContextEverything = ((eSymbolContextSymbol << 1) -
                                 1u), ///< Indicates to try and lookup everything
-                                     /// up during a routine symbol context
-                                     /// query.
-    eSymbolContextVariable = (1u << 7), ///< Set when \a global or static
-                                        /// variable is requested from a query,
-                                        /// or was located in query results.
+                                     ///up during a routine symbol context
+                                     ///query.
+    eSymbolContextVariable = (1u << 7) ///< Set when \a global or static
+                                       ///variable is requested from a query, or
+                                       ///was located in query results.
     ///< eSymbolContextVariable is potentially expensive to lookup so it isn't
-    /// included in
+    ///included in
     ///< eSymbolContextEverything which stops it from being used during frame PC
-    /// lookups and
+    ///lookups and
     ///< many other potential address to symbol context lookups.
 };
-LLDB_MARK_AS_BITMASK_ENUM(SymbolContextItem)
 
 FLAGS_ENUM(Permissions){ePermissionsWritable = (1u << 0),
                         ePermissionsReadable = (1u << 1),
                         ePermissionsExecutable = (1u << 2)};
-LLDB_MARK_AS_BITMASK_ENUM(Permissions)
 
 enum InputReaderAction {
   eInputReaderActivate, // reader is newly pushed onto the reader stack
@@ -658,7 +620,10 @@ enum SymbolType {
   eSymbolTypeObjCClass,
   eSymbolTypeObjCMetaClass,
   eSymbolTypeObjCIVar,
-  eSymbolTypeReExported
+  eSymbolTypeIVarOffset, // A symbol that contains an offset for an instance
+                         // variable
+  eSymbolTypeReExported,
+  eSymbolTypeASTFile   // A symbol whose name is the path to a compiler AST file
 };
 
 enum SectionType {
@@ -694,6 +659,7 @@ enum SectionType {
   eSectionTypeDWARFDebugStrOffsets,
   eSectionTypeDWARFAppleNames,
   eSectionTypeDWARFAppleTypes,
+  eSectionTypeDWARFAppleExternalTypes,
   eSectionTypeDWARFAppleNamespaces,
   eSectionTypeDWARFAppleObjC,
   eSectionTypeELFSymbolTable,       // Elf SHT_SYMTAB section
@@ -701,6 +667,7 @@ enum SectionType {
   eSectionTypeELFRelocationEntries, // Elf SHT_REL or SHT_REL section
   eSectionTypeELFDynamicLinkInfo,   // Elf SHT_DYNAMIC section
   eSectionTypeEHFrame,
+  eSectionTypeSwiftModules,
   eSectionTypeARMexidx,
   eSectionTypeARMextab,
   eSectionTypeCompactUnwind, // compact unwind section in Mach-O,
@@ -711,14 +678,7 @@ enum SectionType {
   eSectionTypeDWARFGNUDebugAltLink,
   eSectionTypeDWARFDebugTypes, // DWARF .debug_types section
   eSectionTypeDWARFDebugNames, // DWARF v5 .debug_names
-  eSectionTypeOther,
-  eSectionTypeDWARFDebugLineStr, // DWARF v5 .debug_line_str
-  eSectionTypeDWARFDebugRngLists, // DWARF v5 .debug_rnglists
-  eSectionTypeDWARFDebugLocLists, // DWARF v5 .debug_loclists
-  eSectionTypeDWARFDebugAbbrevDwo,
-  eSectionTypeDWARFDebugInfoDwo,
-  eSectionTypeDWARFDebugStrDwo,
-  eSectionTypeDWARFDebugStrOffsetsDwo,
+  eSectionTypeOther
 };
 
 FLAGS_ENUM(EmulateInstructionOptions){
@@ -746,7 +706,6 @@ FLAGS_ENUM(FunctionNameType){
     eFunctionNameTypeAny =
         eFunctionNameTypeAuto // DEPRECATED: use eFunctionNameTypeAuto
 };
-LLDB_MARK_AS_BITMASK_ENUM(FunctionNameType)
 
 //----------------------------------------------------------------------
 // Basic types enumeration for the public API SBType::GetBasicType()
@@ -821,7 +780,6 @@ FLAGS_ENUM(TypeClass){
     eTypeClassOther = (1u << 31),
     // Define a mask that can be used for any type when finding types
     eTypeClassAny = (0xffffffffu)};
-LLDB_MARK_AS_BITMASK_ENUM(TypeClass)
 
 enum TemplateArgumentKind {
   eTemplateArgumentKindNull = 0,
@@ -833,6 +791,13 @@ enum TemplateArgumentKind {
   eTemplateArgumentKindExpression,
   eTemplateArgumentKindPack,
   eTemplateArgumentKindNullPtr,
+};
+
+// Kind of argument for generics, either bound or unbound.
+enum GenericKind {
+  eNullGenericKindType = 0,
+  eBoundGenericKindType,
+  eUnboundGenericKindType
 };
 
 //----------------------------------------------------------------------
@@ -998,6 +963,8 @@ enum PathType {
                          // mach-o file in LLDB.framework (MacOSX) exists
   ePathTypeSupportExecutableDir, // Find LLDB support executable directory
                                  // (debugserver, etc)
+  ePathTypeSupportFileDir,       // Find LLDB support file directory
+                                 // (non-executable files)
   ePathTypeHeaderDir,            // Find LLDB header file directory
   ePathTypePythonDir,            // Find Python modules (PYTHONPATH) directory
   ePathTypeLLDBSystemPlugins,    // System plug-ins directory
@@ -1006,7 +973,8 @@ enum PathType {
                                  // will be cleaned up on exit
   ePathTypeGlobalLLDBTempSystemDir, // The LLDB temp directory for this system,
                                     // NOT cleaned up on a process exit.
-  ePathTypeClangDir                 // Find path to Clang builtin headers
+  ePathTypeClangDir,                // Find path to Clang builtin headers
+  ePathTypeSwiftDir                 // Find path to Swift libraries
 };
 
 //----------------------------------------------------------------------
@@ -1044,7 +1012,14 @@ FLAGS_ENUM(TypeFlags){
     eTypeIsVector = (1u << 16),         eTypeIsScalar = (1u << 17),
     eTypeIsInteger = (1u << 18),        eTypeIsFloat = (1u << 19),
     eTypeIsComplex = (1u << 20),        eTypeIsSigned = (1u << 21),
-    eTypeInstanceIsPointer = (1u << 22)};
+    eTypeInstanceIsPointer = (1u << 22),
+    eTypeIsSwift = (1u << 23),
+    eTypeIsGenericTypeParam = (1u << 24),
+    eTypeIsProtocol = (1u << 25),
+    eTypeIsTuple = (1u << 26),
+    eTypeIsMetatype = (1u << 27),
+    eTypeIsGeneric = (1u << 28),
+    eTypeIsBound = (1u << 29)};
 
 FLAGS_ENUM(CommandFlags){
     //----------------------------------------------------------------------
@@ -1130,6 +1105,7 @@ enum TypeSummaryCapping {
   eTypeSummaryCapped = true,
   eTypeSummaryUncapped = false
 };
+
 } // namespace lldb
 
 #endif // LLDB_lldb_enumerations_h_

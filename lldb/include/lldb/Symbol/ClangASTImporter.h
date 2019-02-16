@@ -10,11 +10,14 @@
 #ifndef liblldb_ClangASTImporter_h_
 #define liblldb_ClangASTImporter_h_
 
+// C Includes
+// C++ Includes
 #include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
+// Other libraries and framework includes
 #include "clang/AST/ASTImporter.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/Decl.h"
@@ -22,6 +25,7 @@
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/FileSystemOptions.h"
 
+// Project includes
 #include "lldb/Symbol/CompilerDeclContext.h"
 #include "lldb/lldb-types.h"
 

@@ -9,6 +9,10 @@
 
 #include "lldb/Interpreter/OptionValueProperties.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Utility/Flags.h"
 
 #include "lldb/Core/UserSettingsController.h"
@@ -38,7 +42,7 @@ OptionValueProperties::OptionValueProperties(
   for (size_t i = 0; i < num_properties; ++i) {
     // Duplicate any values that are not global when constructing properties
     // from a global copy
-    if (!m_properties[i].IsGlobal()) {
+    if (m_properties[i].IsGlobal() == false) {
       lldb::OptionValueSP new_value_sp(m_properties[i].GetValue()->DeepCopy());
       m_properties[i].SetOptionValue(new_value_sp);
     }
@@ -212,7 +216,7 @@ Status OptionValueProperties::SetSubValue(const ExecutionContext *exe_ctx,
   else {
     // Don't set an error if the path contained .experimental. - those are
     // allowed to be missing and should silently fail.
-    if (!name_contains_experimental && error.AsCString() == nullptr) {
+    if (name_contains_experimental == false && error.AsCString() == nullptr) {
       error.SetErrorStringWithFormat("invalid value path '%s'", name.str().c_str());
     }
   }

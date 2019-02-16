@@ -10,7 +10,6 @@
 #include "lldb/Host/FileCache.h"
 
 #include "lldb/Host/File.h"
-#include "lldb/Host/FileSystem.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -26,13 +25,14 @@ FileCache &FileCache::GetInstance() {
 
 lldb::user_id_t FileCache::OpenFile(const FileSpec &file_spec, uint32_t flags,
                                     uint32_t mode, Status &error) {
-  if (!file_spec) {
+  std::string path(file_spec.GetPath());
+  if (path.empty()) {
     error.SetErrorString("empty path");
     return UINT64_MAX;
   }
   FileSP file_sp(new File());
-  error = FileSystem::Instance().Open(*file_sp, file_spec, flags, mode);
-  if (!file_sp->IsValid())
+  error = file_sp->Open(path.c_str(), flags, mode);
+  if (file_sp->IsValid() == false)
     return UINT64_MAX;
   lldb::user_id_t fd = file_sp->GetDescriptor();
   m_cache[fd] = file_sp;

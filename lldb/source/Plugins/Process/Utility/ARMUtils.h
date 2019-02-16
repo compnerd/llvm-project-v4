@@ -12,7 +12,7 @@
 
 #include "ARMDefines.h"
 #include "InstructionUtils.h"
-#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/MathExtras.h" // for SignExtend64 template function
 
 // Common utilities for the ARM/Thumb Instruction Set Architecture.
 

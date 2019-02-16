@@ -10,8 +10,9 @@
 // Overview:    CMICmdCmdTargetSelect           implementation.
 
 // Third Party Headers:
+#include "lldb/API/SBCommandInterpreter.h"
+#include "lldb/API/SBCommandReturnObject.h"
 #include "lldb/API/SBStream.h"
-#include "lldb/API/SBError.h"
 
 // In-house headers:
 #include "MICmdArgValNumber.h"
@@ -51,7 +52,7 @@ CMICmdCmdTargetSelect::CMICmdCmdTargetSelect()
 // Return:  None.
 // Throws:  None.
 //--
-CMICmdCmdTargetSelect::~CMICmdCmdTargetSelect() = default;
+CMICmdCmdTargetSelect::~CMICmdCmdTargetSelect() {}
 
 //++
 //------------------------------------------------------------------------------------
@@ -92,17 +93,16 @@ bool CMICmdCmdTargetSelect::Execute() {
 
   CMICmnLLDBDebugSessionInfo &rSessionInfo(
       CMICmnLLDBDebugSessionInfo::Instance());
-  lldb::SBTarget target = rSessionInfo.GetTarget();
 
-  // Check we have a valid target.
-  // Note: target created via 'file-exec-and-symbols' command.
-  if (!target.IsValid()) {
+  // Check we have a valid target
+  // Note: target created via 'file-exec-and-symbols' command
+  if (!rSessionInfo.GetTarget().IsValid()) {
     SetError(CMIUtilString::Format(MIRSRC(IDS_CMD_ERR_INVALID_TARGET_CURRENT),
                                    m_cmdData.strMiCmd.c_str()));
     return MIstatus::failure;
   }
 
-  // Verify that we are executing remotely.
+  // Verify that we are executing remotely
   const CMIUtilString &rRemoteType(pArgType->GetValue());
   if (rRemoteType != "remote") {
     SetError(CMIUtilString::Format(MIRSRC(IDS_CMD_ERR_INVALID_TARGET_TYPE),
@@ -111,25 +111,33 @@ bool CMICmdCmdTargetSelect::Execute() {
     return MIstatus::failure;
   }
 
-  // Create a URL pointing to the remote gdb stub.
+  // Create a URL pointing to the remote gdb stub
   const CMIUtilString strUrl =
       CMIUtilString::Format("connect://%s", pArgParameters->GetValue().c_str());
 
-  lldb::SBError error;
-  // Ask LLDB to connect to the target port.
+  // Ask LLDB to connect to the target port
   const char *pPlugin("gdb-remote");
-  lldb::SBProcess process = target.ConnectRemote(
+  lldb::SBError error;
+  lldb::SBProcess process = rSessionInfo.GetTarget().ConnectRemote(
       rSessionInfo.GetListener(), strUrl.c_str(), pPlugin, error);
 
-  // Verify that we have managed to connect successfully.
+  // Verify that we have managed to connect successfully
+  lldb::SBStream errMsg;
+  error.GetDescription(errMsg);
   if (!process.IsValid()) {
     SetError(CMIUtilString::Format(MIRSRC(IDS_CMD_ERR_INVALID_TARGET_PLUGIN),
                                    m_cmdData.strMiCmd.c_str(),
-                                   error.GetCString()));
+                                   errMsg.GetData()));
+    return MIstatus::failure;
+  }
+  if (error.Fail()) {
+    SetError(CMIUtilString::Format(MIRSRC(IDS_CMD_ERR_CONNECT_TO_TARGET),
+                                   m_cmdData.strMiCmd.c_str(),
+                                   errMsg.GetData()));
     return MIstatus::failure;
   }
 
-  // Set the environment path if we were given one.
+  // Set the environment path if we were given one
   CMIUtilString strWkDir;
   if (rSessionInfo.SharedDataRetrieve<CMIUtilString>(
           rSessionInfo.m_constStrSharedDataKeyWkDir, strWkDir)) {
@@ -142,13 +150,28 @@ bool CMICmdCmdTargetSelect::Execute() {
     }
   }
 
-  // Set the shared object path if we were given one.
+  // Set the shared object path if we were given one
   CMIUtilString strSolibPath;
   if (rSessionInfo.SharedDataRetrieve<CMIUtilString>(
-          rSessionInfo.m_constStrSharedDataSolibPath, strSolibPath))
-    target.AppendImageSearchPath(".", strSolibPath.c_str(), error);
+          rSessionInfo.m_constStrSharedDataSolibPath, strSolibPath)) {
+    lldb::SBDebugger &rDbgr = rSessionInfo.GetDebugger();
+    lldb::SBCommandInterpreter cmdIterpreter = rDbgr.GetCommandInterpreter();
 
-  return HandleSBError(error);
+    CMIUtilString strCmdString = CMIUtilString::Format(
+        "target modules search-paths add . %s", strSolibPath.c_str());
+
+    lldb::SBCommandReturnObject retObj;
+    cmdIterpreter.HandleCommand(strCmdString.c_str(), retObj, false);
+
+    if (!retObj.Succeeded()) {
+      SetError(CMIUtilString::Format(MIRSRC(IDS_CMD_ERR_FNFAILED),
+                                     m_cmdData.strMiCmd.c_str(),
+                                     "target-select"));
+      return MIstatus::failure;
+    }
+  }
+
+  return MIstatus::success;
 }
 
 //++

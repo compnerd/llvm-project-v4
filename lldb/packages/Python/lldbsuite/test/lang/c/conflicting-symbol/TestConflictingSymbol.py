@@ -93,7 +93,6 @@ class TestConflictingSymbols(TestBase):
                 "Multiple internal symbols"])
 
     @expectedFailureAll(bugnumber="llvm.org/pr35043")
-    @skipIfWindows # This test is "passing" on Windows, but it is a false positive.
     def test_shadowed(self):
         self.build()
         exe = self.getBuildArtifact("a.out")

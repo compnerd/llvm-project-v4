@@ -24,6 +24,9 @@ class DataFormatterSynthValueTestCase(TestBase):
         self.line = line_number('main.cpp', 'break here')
 
     @skipIfFreeBSD  # llvm.org/pr20545 bogus output confuses buildbot parser
+    @expectedFailureAll(
+        oslist=["windows"],
+        bugnumber="llvm.org/pr24462, Data formatters have problems on Windows")
     def test_with_run_command(self):
         """Test using Python synthetic children provider to provide a value."""
         self.build()
@@ -104,7 +107,7 @@ class DataFormatterSynthValueTestCase(TestBase):
         # check that an aptly defined synthetic provider does not affect
         # one-lining
         self.expect(
-            "expression struct Struct { myInt theInt{12}; }; Struct()",
+            "expression struct S { myInt theInt{12}; }; S()",
             substrs=['(theInt = 12)'])
 
         # check that we can use a synthetic value in a summary

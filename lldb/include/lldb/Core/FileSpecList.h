@@ -15,7 +15,7 @@
 
 #include <vector>
 
-#include <stddef.h>
+#include <stddef.h> // for size_t
 
 namespace lldb_private {
 class Stream;

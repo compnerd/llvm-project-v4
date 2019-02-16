@@ -10,8 +10,11 @@
 #ifndef liblldb_AuxVector_H_
 #define liblldb_AuxVector_H_
 
+// C Includes
+// C++ Includes
 #include <vector>
 
+// Other libraries and framework includes
 #include "lldb/lldb-forward.h"
 
 namespace lldb_private {

@@ -10,6 +10,10 @@
 
 #include "lldb/DataFormatters/LanguageCategory.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/DataFormatters/FormatManager.h"
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/DataFormatters/TypeFormat.h"

@@ -13,17 +13,17 @@
 #include "llvm/ADT/StringRef.h"
 
 #include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/FileSpec.h"
-#include "lldb/lldb-enumerations.h"
+#include "lldb/Utility/FileSpec.h"  // for FileSpec
+#include "lldb/lldb-enumerations.h" // for StructuredDataType
 
-#include <cassert>
-#include <cstddef>
-#include <cstdint>
+#include <cassert> // for assert
+#include <cstddef> // for size_t
+#include <cstdint> // for uint64_t
 #include <functional>
 #include <map>
 #include <memory>
 #include <string>
-#include <type_traits>
+#include <type_traits> // for move
 #include <utility>
 #include <vector>
 
@@ -170,7 +170,7 @@ public:
     bool
     ForEach(std::function<bool(Object *object)> const &foreach_callback) const {
       for (const auto &object_sp : m_items) {
-        if (!foreach_callback(object_sp.get()))
+        if (foreach_callback(object_sp.get()) == false)
           return false;
       }
       return true;
@@ -359,7 +359,7 @@ public:
     void ForEach(std::function<bool(ConstString key, Object *object)> const
                      &callback) const {
       for (const auto &pair : m_dict) {
-        if (!callback(pair.first, pair.second.get()))
+        if (callback(pair.first, pair.second.get()) == false)
           break;
       }
     }

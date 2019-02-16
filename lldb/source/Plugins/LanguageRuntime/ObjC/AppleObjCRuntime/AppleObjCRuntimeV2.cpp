@@ -7,14 +7,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
 #include <stdint.h>
 
+// C++ Includes
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclObjC.h"
 
+// Project includes
 #include "lldb/Core/ClangForward.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Symbol/CompilerType.h"
@@ -24,8 +28,8 @@
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Core/Section.h"
-#include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/FunctionCaller.h"
@@ -40,17 +44,14 @@
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/TypeList.h"
 #include "lldb/Symbol/VariableList.h"
-#include "lldb/Target/ABI.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
-#include "lldb/Target/StackFrameRecognizer.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
@@ -376,8 +377,6 @@ ExtractRuntimeGlobalSymbol(Process *process, ConstString name,
   }
 }
 
-static void RegisterObjCExceptionRecognizer();
-
 AppleObjCRuntimeV2::AppleObjCRuntimeV2(Process *process,
                                        const ModuleSP &objc_module_sp)
     : AppleObjCRuntime(process), m_get_class_info_code(),
@@ -398,13 +397,12 @@ AppleObjCRuntimeV2::AppleObjCRuntimeV2(Process *process,
   static const ConstString g_gdb_object_getClass("gdb_object_getClass");
   m_has_object_getClass = (objc_module_sp->FindFirstSymbolWithNameAndType(
                                g_gdb_object_getClass, eSymbolTypeCode) != NULL);
-  RegisterObjCExceptionRecognizer();
 }
 
 bool AppleObjCRuntimeV2::GetDynamicTypeAndAddress(
     ValueObject &in_value, lldb::DynamicValueType use_dynamic,
     TypeAndOrName &class_type_or_name, Address &address,
-    Value::ValueType &value_type) {
+    Value::ValueType &value_type, bool allow_swift) {
   // We should never get here with a null process...
   assert(m_process != NULL);
 
@@ -423,7 +421,7 @@ bool AppleObjCRuntimeV2::GetDynamicTypeAndAddress(
   value_type = Value::ValueType::eValueTypeScalar;
 
   // Make sure we can have a dynamic value before starting...
-  if (CouldHaveDynamicValue(in_value)) {
+  if (CouldHaveDynamicValue(in_value, allow_swift)) {
     // First job, pull out the address at 0 offset from the object  That will
     // be the ISA pointer.
     ClassDescriptorSP objc_class_sp(GetNonKVOClassDescriptor(in_value));
@@ -454,7 +452,16 @@ bool AppleObjCRuntimeV2::GetDynamicTypeAndAddress(
       }
     }
   }
-  return !class_type_or_name.IsEmpty();
+  return class_type_or_name.IsEmpty() == false;
+}
+
+bool AppleObjCRuntimeV2::GetDynamicTypeAndAddress(
+    ValueObject &in_value, DynamicValueType use_dynamic,
+    TypeAndOrName &class_type_or_name, Address &address,
+    Value::ValueType &value_type) {
+  return GetDynamicTypeAndAddress(in_value, use_dynamic, class_type_or_name,
+                                  address, value_type,
+                                  /* allow_swift = */ false);
 }
 
 //------------------------------------------------------------------
@@ -805,9 +812,8 @@ AppleObjCRuntimeV2::CreateExceptionResolver(Breakpoint *bkpt, bool catch_bp,
 
   if (throw_bp)
     resolver_sp.reset(new BreakpointResolverName(
-        bkpt, std::get<1>(GetExceptionThrowLocation()).AsCString(),
-        eFunctionNameTypeBase, eLanguageTypeUnknown, Breakpoint::Exact, 0,
-        eLazyBoolNo));
+        bkpt, "objc_exception_throw", eFunctionNameTypeBase,
+        eLanguageTypeUnknown, Breakpoint::Exact, 0, eLazyBoolNo));
   // FIXME: We don't do catch breakpoints for ObjC yet.
   // Should there be some way for the runtime to specify what it can do in this
   // regard?
@@ -1852,8 +1858,8 @@ void AppleObjCRuntimeV2::UpdateISAToDescriptorMapIfNeeded() {
       // warn if:
       // - we could not run either expression
       // - we found fewer than num_classes_to_warn_at classes total
-      if ((!shared_cache_update_result.m_update_ran) ||
-          (!dynamic_update_result.m_update_ran))
+      if ((false == shared_cache_update_result.m_update_ran) ||
+          (false == dynamic_update_result.m_update_ran))
         WarnIfNoClassesCached(
             SharedCacheWarningReason::eExpressionExecutionFailure);
       else if (dynamic_update_result.m_num_found +
@@ -2428,7 +2434,7 @@ AppleObjCRuntimeV2::NonPointerISACache::NonPointerISACache(
 ObjCLanguageRuntime::ClassDescriptorSP
 AppleObjCRuntimeV2::NonPointerISACache::GetClassDescriptor(ObjCISA isa) {
   ObjCISA real_isa = 0;
-  if (!EvaluateNonPointerISA(isa, real_isa))
+  if (EvaluateNonPointerISA(isa, real_isa) == false)
     return ObjCLanguageRuntime::ClassDescriptorSP();
   auto cache_iter = m_cache.find(real_isa);
   if (cache_iter != m_cache.end())
@@ -2444,15 +2450,15 @@ bool AppleObjCRuntimeV2::NonPointerISACache::EvaluateNonPointerISA(
     ObjCISA isa, ObjCISA &ret_isa) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES));
 
-  if (log)
-    log->Printf("AOCRT::NPI Evalulate(isa = 0x%" PRIx64 ")", (uint64_t)isa);
-
   if ((isa & ~m_objc_debug_isa_class_mask) == 0)
     return false;
 
+  if (log)
+    log->Printf("AOCRT::NPI Evalulate(isa = 0x%" PRIx64 ")", (uint64_t)isa);
+
   // If all of the indexed ISA variables are set, then its possible that this
   // ISA is indexed, and we should first try to get its value using the index.
-  // Note, we check these variables first as the ObjC runtime will set at least
+  // Note, we check these varaibles first as the ObjC runtime will set at least
   // one of their values to 0 if they aren't needed.
   if (m_objc_debug_indexed_isa_magic_mask &&
       m_objc_debug_indexed_isa_magic_value &&
@@ -2539,7 +2545,7 @@ bool AppleObjCRuntimeV2::NonPointerISACache::EvaluateNonPointerISA(
     return false;
   }
 
-  // Definitely not an indexed ISA, so try to use a mask to extract the pointer
+  // Definately not an indexed ISA, so try to use a mask to extract the pointer
   // from the ISA.
   if ((isa & m_objc_debug_isa_magic_mask) == m_objc_debug_isa_magic_value) {
     ret_isa = isa & m_objc_debug_isa_class_mask;
@@ -2598,60 +2604,4 @@ void AppleObjCRuntimeV2::GetValuesForGlobalCFBooleans(lldb::addr_t &cf_true,
     cf_false = m_CFBoolean_values->first;
   } else
     this->AppleObjCRuntime::GetValuesForGlobalCFBooleans(cf_true, cf_false);
-}
-
-#pragma mark Frame recognizers
-
-class ObjCExceptionRecognizedStackFrame : public RecognizedStackFrame {
- public:
-  ObjCExceptionRecognizedStackFrame(StackFrameSP frame_sp) {
-    ThreadSP thread_sp = frame_sp->GetThread();
-    ProcessSP process_sp = thread_sp->GetProcess();
-
-    const lldb::ABISP &abi = process_sp->GetABI();
-    if (!abi) return;
-
-    CompilerType voidstar = process_sp->GetTarget()
-                                .GetScratchClangASTContext()
-                                ->GetBasicType(lldb::eBasicTypeVoid)
-                                .GetPointerType();
-
-    ValueList args;
-    Value input_value;
-    input_value.SetCompilerType(voidstar);
-    args.PushValue(input_value);
-
-    if (!abi->GetArgumentValues(*thread_sp, args)) return;
-
-    addr_t exception_addr = args.GetValueAtIndex(0)->GetScalar().ULongLong();
-
-    Value value(exception_addr);
-    value.SetCompilerType(voidstar);
-    exception = ValueObjectConstResult::Create(frame_sp.get(), value,
-                                               ConstString("exception"));
-    exception = exception->GetDynamicValue(eDynamicDontRunTarget);
-  }
-
-  ValueObjectSP exception;
-
-  lldb::ValueObjectSP GetExceptionObject() override { return exception; }
-};
-
-class ObjCExceptionThrowFrameRecognizer : public StackFrameRecognizer {
-  lldb::RecognizedStackFrameSP RecognizeFrame(lldb::StackFrameSP frame) {
-    return lldb::RecognizedStackFrameSP(
-        new ObjCExceptionRecognizedStackFrame(frame));
-  };
-};
-
-static void RegisterObjCExceptionRecognizer() {
-  static llvm::once_flag g_once_flag;
-  llvm::call_once(g_once_flag, []() {
-    FileSpec module;
-    ConstString function;
-    std::tie(module, function) = AppleObjCRuntime::GetExceptionThrowLocation();
-    StackFrameRecognizerManager::AddRecognizer(
-        StackFrameRecognizerSP(new ObjCExceptionThrowFrameRecognizer()),
-        module.GetFilename(), function, /*first_instruction_only*/ true);
-  });
 }

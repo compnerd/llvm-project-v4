@@ -7,10 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <mutex>
 
+// Other libraries and framework includes
 #include "clang/AST/DeclCXX.h"
 
+// Project includes
 #include "NSDictionary.h"
 
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntime.h"
@@ -462,7 +466,7 @@ lldb_private::formatters::NSDictionarySyntheticFrontEndCreator(
   CompilerType valobj_type(valobj_sp->GetCompilerType());
   Flags flags(valobj_type.GetTypeInfo());
 
-  if (flags.IsClear(eTypeIsPointer)) {
+  if (flags.IsClear(eTypeIsPointer) && flags.IsClear(eTypeIsSwift)) {
     Status error;
     valobj_sp = valobj_sp->AddressOf(error);
     if (error.Fail() || !valobj_sp)

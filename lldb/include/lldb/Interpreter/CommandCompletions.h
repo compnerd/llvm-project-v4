@@ -10,8 +10,12 @@
 #ifndef lldb_CommandCompletions_h_
 #define lldb_CommandCompletions_h_
 
+// C Includes
+// C++ Includes
 #include <set>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/SearchFilter.h"
 #include "lldb/Utility/CompletionRequest.h"

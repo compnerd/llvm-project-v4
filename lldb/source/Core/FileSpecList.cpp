@@ -9,12 +9,12 @@
 
 #include "lldb/Core/FileSpecList.h"
 
-#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/ConstString.h" // for ConstString
 #include "lldb/Utility/Stream.h"
 
-#include <utility>
+#include <utility> // for find
 
-#include <stdint.h>
+#include <stdint.h> // for UINT32_MAX
 
 using namespace lldb_private;
 using namespace std;

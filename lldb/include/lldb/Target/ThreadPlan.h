@@ -10,9 +10,13 @@
 #ifndef liblldb_ThreadPlan_h_
 #define liblldb_ThreadPlan_h_
 
+// C Includes
+// C++ Includes
 #include <mutex>
 #include <string>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/Process.h"
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/Target.h"
@@ -516,6 +520,8 @@ public:
   virtual lldb::ValueObjectSP GetReturnValueObject() {
     return lldb::ValueObjectSP();
   }
+
+  virtual bool IsReturnValueSwiftErrorValue() { return false; }
 
   // If the thread plan managing the evaluation of a user expression lives
   // longer than the command that instigated the expression (generally because

@@ -7,9 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/Target/Queue.h"
-#include "lldb/Target/Process.h"
 #include "lldb/Target/QueueItem.h"
+#include "lldb/Target/Process.h"
+#include "lldb/Target/Queue.h"
 #include "lldb/Target/SystemRuntime.h"
 
 using namespace lldb;
@@ -94,7 +94,7 @@ std::string QueueItem::GetQueueLabel() {
 ProcessSP QueueItem::GetProcessSP() { return m_process_wp.lock(); }
 
 void QueueItem::FetchEntireItem() {
-  if (m_have_fetched_entire_item)
+  if (m_have_fetched_entire_item == true)
     return;
   ProcessSP process_sp = m_process_wp.lock();
   if (process_sp) {

@@ -10,6 +10,10 @@
 #ifndef LLDB_SBTarget_h_
 #define LLDB_SBTarget_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/API/SBAddress.h"
 #include "lldb/API/SBAttachInfo.h"
 #include "lldb/API/SBBreakpoint.h"
@@ -292,10 +296,6 @@ public:
                                 const char *plugin_name, SBError &error);
 
   lldb::SBFileSpec GetExecutable();
-
-  // Append the path mapping (from -> to) to the target's paths mapping list.
-  void AppendImageSearchPath(const char *from, const char *to,
-                             lldb::SBError &error);
 
   bool AddModule(lldb::SBModule &module);
 
@@ -609,12 +609,14 @@ public:
   lldb::SBBreakpoint BreakpointCreateByName(const char *symbol_name,
                                             const char *module_name = nullptr);
 
-  // This version uses name_type_mask = eFunctionNameTypeAuto
+  // This version uses name_type_mask = eFunctionNameTypeAuto, symbol_language =
+  // eLanguageTypeUnknown
   lldb::SBBreakpoint
   BreakpointCreateByName(const char *symbol_name,
                          const SBFileSpecList &module_list,
                          const SBFileSpecList &comp_unit_list);
 
+  // symbol_language = eLanguageTypeUnknown.
   lldb::SBBreakpoint BreakpointCreateByName(
       const char *symbol_name,
       uint32_t
@@ -679,6 +681,15 @@ public:
 
   lldb::SBBreakpoint BreakpointCreateForException(lldb::LanguageType language,
                                                   bool catch_bp, bool throw_bp);
+
+  // The extra_args parameter will hold any number of pairs, the first element
+  // is the extra
+  // argument type, and the second the value.
+  // The argument types all follow the option long name from "breakpoint set -E
+  // <Language>".
+  lldb::SBBreakpoint BreakpointCreateForException(lldb::LanguageType language,
+                                                  bool catch_bp, bool throw_bp,
+                                                  SBStringList &extra_args);
 
   lldb::SBBreakpoint BreakpointCreateByAddress(addr_t address);
 
@@ -903,7 +914,6 @@ protected:
   friend class SBSourceManager;
   friend class SBSymbol;
   friend class SBValue;
-  friend class SBVariablesOptions;
 
   //------------------------------------------------------------------
   // Constructors are private, use static Target::Create function to create an

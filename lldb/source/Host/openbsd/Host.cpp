@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
 #include <sys/types.h>
 
 #include <sys/signal.h>
@@ -18,6 +19,9 @@
 
 #include <stdio.h>
 
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Target/Process.h"

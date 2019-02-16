@@ -26,7 +26,6 @@ class STLTestCase(TestBase):
         self.line = line_number(
             self.source, '// Set break point at this line.')
 
-    @skipIf
     @expectedFailureAll(bugnumber="llvm.org/PR36713")
     def test(self):
         """Test some expressions involving STL data types."""

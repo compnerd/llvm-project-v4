@@ -9,13 +9,14 @@
 
 #include "lldb/Core/FileLineResolver.h"
 
-#include "lldb/Core/FileSpecList.h"
+// Project includes
+#include "lldb/Core/FileSpecList.h" // for FileSpecList
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/LineTable.h"
-#include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/Stream.h"
+#include "lldb/Utility/ConstString.h" // for ConstString
+#include "lldb/Utility/Stream.h"      // for Stream
 
-#include <string>
+#include <string> // for string
 
 namespace lldb_private {
 class Address;

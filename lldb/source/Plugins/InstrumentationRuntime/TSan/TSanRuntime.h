@@ -10,6 +10,10 @@
 #ifndef liblldb_ThreadSanitizerRuntime_h_
 #define liblldb_ThreadSanitizerRuntime_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/ABI.h"
 #include "lldb/Target/InstrumentationRuntime.h"
 #include "lldb/Utility/StructuredData.h"
@@ -62,7 +66,8 @@ private:
 
   StructuredData::ObjectSP RetrieveReportData(ExecutionContextRef exe_ctx_ref);
 
-  std::string FormatDescription(StructuredData::ObjectSP report);
+  std::string FormatDescription(StructuredData::ObjectSP report,
+                                bool &is_swift_access_race);
 
   std::string GenerateSummary(StructuredData::ObjectSP report);
 

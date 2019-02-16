@@ -1,6 +1,5 @@
 
 %extend lldb::SBAddress {
-        %nothreadallow;
         PyObject *lldb::SBAddress::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -13,10 +12,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBBlock {
-        %nothreadallow;
         PyObject *lldb::SBBlock::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -29,10 +26,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBBreakpoint {
-        %nothreadallow;
         PyObject *lldb::SBBreakpoint::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -45,7 +40,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
         
     %pythoncode %{ 
         def __eq__(self, rhs):
@@ -63,7 +57,6 @@
 
 }
 %extend lldb::SBBreakpointLocation {
-        %nothreadallow;
         PyObject *lldb::SBBreakpointLocation::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelFull);
@@ -76,11 +69,9 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 
 %extend lldb::SBBreakpointName {
-        %nothreadallow;
         PyObject *lldb::SBBreakpointName::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -93,7 +84,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 
 %extend lldb::SBBroadcaster {
@@ -113,7 +103,6 @@
 }
 
 %extend lldb::SBCommandReturnObject {
-        %nothreadallow;
         PyObject *lldb::SBCommandReturnObject::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -126,7 +115,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
         
         /* the write() and flush() calls are not part of the SB API proper, and are solely for Python usage
         they are meant to make an SBCommandReturnObject into a file-like object so that instructions of the sort
@@ -142,7 +130,6 @@
         {}
 }
 %extend lldb::SBCompileUnit {
-        %nothreadallow;
         PyObject *lldb::SBCompileUnit::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -155,7 +142,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
     %pythoncode %{ 
         def __eq__(self, rhs):
             if not isinstance(rhs, type(self)): 
@@ -171,7 +157,6 @@
     %}
 }
 %extend lldb::SBData {
-        %nothreadallow;
         PyObject *lldb::SBData::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -184,10 +169,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBDebugger {
-        %nothreadallow;
         PyObject *lldb::SBDebugger::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -200,10 +183,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBDeclaration {
-        %nothreadallow;
         PyObject *lldb::SBDeclaration::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -216,7 +197,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
         
     %pythoncode %{ 
         def __eq__(self, rhs):
@@ -234,7 +214,6 @@
 
 }
 %extend lldb::SBError {
-        %nothreadallow;
         PyObject *lldb::SBError::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -247,10 +226,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBFileSpec {
-        %nothreadallow;
         PyObject *lldb::SBFileSpec::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -263,10 +240,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBFrame {
-        %nothreadallow;
         PyObject *lldb::SBFrame::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -279,10 +254,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBFunction {
-        %nothreadallow;
         PyObject *lldb::SBFunction::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -295,7 +268,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
         
     %pythoncode %{ 
         def __eq__(self, rhs):
@@ -313,7 +285,6 @@
 
 }
 %extend lldb::SBInstruction {
-        %nothreadallow;
         PyObject *lldb::SBInstruction::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -326,10 +297,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBInstructionList {
-        %nothreadallow;
         PyObject *lldb::SBInstructionList::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -342,10 +311,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBLineEntry {
-        %nothreadallow;
         PyObject *lldb::SBLineEntry::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -358,7 +325,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
         
     %pythoncode %{ 
         def __eq__(self, rhs):
@@ -376,7 +342,6 @@
 }
 
 %extend lldb::SBMemoryRegionInfo {
-        %nothreadallow;
         PyObject *lldb::SBMemoryRegionInfo::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -389,11 +354,9 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 
 %extend lldb::SBModule {
-        %nothreadallow;
         PyObject *lldb::SBModule::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -406,7 +369,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
         
     %pythoncode %{ 
         def __eq__(self, rhs):
@@ -424,7 +386,6 @@
 }
 
 %extend lldb::SBModuleSpec {
-        %nothreadallow;
         PyObject *lldb::SBModuleSpec::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -437,11 +398,9 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 
 %extend lldb::SBModuleSpecList {
-        %nothreadallow;
         PyObject *lldb::SBModuleSpecList::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -454,11 +413,9 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 
 %extend lldb::SBProcess {
-        %nothreadallow;
         PyObject *lldb::SBProcess::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -471,10 +428,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBSection {
-        %nothreadallow;
         PyObject *lldb::SBSection::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -487,7 +442,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
         
     %pythoncode %{ 
         def __eq__(self, rhs):
@@ -518,7 +472,6 @@
         {}
 }
 %extend lldb::SBSymbol {
-        %nothreadallow;
         PyObject *lldb::SBSymbol::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -531,7 +484,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
     %pythoncode %{
         def __eq__(self, rhs):
             if not isinstance(rhs, type(self)): 
@@ -547,7 +499,6 @@
     %}
 }
 %extend lldb::SBSymbolContext {
-        %nothreadallow;
         PyObject *lldb::SBSymbolContext::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -560,10 +511,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBSymbolContextList {
-        %nothreadallow;
         PyObject *lldb::SBSymbolContextList::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -576,11 +525,9 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 
 %extend lldb::SBTarget {
-        %nothreadallow;
         PyObject *lldb::SBTarget::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -593,7 +540,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 
     %pythoncode %{ 
         def __eq__(self, rhs):
@@ -611,7 +557,6 @@
 }
 
 %extend lldb::SBType {
-        %nothreadallow;
         PyObject *lldb::SBType::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -624,10 +569,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBTypeCategory {
-        %nothreadallow;
         PyObject *lldb::SBTypeCategory::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -640,10 +583,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBTypeFilter {
-        %nothreadallow;
         PyObject *lldb::SBTypeFilter::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -656,7 +597,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
     %pythoncode %{ 
         def __eq__(self, rhs):
             if not isinstance(rhs, type(self)): 
@@ -672,7 +612,6 @@
     %}
 }
 %extend lldb::SBTypeFormat {
-        %nothreadallow;
         PyObject *lldb::SBTypeFormat::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -685,10 +624,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBTypeMember {
-        %nothreadallow;
         PyObject *lldb::SBTypeMember::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -701,10 +638,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBTypeMemberFunction {
-        %nothreadallow;
         PyObject *lldb::SBTypeMemberFunction::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -717,10 +652,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBTypeEnumMember {
-        %nothreadallow;
         PyObject *lldb::SBTypeEnumMember::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -733,10 +666,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBTypeNameSpecifier {
-        %nothreadallow;
         PyObject *lldb::SBTypeNameSpecifier::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -749,7 +680,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
     %pythoncode %{ 
         def __eq__(self, rhs):
             if not isinstance(rhs, type(self)): 
@@ -765,7 +695,6 @@
     %}
 }
 %extend lldb::SBTypeSummary {
-        %nothreadallow;
         PyObject *lldb::SBTypeSummary::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -778,7 +707,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
     %pythoncode %{ 
         def __eq__(self, rhs):
             if not isinstance(rhs, type(self)): 
@@ -794,7 +722,6 @@
     %}
 }
 %extend lldb::SBTypeSynthetic {
-        %nothreadallow;
         PyObject *lldb::SBTypeSynthetic::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelBrief);
@@ -807,7 +734,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
     %pythoncode %{ 
         def __eq__(self, rhs):
             if not isinstance(rhs, type(self)): 
@@ -823,7 +749,6 @@
     %}
 }
 %extend lldb::SBThread {
-        %nothreadallow;
         PyObject *lldb::SBThread::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -836,7 +761,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
     %pythoncode %{ 
         def __eq__(self, rhs):
             if not isinstance(rhs, type(self)): 
@@ -852,7 +776,6 @@
     %}
 }
 %extend lldb::SBValue {
-        %nothreadallow;
         PyObject *lldb::SBValue::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description);
@@ -865,10 +788,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBValueList {
-        %nothreadallow;
         PyObject *lldb::SBValueList::__str__ (){
                 lldb::SBStream description;
                 const size_t n = $self->GetSize();
@@ -890,10 +811,8 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 %extend lldb::SBWatchpoint {
-        %nothreadallow;
         PyObject *lldb::SBWatchpoint::__str__ (){
                 lldb::SBStream description;
                 $self->GetDescription (description, lldb::eDescriptionLevelVerbose);
@@ -906,7 +825,6 @@
                 else
                     return lldb_private::PythonString("").release();
         }
-        %clearnothreadallow;
 }
 
 

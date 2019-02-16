@@ -12,7 +12,7 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
-class LibcxxVariantDataFormatterTestCase(TestBase):
+class LibcxxOptionalDataFormatterTestCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
 

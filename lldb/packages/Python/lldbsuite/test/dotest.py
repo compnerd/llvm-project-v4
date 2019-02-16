@@ -364,6 +364,12 @@ def parseOptionsAndInitTestdirs():
         configuration.skipCategories += test_categories.validate(
             args.skipCategories, False)
 
+    if args.swiftcompiler:
+        configuration.swiftCompiler = args.swiftcompiler
+
+    if args.swiftlibrary:
+        configuration.swiftLibrary = args.swiftlibrary
+
     if args.E:
         cflags_extras = args.E
         os.environ['CFLAGS_EXTRAS'] = cflags_extras
@@ -542,10 +548,13 @@ def getXcodeOutputPaths(lldbRootDirectory):
     xcode4_build_dir = ['build', 'lldb', 'Build', 'Products']
 
     configurations = [
+        ['DebugPresubmission'],
         ['Debug'],
         ['DebugClang'],
         ['Release'],
-        ['BuildAndIntegration']]
+        ['BuildAndIntegration'],
+        ['CustomSwift-Debug'],
+        ['CustomSwift-Release']]
     xcode_build_dirs = [xcode3_build_dir, xcode4_build_dir]
     for configuration in configurations:
         for xcode_build_dir in xcode_build_dirs:
@@ -632,6 +641,32 @@ def getOutputPaths(lldbRootDirectory):
     result.append(os.path.join(lldbParentDir, 'build', 'bin'))
     result.append(os.path.join(lldbParentDir, 'build', 'host', 'bin'))
 
+    # linux swiftie build
+    # TODO: add more configurations
+    configurations = ['Ninja-DebugAssert', 'Ninja-RelWithDebInfoAssert']
+    for configuration in configurations:
+        result.append(
+            os.path.join(
+                lldbParentDir,
+                'build',
+                configuration,
+                'lldb-linux-x86_64',
+                'bin'))
+
+    # osx swiftie build
+    configurations = [['Ninja-DebugAssert',
+                       'CustomSwift-Debug'],
+                      ['Ninja-RelWithDebInfoAssert',
+                       'CustomSwift-Release']]  # TODO: add more configurations
+    for configuration in configurations:
+        result.append(
+            os.path.join(
+                lldbParentDir,
+                'build',
+                configuration[0],
+                'lldb-macosx-x86_64',
+                configuration[1]))
+
     return result
 
 def get_llvm_bin_dirs():
@@ -689,7 +724,6 @@ def setupSysPath():
 
     pluginPath = os.path.join(scriptPath, 'plugins')
     toolsLLDBMIPath = os.path.join(scriptPath, 'tools', 'lldb-mi')
-    toolsLLDBVSCode = os.path.join(scriptPath, 'tools', 'lldb-vscode')
     toolsLLDBServerPath = os.path.join(scriptPath, 'tools', 'lldb-server')
 
     # Insert script dir, plugin dir, lldb-mi dir and lldb-server dir to the
@@ -698,9 +732,6 @@ def setupSysPath():
     # Adding test/tools/lldb-mi to the path makes it easy
     sys.path.insert(0, toolsLLDBMIPath)
     # to "import lldbmi_testcase" from the MI tests
-    # Adding test/tools/lldb-vscode to the path makes it easy to
-    # "import lldb_vscode_testcase" from the VSCode tests
-    sys.path.insert(0, toolsLLDBVSCode)
     # Adding test/tools/lldb-server to the path makes it easy
     sys.path.insert(0, toolsLLDBServerPath)
     # to "import lldbgdbserverutils" from the lldb-server tests
@@ -769,15 +800,6 @@ def setupSysPath():
             print(
                 "The 'lldb-mi' executable cannot be located.  The lldb-mi tests can not be run as a result.")
             configuration.skipCategories.append("lldb-mi")
-
-    lldbVSCodeExec = os.path.join(lldbDir, "lldb-vscode")
-    if is_exe(lldbVSCodeExec):
-        os.environ["LLDBVSCODE_EXEC"] = lldbVSCodeExec
-    else:
-        if not configuration.shouldSkipBecauseOfCategories(["lldb-vscode"]):
-            print(
-                "The 'lldb-vscode' executable cannot be located.  The lldb-vscode tests can not be run as a result.")
-            configuration.skipCategories.append("lldb-vscode")
 
     lldbPythonDir = None  # The directory that contains 'lldb/__init__.py'
     if not configuration.lldbFrameworkPath and os.path.exists(os.path.join(lldbLibDir, "LLDB.framework")):
@@ -1373,6 +1395,10 @@ def run_suite():
     # Iterating over all possible architecture and compiler combinations.
     os.environ["ARCH"] = configuration.arch
     os.environ["CC"] = configuration.compiler
+    if configuration.swiftCompiler:
+        os.environ["SWIFTC"] = configuration.swiftCompiler
+    if configuration.swiftLibrary:
+        os.environ["USERSWIFTLIBRARY"] = configuration.swiftLibrary
     configString = "arch=%s compiler=%s" % (configuration.arch,
                                             configuration.compiler)
 

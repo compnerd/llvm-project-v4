@@ -9,6 +9,10 @@
 
 #include "lldb/Interpreter/OptionGroupValueObjectDisplay.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/DataFormatters/ValueObjectPrinter.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
@@ -42,7 +46,8 @@ static const OptionDefinition g_option_table[] = {
      {}, 0, eArgTypeNone, "Show variable location information."},
     {LLDB_OPT_SET_1, false, "object-description", 'O',
      OptionParser::eNoArgument, nullptr, {}, 0, eArgTypeNone,
-     "Print as an Objective-C object."},
+     // Difference to llvm.org is intended for this description
+     "Display using a language-specific description API, if possible."},
     {LLDB_OPT_SET_1, false, "ptr-depth", 'P', OptionParser::eRequiredArgument,
      nullptr, {}, 0, eArgTypeCount, "The number of pointers to be traversed "
                                     "when dumping values (default is zero)."},

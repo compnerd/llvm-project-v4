@@ -153,10 +153,9 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
     if (dsym_fspec) {
       DataBufferSP dsym_file_data_sp;
       lldb::offset_t dsym_file_data_offset = 0;
-      dsym_objfile_sp =
-          ObjectFile::FindPlugin(module_sp, &dsym_fspec, 0,
-                                 FileSystem::Instance().GetByteSize(dsym_fspec),
-                                 dsym_file_data_sp, dsym_file_data_offset);
+      dsym_objfile_sp = ObjectFile::FindPlugin(
+          module_sp, &dsym_fspec, 0, dsym_fspec.GetByteSize(),
+          dsym_file_data_sp, dsym_file_data_offset);
       if (UUIDsMatch(module_sp.get(), dsym_objfile_sp.get(), feedback_strm)) {
         // We need a XML parser if we hope to parse a plist...
         if (XMLDocument::XMLEnabled()) {
@@ -173,8 +172,8 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
                   resources[strlen("/Contents/Resources/")] = '\0';
                   snprintf(dsym_uuid_plist_path, sizeof(dsym_uuid_plist_path),
                            "%s%s.plist", dsym_path, uuid_str.c_str());
-                  FileSpec dsym_uuid_plist_spec(dsym_uuid_plist_path);
-                  if (FileSystem::Instance().Exists(dsym_uuid_plist_spec)) {
+                  FileSpec dsym_uuid_plist_spec(dsym_uuid_plist_path, false);
+                  if (dsym_uuid_plist_spec.Exists()) {
                     ApplePropertyList plist(dsym_uuid_plist_path);
                     if (plist) {
                       std::string DBGBuildSourcePath;
@@ -237,15 +236,14 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
                                 // object is DBGSourcePath
                                 std::string DBGSourcePath =
                                     object->GetStringValue();
-                                if (!new_style_source_remapping_dictionary &&
+                                if (new_style_source_remapping_dictionary ==
+                                        false &&
                                     !original_DBGSourcePath_value.empty()) {
                                   DBGSourcePath = original_DBGSourcePath_value;
                                 }
                                 if (DBGSourcePath[0] == '~') {
                                   FileSpec resolved_source_path(
-                                      DBGSourcePath.c_str());
-                                  FileSystem::Instance().Resolve(
-                                      resolved_source_path);
+                                      DBGSourcePath.c_str(), true);
                                   DBGSourcePath =
                                       resolved_source_path.GetPath();
                                 }
@@ -258,8 +256,8 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
                                 // Add this as another option in addition to
                                 // the full source path remap.
                                 if (do_truncate_remapping_names) {
-                                  FileSpec build_path(key.AsCString());
-                                  FileSpec source_path(DBGSourcePath.c_str());
+                                  FileSpec build_path(key.AsCString(), false);
+                                  FileSpec source_path(DBGSourcePath.c_str(), false);
                                   build_path.RemoveLastPathComponent();
                                   build_path.RemoveLastPathComponent();
                                   source_path.RemoveLastPathComponent();
@@ -282,8 +280,8 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
                       if (!DBGBuildSourcePath.empty() &&
                           !DBGSourcePath.empty()) {
                         if (DBGSourcePath[0] == '~') {
-                          FileSpec resolved_source_path(DBGSourcePath.c_str());
-                          FileSystem::Instance().Resolve(resolved_source_path);
+                          FileSpec resolved_source_path(DBGSourcePath.c_str(),
+                                                        true);
                           DBGSourcePath = resolved_source_path.GetPath();
                         }
                         module_sp->GetSourceMappingList().Append(

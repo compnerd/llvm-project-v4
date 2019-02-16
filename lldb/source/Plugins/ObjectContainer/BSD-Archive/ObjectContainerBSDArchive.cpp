@@ -33,6 +33,7 @@ typedef struct ar_hdr {
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Utility/ArchSpec.h"
+#include "lldb/Utility/DataBufferLLVM.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/Timer.h"
 
@@ -207,7 +208,7 @@ ObjectContainerBSDArchive::Archive::FindCachedArchive(
   while (pos != archive_map.end() && pos->first == file) {
     bool match = true;
     if (arch.IsValid() &&
-        !pos->second->GetArchitecture().IsCompatibleMatch(arch))
+        pos->second->GetArchitecture().IsCompatibleMatch(arch) == false)
       match = false;
     else if (file_offset != LLDB_INVALID_OFFSET &&
              pos->second->GetFileOffset() != file_offset)
@@ -312,7 +313,7 @@ ObjectContainer *ObjectContainerBSDArchive::CreateInstance(
       // file gets updated by a new build while this .a file is being used for
       // debugging
       DataBufferSP archive_data_sp =
-          FileSystem::Instance().CreateDataBuffer(*file, length, file_offset);
+          DataBufferLLVM::CreateSliceFromPath(file->GetPath(), length, file_offset);
       if (!archive_data_sp)
         return nullptr;
 
@@ -460,14 +461,14 @@ size_t ObjectContainerBSDArchive::GetModuleSpecifications(
     return 0;
 
   const size_t initial_count = specs.GetSize();
-  llvm::sys::TimePoint<> file_mod_time = FileSystem::Instance().GetModificationTime(file);
+  llvm::sys::TimePoint<> file_mod_time = FileSystem::GetModificationTime(file);
   Archive::shared_ptr archive_sp(
       Archive::FindCachedArchive(file, ArchSpec(), file_mod_time, file_offset));
   bool set_archive_arch = false;
   if (!archive_sp) {
     set_archive_arch = true;
     data_sp =
-        FileSystem::Instance().CreateDataBuffer(file, file_size, file_offset);
+        DataBufferLLVM::CreateSliceFromPath(file.GetPath(), file_size, file_offset);
     if (data_sp) {
       data.SetData(data_sp, 0, data_sp->GetByteSize());
       archive_sp = Archive::ParseAndCacheArchiveForFile(

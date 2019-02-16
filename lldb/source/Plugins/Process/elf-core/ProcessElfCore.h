@@ -17,9 +17,13 @@
 #ifndef liblldb_ProcessElfCore_h_
 #define liblldb_ProcessElfCore_h_
 
+// C Includes
+// C++ Includes
 #include <list>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Status.h"
@@ -166,7 +170,7 @@ private:
 
   // Parse thread(s) data structures(prstatus, prpsinfo) from given NOTE segment
   llvm::Error ParseThreadContextsFromNoteSegment(
-      const elf::ELFProgramHeader &segment_header,
+      const elf::ELFProgramHeader *segment_header,
       lldb_private::DataExtractor segment_data);
 
   // Returns number of thread contexts stored in the core file
@@ -174,7 +178,7 @@ private:
 
   // Parse a contiguous address range of the process from LOAD segment
   lldb::addr_t
-  AddAddressRangeFromLoadSegment(const elf::ELFProgramHeader &header);
+  AddAddressRangeFromLoadSegment(const elf::ELFProgramHeader *header);
 
   llvm::Expected<std::vector<lldb_private::CoreNote>>
   parseSegment(const lldb_private::DataExtractor &segment);

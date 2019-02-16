@@ -11,7 +11,7 @@
 
 // Third party headers:
 #include "lldb/API/SBCommandReturnObject.h"
-#include <inttypes.h>
+#include <inttypes.h> // For PRIx64
 
 // In-house headers:
 #include "MICmdArgValString.h"

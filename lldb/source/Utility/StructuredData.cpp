@@ -12,14 +12,14 @@
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/JSON.h"
 #include "lldb/Utility/Status.h"
-#include "lldb/Utility/Stream.h"
+#include "lldb/Utility/Stream.h" // for Stream
 #include "lldb/Utility/StreamString.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/STLExtras.h" // for make_unique
 #include "llvm/Support/MemoryBuffer.h"
 #include <cerrno>
 #include <cstdlib>
 #include <inttypes.h>
-#include <limits>
+#include <limits> // for numeric_limits
 
 using namespace lldb_private;
 
@@ -33,6 +33,11 @@ static StructuredData::ObjectSP ParseJSONArray(JSONParser &json_parser);
 StructuredData::ObjectSP
 StructuredData::ParseJSONFromFile(const FileSpec &input_spec, Status &error) {
   StructuredData::ObjectSP return_sp;
+  if (!input_spec.Exists()) {
+    error.SetErrorStringWithFormatv("input file {0} does not exist.",
+                                    input_spec);
+    return return_sp;
+  }
 
   auto buffer_or_error = llvm::MemoryBuffer::getFile(input_spec.GetPath());
   if (!buffer_or_error) {
@@ -144,7 +149,7 @@ static StructuredData::ObjectSP ParseJSONValue(JSONParser &json_parser) {
 }
 
 StructuredData::ObjectSP StructuredData::ParseJSON(std::string json_text) {
-  JSONParser json_parser(json_text);
+  JSONParser json_parser(json_text.c_str());
   StructuredData::ObjectSP object_sp = ParseJSONValue(json_parser);
   return object_sp;
 }
@@ -169,11 +174,11 @@ StructuredData::Object::GetObjectForDotSeparatedPath(llvm::StringRef path) {
 
   if (this->GetType() == lldb::eStructuredDataTypeArray) {
     std::pair<llvm::StringRef, llvm::StringRef> match = path.split('[');
-    if (match.second.empty()) {
+    if (match.second.size() == 0) {
       return this->shared_from_this();
     }
     errno = 0;
-    uint64_t val = strtoul(match.second.str().c_str(), nullptr, 10);
+    uint64_t val = strtoul(match.second.str().c_str(), NULL, 10);
     if (errno == 0) {
       return this->GetAsArray()->GetItemAtIndex(val);
     }
@@ -226,7 +231,7 @@ void StructuredData::Float::Dump(Stream &s, bool pretty_print) const {
 }
 
 void StructuredData::Boolean::Dump(Stream &s, bool pretty_print) const {
-  if (m_value)
+  if (m_value == true)
     s.PutCString("true");
   else
     s.PutCString("false");

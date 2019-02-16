@@ -42,12 +42,6 @@ protected:
   const MemoryRegionInfoListImpl &operator*() const;
 
 private:
-  friend class SBProcess;
-
-  lldb_private::MemoryRegionInfos &ref();
-
-  const lldb_private::MemoryRegionInfos &ref() const;
-
   std::unique_ptr<MemoryRegionInfoListImpl> m_opaque_ap;
 };
 

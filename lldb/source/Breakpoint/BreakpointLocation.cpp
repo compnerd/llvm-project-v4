@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Breakpoint/BreakpointID.h"
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
@@ -255,6 +259,7 @@ bool BreakpointLocation::ConditionSaysStop(ExecutionContext &exe_ctx,
       language = comp_unit->GetLanguage();
 
     m_user_expression_sp.reset(GetTarget().GetUserExpressionForLanguage(
+        exe_ctx,
         condition_text, llvm::StringRef(), language, Expression::eResultTypeAny,
         EvaluateExpressionOptions(), error));
     if (error.Fail()) {
@@ -267,7 +272,7 @@ bool BreakpointLocation::ConditionSaysStop(ExecutionContext &exe_ctx,
 
     if (!m_user_expression_sp->Parse(diagnostics, exe_ctx,
                                      eExecutionPolicyOnlyWhenNeeded, true,
-                                     false)) {
+                                     false, 0)) {
       error.SetErrorStringWithFormat(
           "Couldn't parse conditional expression:\n%s",
           diagnostics.GetString().c_str());

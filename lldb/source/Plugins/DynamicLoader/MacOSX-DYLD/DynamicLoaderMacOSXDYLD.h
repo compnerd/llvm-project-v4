@@ -21,13 +21,17 @@
 #ifndef liblldb_DynamicLoaderMacOSXDYLD_h_
 #define liblldb_DynamicLoaderMacOSXDYLD_h_
 
+// C Includes
+// C++ Includes
 #include <mutex>
 #include <vector>
 
-#include "lldb/Host/SafeMachO.h"
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/DynamicLoader.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/SafeMachO.h"
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/Utility/UUID.h"
 

@@ -10,8 +10,12 @@
 #ifndef liblldb_ClangUserExpression_h_
 #define liblldb_ClangUserExpression_h_
 
+// C Includes
+// C++ Includes
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "ASTResultSynthesizer.h"
 #include "ASTStructExtractor.h"
 #include "ClangExpressionDeclMap.h"
@@ -24,6 +28,7 @@
 #include "lldb/Expression/LLVMUserExpression.h"
 #include "lldb/Expression/Materializer.h"
 #include "lldb/Target/ExecutionContext.h"
+#include "lldb/Target/Target.h"
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-private.h"
 
@@ -42,6 +47,15 @@ namespace lldb_private {
 class ClangUserExpression : public LLVMUserExpression {
 public:
   enum { kDefaultTimeout = 500000u };
+
+  enum {
+    eLanguageFlagNeedsObjectPointer = 1 << 0,
+    eLanguageFlagEnforceValidObject = 1 << 1,
+    eLanguageFlagInCPlusPlusMethod = 1 << 2,
+    eLanguageFlagInObjectiveCMethod = 1 << 3,
+    eLanguageFlagInStaticMethod = 1 << 4,
+    eLanguageFlagConstObject = 1 << 5
+  };
 
   class ClangUserExpressionHelper : public ClangExpressionHelper {
   public:
@@ -106,6 +120,9 @@ public:
   /// @param[in] desired_type
   ///     If not eResultTypeAny, the type to use for the expression
   ///     result.
+  ///
+  /// @param[in] options
+  ///     Additional options for the expression.
   //------------------------------------------------------------------
   ClangUserExpression(ExecutionContextScope &exe_scope, llvm::StringRef expr,
                       llvm::StringRef prefix, lldb::LanguageType language,
@@ -137,10 +154,8 @@ public:
   //------------------------------------------------------------------
   bool Parse(DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx,
              lldb_private::ExecutionPolicy execution_policy,
-             bool keep_result_in_memory, bool generate_debug_info) override;
-
-  bool Complete(ExecutionContext &exe_ctx, CompletionRequest &request,
-                unsigned complete_pos) override;
+             bool keep_result_in_memory, bool generate_debug_info,
+             uint32_t line_offset = 0) override;
 
   ExpressionTypeSystemHelper *GetTypeSystemHelper() override {
     return &m_type_system_helper;
@@ -173,8 +188,8 @@ private:
                     lldb::addr_t struct_address,
                     DiagnosticManager &diagnostic_manager) override;
 
-  void UpdateLanguageForExpr(DiagnosticManager &diagnostic_manager,
-                             ExecutionContext &exe_ctx);
+  llvm::Optional<lldb::LanguageType> GetLanguageForExpr(
+      DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx);
   bool SetupPersistentState(DiagnosticManager &diagnostic_manager,
                                    ExecutionContext &exe_ctx);
   bool PrepareForParsing(DiagnosticManager &diagnostic_manager,
@@ -197,13 +212,6 @@ private:
     lldb::TargetSP m_target_sp;
   };
 
-  /// The language type of the current expression.
-  lldb::LanguageType m_expr_lang = lldb::eLanguageTypeUnknown;
-
-  /// The absolute character position in the transformed source code where the
-  /// user code (as typed by the user) starts. If the variable is empty, then we
-  /// were not able to calculate this position.
-  llvm::Optional<size_t> m_user_expression_start_pos;
   ResultDelegate m_result_delegate;
 };
 

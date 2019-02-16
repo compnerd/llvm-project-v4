@@ -10,8 +10,7 @@
 #include "lldb/Host/PseudoTerminal.h"
 #include "lldb/Host/Config.h"
 
-#include "llvm/Support/Errno.h"
-
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,14 +25,6 @@ int posix_openpt(int flags);
 #endif
 
 using namespace lldb_private;
-
-//----------------------------------------------------------------------
-// Write string describing error number
-//----------------------------------------------------------------------
-static void ErrnoToStr(char *error_str, size_t error_len) {
-  std::string strerror = llvm::sys::StrError();
-  ::snprintf(error_str, error_len, "%s", strerror.c_str());
-}
 
 //----------------------------------------------------------------------
 // PseudoTerminal constructor
@@ -97,14 +88,14 @@ bool PseudoTerminal::OpenFirstAvailableMaster(int oflag, char *error_str,
   m_master_fd = ::posix_openpt(oflag);
   if (m_master_fd < 0) {
     if (error_str)
-      ErrnoToStr(error_str, error_len);
+      ::strerror_r(errno, error_str, error_len);
     return false;
   }
 
   // Grant access to the slave pseudo terminal
   if (::grantpt(m_master_fd) < 0) {
     if (error_str)
-      ErrnoToStr(error_str, error_len);
+      ::strerror_r(errno, error_str, error_len);
     CloseMasterFileDescriptor();
     return false;
   }
@@ -112,7 +103,7 @@ bool PseudoTerminal::OpenFirstAvailableMaster(int oflag, char *error_str,
   // Clear the lock flag on the slave pseudo terminal
   if (::unlockpt(m_master_fd) < 0) {
     if (error_str)
-      ErrnoToStr(error_str, error_len);
+      ::strerror_r(errno, error_str, error_len);
     CloseMasterFileDescriptor();
     return false;
   }
@@ -152,7 +143,7 @@ bool PseudoTerminal::OpenSlave(int oflag, char *error_str, size_t error_len) {
 
   if (m_slave_fd < 0) {
     if (error_str)
-      ErrnoToStr(error_str, error_len);
+      ::strerror_r(errno, error_str, error_len);
     return false;
   }
 
@@ -184,7 +175,7 @@ const char *PseudoTerminal::GetSlaveName(char *error_str,
   const char *slave_name = ::ptsname(m_master_fd);
 
   if (error_str && slave_name == nullptr)
-    ErrnoToStr(error_str, error_len);
+    ::strerror_r(errno, error_str, error_len);
 
   return slave_name;
 }
@@ -222,7 +213,7 @@ lldb::pid_t PseudoTerminal::Fork(char *error_str, size_t error_len) {
     if (pid < 0) {
       // Fork failed
       if (error_str)
-        ErrnoToStr(error_str, error_len);
+        ::strerror_r(errno, error_str, error_len);
     } else if (pid == 0) {
       // Child Process
       ::setsid();
@@ -238,23 +229,23 @@ lldb::pid_t PseudoTerminal::Fork(char *error_str, size_t error_len) {
         // Acquire the controlling terminal
         if (::ioctl(m_slave_fd, TIOCSCTTY, (char *)0) < 0) {
           if (error_str)
-            ErrnoToStr(error_str, error_len);
+            ::strerror_r(errno, error_str, error_len);
         }
 #endif
         // Duplicate all stdio file descriptors to the slave pseudo terminal
         if (::dup2(m_slave_fd, STDIN_FILENO) != STDIN_FILENO) {
           if (error_str && !error_str[0])
-            ErrnoToStr(error_str, error_len);
+            ::strerror_r(errno, error_str, error_len);
         }
 
         if (::dup2(m_slave_fd, STDOUT_FILENO) != STDOUT_FILENO) {
           if (error_str && !error_str[0])
-            ErrnoToStr(error_str, error_len);
+            ::strerror_r(errno, error_str, error_len);
         }
 
         if (::dup2(m_slave_fd, STDERR_FILENO) != STDERR_FILENO) {
           if (error_str && !error_str[0])
-            ErrnoToStr(error_str, error_len);
+            ::strerror_r(errno, error_str, error_len);
         }
       }
     } else {

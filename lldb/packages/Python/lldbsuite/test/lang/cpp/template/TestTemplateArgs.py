@@ -47,6 +47,7 @@ class TemplateArgsTestCase(TestBase):
         # Get frame for current thread
         return thread.GetSelectedFrame()
 
+    @expectedFailureAll(oslist=["windows"])
     def test_integer_args(self):
         frame = self.prepareProcess()
 
@@ -110,9 +111,12 @@ class TemplateArgsTestCase(TestBase):
         self.assertTrue(f4.GetType().GetName() == 'int')
         self.assertTrue(f4.GetValue() == '42')
 
+
     # Gcc does not generate the necessary DWARF attribute for enum template
     # parameters.
     @expectedFailureAll(bugnumber="llvm.org/pr28354", compiler="gcc")
+    @expectedFailureAll(oslist=["windows"])
+    @expectedFailureAll
     def test_enum_args(self):
         frame = self.prepareProcess()
 

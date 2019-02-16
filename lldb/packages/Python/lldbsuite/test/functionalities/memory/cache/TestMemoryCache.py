@@ -24,7 +24,7 @@ class MemoryCacheTestCase(TestBase):
         # Find the line number to break inside main().
         self.line = line_number('main.cpp', '// Set break point at this line.')
 
-    @skipIfWindows # This is flakey on Windows: llvm.org/pr38373
+    @expectedFlakeyOS(oslist=["windows"])
     def test_memory_cache(self):
         """Test the MemoryCache class with a sequence of 'memory read' and 'memory write' operations."""
         self.build()

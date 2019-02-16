@@ -9,71 +9,83 @@
 
 #include "lldb/Core/Debugger.h"
 
-#include "lldb/Breakpoint/Breakpoint.h"
+// C Includes
+// C++ Includes
+#include <map>
+#include <mutex>
+
+// Other libraries and framework includes
+#include "swift/Basic/Version.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Threading.h"
+
+// Project includes
+#include "lldb/Breakpoint/BreakpointLocation.h"
+#include "lldb/Breakpoint/Breakpoint.h" // for Breakpoint, Brea...
+#include "lldb/Core/Event.h"            // for Event, EventData...
 #include "lldb/Core/FormatEntity.h"
-#include "lldb/Core/Mangled.h"
-#include "lldb/Core/ModuleList.h"
+#include "lldb/Core/Listener.h" // for Listener
+#include "lldb/Core/Mangled.h"  // for Mangled
+#include "lldb/Core/ModuleList.h"  // for Mangled
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/State.h"
 #include "lldb/Core/StreamAsynchronousIO.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/Expression/REPL.h"
-#include "lldb/Host/File.h"
-#include "lldb/Host/FileSystem.h"
+#include "lldb/Host/File.h" // for File, File::kInv...
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Host/Terminal.h"
 #include "lldb/Host/ThreadLauncher.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
-#include "lldb/Interpreter/OptionValue.h"
+#include "lldb/Interpreter/CommandReturnObject.h"
+#include "lldb/Interpreter/OptionValue.h" // for OptionValue, Opt...
 #include "lldb/Interpreter/OptionValueProperties.h"
 #include "lldb/Interpreter/OptionValueSInt64.h"
 #include "lldb/Interpreter/OptionValueString.h"
-#include "lldb/Interpreter/Property.h"
-#include "lldb/Interpreter/ScriptInterpreter.h"
+#include "lldb/Interpreter/Property.h"          // for PropertyDefinition
+#include "lldb/Interpreter/ScriptInterpreter.h" // for ScriptInterpreter
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/Symbol.h"
-#include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Symbol/SymbolContext.h" // for SymbolContext
+#include "lldb/Target/Language.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/StructuredDataPlugin.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/TargetList.h"
 #include "lldb/Target/Thread.h"
-#include "lldb/Target/ThreadList.h"
+#include "lldb/Target/ThreadList.h" // for ThreadList
 #include "lldb/Utility/AnsiTerminal.h"
-#include "lldb/Utility/Event.h"
-#include "lldb/Utility/Listener.h"
-#include "lldb/Utility/Log.h"
-#include "lldb/Utility/Reproducer.h"
-#include "lldb/Utility/State.h"
-#include "lldb/Utility/Stream.h"
+#include "lldb/Utility/Log.h"    // for LLDB_LOG_OPTION_...
+#include "lldb/Utility/Stream.h" // for Stream
 #include "lldb/Utility/StreamCallback.h"
 #include "lldb/Utility/StreamString.h"
 
 #if defined(_WIN32)
-#include "lldb/Host/windows/PosixApi.h"
-#include "lldb/Host/windows/windows.h"
+#include "lldb/Host/windows/PosixApi.h" // for PATH_MAX
 #endif
 
-#include "llvm/ADT/None.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/None.h"      // for None
+#include "llvm/ADT/STLExtras.h" // for make_unique
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/iterator.h"
+#include "llvm/ADT/iterator.h" // for iterator_facade_...
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Process.h"
 #include "llvm/Support/Threading.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/raw_ostream.h" // for raw_fd_ostream
 
-#include <list>
-#include <memory>
+#include <list>   // for list
+#include <memory> // for make_shared
 #include <mutex>
-#include <set>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string>
-#include <system_error>
+#include <set>          // for set
+#include <stdio.h>      // for size_t, NULL
+#include <stdlib.h>     // for getenv
+#include <string.h>     // for strcmp
+#include <string>       // for string
+#include <system_error> // for error_code
 
 namespace lldb_private {
 class Address;
@@ -81,6 +93,69 @@ class Address;
 
 using namespace lldb;
 using namespace lldb_private;
+
+inline std::string FormatAnsiTerminalCodes(const char *format,
+                                           bool do_color = true) {
+  // Convert "${ansi.XXX}" tokens to ansi values or clear them if do_color is
+  // false.
+  static const struct {
+    const char *name;
+    const char *value;
+  } g_color_tokens[] = {
+      {"fg.black}", ANSI_ESCAPE1(ANSI_FG_COLOR_BLACK)},
+      {"fg.red}", ANSI_ESCAPE1(ANSI_FG_COLOR_RED)},
+      {"fg.green}", ANSI_ESCAPE1(ANSI_FG_COLOR_GREEN)},
+      {"fg.yellow}", ANSI_ESCAPE1(ANSI_FG_COLOR_YELLOW)},
+      {"fg.blue}", ANSI_ESCAPE1(ANSI_FG_COLOR_BLUE)},
+      {"fg.purple}", ANSI_ESCAPE1(ANSI_FG_COLOR_PURPLE)},
+      {"fg.cyan}", ANSI_ESCAPE1(ANSI_FG_COLOR_CYAN)},
+      {"fg.white}", ANSI_ESCAPE1(ANSI_FG_COLOR_WHITE)},
+      {"bg.black}", ANSI_ESCAPE1(ANSI_BG_COLOR_BLACK)},
+      {"bg.red}", ANSI_ESCAPE1(ANSI_BG_COLOR_RED)},
+      {"bg.green}", ANSI_ESCAPE1(ANSI_BG_COLOR_GREEN)},
+      {"bg.yellow}", ANSI_ESCAPE1(ANSI_BG_COLOR_YELLOW)},
+      {"bg.blue}", ANSI_ESCAPE1(ANSI_BG_COLOR_BLUE)},
+      {"bg.purple}", ANSI_ESCAPE1(ANSI_BG_COLOR_PURPLE)},
+      {"bg.cyan}", ANSI_ESCAPE1(ANSI_BG_COLOR_CYAN)},
+      {"bg.white}", ANSI_ESCAPE1(ANSI_BG_COLOR_WHITE)},
+      {"normal}", ANSI_ESCAPE1(ANSI_CTRL_NORMAL)},
+      {"bold}", ANSI_ESCAPE1(ANSI_CTRL_BOLD)},
+      {"faint}", ANSI_ESCAPE1(ANSI_CTRL_FAINT)},
+      {"italic}", ANSI_ESCAPE1(ANSI_CTRL_ITALIC)},
+      {"underline}", ANSI_ESCAPE1(ANSI_CTRL_UNDERLINE)},
+      {"slow-blink}", ANSI_ESCAPE1(ANSI_CTRL_SLOW_BLINK)},
+      {"fast-blink}", ANSI_ESCAPE1(ANSI_CTRL_FAST_BLINK)},
+      {"negative}", ANSI_ESCAPE1(ANSI_CTRL_IMAGE_NEGATIVE)},
+      {"conceal}", ANSI_ESCAPE1(ANSI_CTRL_CONCEAL)},
+      {"crossed-out}", ANSI_ESCAPE1(ANSI_CTRL_CROSSED_OUT)},
+  };
+  static const char tok_hdr[] = "${ansi.";
+
+  std::string fmt;
+  for (const char *p = format; *p; ++p) {
+    const char *tok_start = strstr(p, tok_hdr);
+    if (!tok_start) {
+      fmt.append(p, strlen(p));
+      break;
+    }
+
+    fmt.append(p, tok_start - p);
+    p = tok_start;
+
+    const char *tok_str = tok_start + sizeof(tok_hdr) - 1;
+    for (size_t i = 0; i < sizeof(g_color_tokens) / sizeof(g_color_tokens[0]);
+         ++i) {
+      if (!strncmp(tok_str, g_color_tokens[i].name,
+                   strlen(g_color_tokens[i].name))) {
+        if (do_color)
+          fmt.append(g_color_tokens[i].value);
+        p = tok_str + strlen(g_color_tokens[i].name) - 1;
+        break;
+      }
+    }
+  }
+  return fmt;
+}
 
 static lldb::user_id_t g_unique_id = 1;
 static size_t g_debugger_event_thread_stack_bytes = 8 * 1024 * 1024;
@@ -167,8 +242,8 @@ static constexpr OptionEnumValueElement g_language_enumerators[] = {
 //      address <+offset>:
 #define DEFAULT_DISASSEMBLY_FORMAT                                             \
   "{${function.initial-function}{${module.file.basename}`}{${function.name-"   \
-  "without-args}}:\\n}{${function.changed}\\n{${module.file.basename}`}{${"    \
-  "function.name-without-args}}:\\n}{${current-pc-arrow} "                     \
+  "without-args}}:\n}{${function.changed}\n{${module.file.basename}`}{${"      \
+  "function.name-without-args}}:\n}{${current-pc-arrow} "                      \
   "}${addr-file-or-load}{ "                                                    \
   "<${function.concrete-only-addr-offset-no-padding}>}: "
 
@@ -413,11 +488,6 @@ void Debugger::SetPrompt(llvm::StringRef p) {
   GetCommandInterpreter().UpdatePrompt(new_prompt);
 }
 
-llvm::StringRef Debugger::GetReproducerPath() const {
-  auto &r = repro::Reproducer::Instance();
-  return r.GetReproducerPath().GetCString();
-}
-
 const FormatEntity::Entry *Debugger::GetThreadFormat() const {
   const uint32_t idx = ePropertyThreadFormat;
   return m_collection_sp->GetPropertyAtIndexAsFormatEntity(nullptr, idx);
@@ -611,16 +681,16 @@ bool Debugger::LoadPlugin(const FileSpec &spec, Status &error) {
   return false;
 }
 
-static FileSystem::EnumerateDirectoryResult
+static FileSpec::EnumerateDirectoryResult
 LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
-                   llvm::StringRef path) {
+                   const FileSpec &file_spec) {
   Status error;
 
   static ConstString g_dylibext(".dylib");
   static ConstString g_solibext(".so");
 
   if (!baton)
-    return FileSystem::eEnumerateDirectoryResultQuit;
+    return FileSpec::eEnumerateDirectoryResultQuit;
 
   Debugger *debugger = (Debugger *)baton;
 
@@ -631,18 +701,18 @@ LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
   // file type information.
   if (ft == fs::file_type::regular_file || ft == fs::file_type::symlink_file ||
       ft == fs::file_type::type_unknown) {
-    FileSpec plugin_file_spec(path);
-    FileSystem::Instance().Resolve(plugin_file_spec);
+    FileSpec plugin_file_spec(file_spec);
+    plugin_file_spec.ResolvePath();
 
     if (plugin_file_spec.GetFileNameExtension() != g_dylibext &&
         plugin_file_spec.GetFileNameExtension() != g_solibext) {
-      return FileSystem::eEnumerateDirectoryResultNext;
+      return FileSpec::eEnumerateDirectoryResultNext;
     }
 
     Status plugin_load_error;
     debugger->LoadPlugin(plugin_file_spec, plugin_load_error);
 
-    return FileSystem::eEnumerateDirectoryResultNext;
+    return FileSpec::eEnumerateDirectoryResultNext;
   } else if (ft == fs::file_type::directory_file ||
              ft == fs::file_type::symlink_file ||
              ft == fs::file_type::type_unknown) {
@@ -650,10 +720,10 @@ LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
     // also do this for unknown as sometimes the directory enumeration might be
     // enumerating a file system that doesn't have correct file type
     // information.
-    return FileSystem::eEnumerateDirectoryResultEnter;
+    return FileSpec::eEnumerateDirectoryResultEnter;
   }
 
-  return FileSystem::eEnumerateDirectoryResultNext;
+  return FileSpec::eEnumerateDirectoryResultNext;
 }
 
 void Debugger::InstanceInitialize() {
@@ -662,20 +732,16 @@ void Debugger::InstanceInitialize() {
   const bool find_other = true;
   char dir_path[PATH_MAX];
   if (FileSpec dir_spec = HostInfo::GetSystemPluginDir()) {
-    if (FileSystem::Instance().Exists(dir_spec) &&
-        dir_spec.GetPath(dir_path, sizeof(dir_path))) {
-      FileSystem::Instance().EnumerateDirectory(dir_path, find_directories,
-                                                find_files, find_other,
-                                                LoadPluginCallback, this);
+    if (dir_spec.Exists() && dir_spec.GetPath(dir_path, sizeof(dir_path))) {
+      FileSpec::EnumerateDirectory(dir_path, find_directories, find_files,
+                                   find_other, LoadPluginCallback, this);
     }
   }
 
   if (FileSpec dir_spec = HostInfo::GetUserPluginDir()) {
-    if (FileSystem::Instance().Exists(dir_spec) &&
-        dir_spec.GetPath(dir_path, sizeof(dir_path))) {
-      FileSystem::Instance().EnumerateDirectory(dir_path, find_directories,
-                                                find_files, find_other,
-                                                LoadPluginCallback, this);
+    if (dir_spec.Exists() && dir_spec.GetPath(dir_path, sizeof(dir_path))) {
+      FileSpec::EnumerateDirectory(dir_path, find_directories, find_files,
+                                   find_other, LoadPluginCallback, this);
     }
   }
 
@@ -813,12 +879,6 @@ Debugger::Debugger(lldb::LogOutputCallback log_callback, void *baton)
   // Turn off use-color if we don't write to a terminal with color support.
   if (!m_output_file_sp->GetFile().GetIsTerminalWithColors())
     SetUseColor(false);
-
-#if defined(_WIN32) && defined(ENABLE_VIRTUAL_TERMINAL_PROCESSING)
-  // Enabling use of ANSI color codes because LLDB is using them to highlight
-  // text.
-  llvm::sys::Process::UseANSIEscapeCodes(true);
-#endif
 }
 
 Debugger::~Debugger() { Clear(); }
@@ -1119,6 +1179,42 @@ void Debugger::PushIOHandler(const IOHandlerSP &reader_sp,
   }
 }
 
+// Pop 2 IOHandlers and don't active the second one after the first is popped
+uint32_t Debugger::PopIOHandlers(const IOHandlerSP &reader1_sp,
+                                 const IOHandlerSP &reader2_sp) {
+  uint32_t result = 0;
+
+  std::lock_guard<std::recursive_mutex> guard(m_input_reader_stack.GetMutex());
+
+  // The reader on the stop of the stack is done, so let the next
+  // read on the stack refresh its prompt and if there is one...
+  if (!m_input_reader_stack.IsEmpty()) {
+    IOHandlerSP reader_sp(m_input_reader_stack.Top());
+
+    if (!reader1_sp || reader1_sp.get() == reader_sp.get()) {
+      reader_sp->Deactivate();
+      reader_sp->Cancel();
+      m_input_reader_stack.Pop();
+      ++result;
+
+      reader_sp = m_input_reader_stack.Top();
+
+      if (reader2_sp && reader2_sp.get() == reader_sp.get()) {
+        m_input_reader_stack.Pop();
+        ++result;
+        reader_sp = m_input_reader_stack.Top();
+      }
+
+      if (reader_sp)
+        reader_sp->Activate();
+
+    } else if (PopIOHandler(reader2_sp)) {
+      ++result;
+    }
+  }
+  return result;
+}
+
 bool Debugger::PopIOHandler(const IOHandlerSP &pop_reader_sp) {
   if (!pop_reader_sp)
     return false;
@@ -1411,6 +1507,7 @@ void Debugger::HandleProcessEvent(const EventSP &event_sp) {
 
   if (!gui_enabled) {
     bool pop_process_io_handler = false;
+    bool pop_command_interpreter = false;
     assert(process_sp);
 
     bool state_is_stopped = false;
@@ -1430,7 +1527,8 @@ void Debugger::HandleProcessEvent(const EventSP &event_sp) {
     // Display running state changes first before any STDIO
     if (got_state_changed && !state_is_stopped) {
       Process::HandleProcessStateChangedEvent(event_sp, output_stream_sp.get(),
-                                              pop_process_io_handler);
+                                              pop_process_io_handler,
+                                              pop_command_interpreter);
     }
 
     // Now display and STDOUT
@@ -1476,14 +1574,15 @@ void Debugger::HandleProcessEvent(const EventSP &event_sp) {
     // Now display any stopped state changes after any STDIO
     if (got_state_changed && state_is_stopped) {
       Process::HandleProcessStateChangedEvent(event_sp, output_stream_sp.get(),
-                                              pop_process_io_handler);
+                                              pop_process_io_handler,
+                                              pop_command_interpreter);
     }
 
     output_stream_sp->Flush();
     error_stream_sp->Flush();
 
     if (pop_process_io_handler)
-      process_sp->PopProcessIOHandler();
+      process_sp->PopProcessIOHandler(pop_command_interpreter);
   }
 }
 

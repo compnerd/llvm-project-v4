@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "llvm/ADT/StringRef.h"
 
+// Project includes
 #include "CommandObjectCommands.h"
 #include "CommandObjectHelp.h"
 #include "lldb/Core/Debugger.h"
@@ -304,8 +308,7 @@ protected:
       return false;
     }
 
-    FileSpec cmd_file(command[0].ref);
-    FileSystem::Instance().Resolve(cmd_file);
+    FileSpec cmd_file(command[0].ref, true);
     ExecutionContext *exe_ctx = nullptr; // Just use the default context.
 
     // If any options were set, then use them
@@ -1013,6 +1016,20 @@ protected:
         m_interpreter.AddCommand(cmd_sp->GetCommandName(), cmd_sp, true);
       }
     }
+  }
+
+  bool IOHandlerIsInputComplete(IOHandler &io_handler,
+                                StringList &lines) override {
+    // An empty lines is used to indicate the end of input
+    const size_t num_lines = lines.GetSize();
+    if (num_lines > 0 && lines[num_lines - 1].empty()) {
+      // Remove the last empty line from "lines" so it doesn't appear
+      // in our resulting input and return true to indicate we are done
+      // getting lines
+      lines.PopBack();
+      return true;
+    }
+    return false;
   }
 
   bool DoExecute(Args &command, CommandReturnObject &result) override {

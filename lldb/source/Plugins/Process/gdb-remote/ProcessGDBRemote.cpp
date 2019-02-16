@@ -9,11 +9,12 @@
 
 #include "lldb/Host/Config.h"
 
+// C Includes
 #include <errno.h>
 #include <stdlib.h>
 #ifndef LLDB_DISABLE_POSIX
 #include <netinet/in.h>
-#include <sys/mman.h>
+#include <sys/mman.h> // for mmap
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -21,6 +22,7 @@
 #include <sys/types.h>
 #include <time.h>
 
+// C++ Includes
 #include <algorithm>
 #include <csignal>
 #include <map>
@@ -32,6 +34,7 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/State.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/Value.h"
 #include "lldb/DataFormatters/FormatManager.h"
@@ -65,11 +68,10 @@
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/CleanUp.h"
 #include "lldb/Utility/FileSpec.h"
-#include "lldb/Utility/Reproducer.h"
-#include "lldb/Utility/State.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/Timer.h"
 
+// Project includes
 #include "GDBRemoteRegisterContext.h"
 #include "Plugins/Platform/MacOSX/PlatformRemoteiOS.h"
 #include "Plugins/Process/Utility/GDBRemoteSignals.h"
@@ -86,7 +88,6 @@
 #include "llvm/Support/raw_ostream.h"
 
 #define DEBUGSERVER_BASENAME "debugserver"
-using namespace llvm;
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::process_gdb_remote;
@@ -100,13 +101,12 @@ namespace lldb {
 // and get the packet history dumped to a file.
 void DumpProcessGDBRemotePacketHistory(void *p, const char *path) {
   StreamFile strm;
-  Status error = FileSystem::Instance().Open(strm.GetFile(), FileSpec(path),
-                                             File::eOpenOptionWrite |
-                                                 File::eOpenOptionCanCreate);
+  Status error(strm.GetFile().Open(path, File::eOpenOptionWrite |
+                                             File::eOpenOptionCanCreate));
   if (error.Success())
     ((ProcessGDBRemote *)p)->GetGDBRemote().DumpHistory(strm);
 }
-} // namespace lldb
+}
 
 namespace {
 
@@ -157,42 +157,7 @@ static const ProcessKDPPropertiesSP &GetGlobalPluginProperties() {
   return g_settings_sp;
 }
 
-class ProcessGDBRemoteProvider
-    : public repro::Provider<ProcessGDBRemoteProvider> {
-public:
-  ProcessGDBRemoteProvider(const FileSpec &directory) : Provider(directory) {
-    m_info.name = "gdb-remote";
-    m_info.files.push_back("gdb-remote.yaml");
-  }
-
-  raw_ostream *GetHistoryStream() {
-    FileSpec history_file =
-        GetRoot().CopyByAppendingPathComponent("gdb-remote.yaml");
-
-    std::error_code EC;
-    m_stream_up = llvm::make_unique<raw_fd_ostream>(history_file.GetPath(), EC,
-                                                    sys::fs::OpenFlags::F_None);
-    return m_stream_up.get();
-  }
-
-  void SetCallback(std::function<void()> callback) {
-    m_callback = std::move(callback);
-  }
-
-  void Keep() override { m_callback(); }
-
-  void Discard() override { m_callback(); }
-
-  static char ID;
-
-private:
-  std::function<void()> m_callback;
-  std::unique_ptr<raw_fd_ostream> m_stream_up;
-};
-
-char ProcessGDBRemoteProvider::ID = 0;
-
-} // namespace
+} // anonymous namespace end
 
 // TODO Randomly assigning a port is unsafe.  We should get an unused
 // ephemeral port from the kernel and make sure we reserve it before passing it
@@ -268,7 +233,7 @@ bool ProcessGDBRemote::CanDebug(lldb::TargetSP target_sp,
     case ObjectFile::eTypeUnknown:
       break;
     }
-    return FileSystem::Instance().Exists(exe_module->GetFileSpec());
+    return exe_module->GetFileSpec().Exists();
   }
   // However, if there is no executable module, we return true since we might
   // be preparing to attach.
@@ -293,23 +258,14 @@ ProcessGDBRemote::ProcessGDBRemote(lldb::TargetSP target_sp,
       m_addr_to_mmap_size(), m_thread_create_bp_sp(),
       m_waiting_for_attach(false), m_destroy_tried_resuming(false),
       m_command_sp(), m_breakpoint_pc_offset(0),
-      m_initial_tid(LLDB_INVALID_THREAD_ID), m_replay_mode(false),
-      m_allow_flash_writes(false), m_erased_flash_ranges() {
+      m_initial_tid(LLDB_INVALID_THREAD_ID), m_allow_flash_writes(false),
+      m_erased_flash_ranges() {
   m_async_broadcaster.SetEventName(eBroadcastBitAsyncThreadShouldExit,
                                    "async thread should exit");
   m_async_broadcaster.SetEventName(eBroadcastBitAsyncContinue,
                                    "async thread continue");
   m_async_broadcaster.SetEventName(eBroadcastBitAsyncThreadDidExit,
                                    "async thread did exit");
-
-  if (repro::Generator *g = repro::Reproducer::Instance().GetGenerator()) {
-    ProcessGDBRemoteProvider &provider =
-        g->GetOrCreate<ProcessGDBRemoteProvider>();
-    // Set the history stream to the stream owned by the provider.
-    m_gdb_comm.SetHistoryStream(provider.GetHistoryStream());
-    // Make sure to clear the stream again when we're finished.
-    provider.SetCallback([&]() { m_gdb_comm.SetHistoryStream(nullptr); });
-  }
 
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_ASYNC));
 
@@ -483,10 +439,10 @@ void ProcessGDBRemote::BuildDynamicRegisterInfo(bool force) {
 
   FileSpec target_definition_fspec =
       GetGlobalPluginProperties()->GetTargetDefinitionFile();
-  if (!FileSystem::Instance().Exists(target_definition_fspec)) {
+  if (!target_definition_fspec.Exists()) {
     // If the filename doesn't exist, it may be a ~ not having been expanded -
     // try to resolve it.
-    FileSystem::Instance().Resolve(target_definition_fspec);
+    target_definition_fspec.ResolvePath();
   }
   if (target_definition_fspec) {
     // See if we can get register definitions from a python file
@@ -683,7 +639,7 @@ void ProcessGDBRemote::BuildDynamicRegisterInfo(bool force) {
   m_register_info.Finalize(GetTarget().GetArchitecture());
 }
 
-Status ProcessGDBRemote::WillLaunch(lldb_private::Module *module) {
+Status ProcessGDBRemote::WillLaunch(Module *module) {
   return WillLaunchOrAttach();
 }
 
@@ -799,7 +755,7 @@ Status ProcessGDBRemote::WillLaunchOrAttach() {
 //----------------------------------------------------------------------
 // Process Control
 //----------------------------------------------------------------------
-Status ProcessGDBRemote::DoLaunch(lldb_private::Module *exe_module,
+Status ProcessGDBRemote::DoLaunch(Module *exe_module,
                                   ProcessLaunchInfo &launch_info) {
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PROCESS));
   Status error;
@@ -869,13 +825,13 @@ Status ProcessGDBRemote::DoLaunch(lldb_private::Module *exe_module,
       if (disable_stdio) {
         // set to /dev/null unless redirected to a file above
         if (!stdin_file_spec)
-          stdin_file_spec.SetFile(FileSystem::DEV_NULL,
+          stdin_file_spec.SetFile(FileSystem::DEV_NULL, false,
                                   FileSpec::Style::native);
         if (!stdout_file_spec)
-          stdout_file_spec.SetFile(FileSystem::DEV_NULL,
+          stdout_file_spec.SetFile(FileSystem::DEV_NULL, false,
                                    FileSpec::Style::native);
         if (!stderr_file_spec)
-          stderr_file_spec.SetFile(FileSystem::DEV_NULL,
+          stderr_file_spec.SetFile(FileSystem::DEV_NULL, false,
                                    FileSpec::Style::native);
       } else if (platform_sp && platform_sp->IsHost()) {
         // If the debugserver is local and we aren't disabling STDIO, lets use
@@ -884,7 +840,7 @@ Status ProcessGDBRemote::DoLaunch(lldb_private::Module *exe_module,
         // does a lot of output.
         if ((!stdin_file_spec || !stdout_file_spec || !stderr_file_spec) &&
             pty.OpenFirstAvailableMaster(O_RDWR | O_NOCTTY, NULL, 0)) {
-          FileSpec slave_name{pty.GetSlaveName(NULL, 0)};
+          FileSpec slave_name{pty.GetSlaveName(NULL, 0), false};
 
           if (!stdin_file_spec)
             stdin_file_spec = slave_name;
@@ -1103,10 +1059,9 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
       if (log)
         log->Printf("ProcessGDBRemote::%s gdb-remote had process architecture, "
                     "using %s %s",
-                    __FUNCTION__,
-                    process_arch.GetArchitectureName()
-                        ? process_arch.GetArchitectureName()
-                        : "<null>",
+                    __FUNCTION__, process_arch.GetArchitectureName()
+                                      ? process_arch.GetArchitectureName()
+                                      : "<null>",
                     process_arch.GetTriple().getTriple().c_str()
                         ? process_arch.GetTriple().getTriple().c_str()
                         : "<null>");
@@ -1115,10 +1070,9 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
       if (log)
         log->Printf("ProcessGDBRemote::%s gdb-remote did not have process "
                     "architecture, using gdb-remote host architecture %s %s",
-                    __FUNCTION__,
-                    process_arch.GetArchitectureName()
-                        ? process_arch.GetArchitectureName()
-                        : "<null>",
+                    __FUNCTION__, process_arch.GetArchitectureName()
+                                      ? process_arch.GetArchitectureName()
+                                      : "<null>",
                     process_arch.GetTriple().getTriple().c_str()
                         ? process_arch.GetTriple().getTriple().c_str()
                         : "<null>");
@@ -1130,10 +1084,9 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
         if (log)
           log->Printf(
               "ProcessGDBRemote::%s analyzing target arch, currently %s %s",
-              __FUNCTION__,
-              target_arch.GetArchitectureName()
-                  ? target_arch.GetArchitectureName()
-                  : "<null>",
+              __FUNCTION__, target_arch.GetArchitectureName()
+                                ? target_arch.GetArchitectureName()
+                                : "<null>",
               target_arch.GetTriple().getTriple().c_str()
                   ? target_arch.GetTriple().getTriple().c_str()
                   : "<null>");
@@ -1153,10 +1106,9 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
           if (log)
             log->Printf("ProcessGDBRemote::%s remote process is ARM/Apple, "
                         "setting target arch to %s %s",
-                        __FUNCTION__,
-                        process_arch.GetArchitectureName()
-                            ? process_arch.GetArchitectureName()
-                            : "<null>",
+                        __FUNCTION__, process_arch.GetArchitectureName()
+                                          ? process_arch.GetArchitectureName()
+                                          : "<null>",
                         process_arch.GetTriple().getTriple().c_str()
                             ? process_arch.GetTriple().getTriple().c_str()
                             : "<null>");
@@ -1184,10 +1136,9 @@ void ProcessGDBRemote::DidLaunchOrAttach(ArchSpec &process_arch) {
         if (log)
           log->Printf("ProcessGDBRemote::%s final target arch after "
                       "adjustments for remote architecture: %s %s",
-                      __FUNCTION__,
-                      target_arch.GetArchitectureName()
-                          ? target_arch.GetArchitectureName()
-                          : "<null>",
+                      __FUNCTION__, target_arch.GetArchitectureName()
+                                        ? target_arch.GetArchitectureName()
+                                        : "<null>",
                       target_arch.GetTriple().getTriple().c_str()
                           ? target_arch.GetTriple().getTriple().c_str()
                           : "<null>");
@@ -1528,7 +1479,7 @@ Status ProcessGDBRemote::DoResume() {
           new EventDataBytes(continue_packet.GetString().data(),
                              continue_packet.GetSize()));
 
-      if (!listener_sp->GetEvent(event_sp, std::chrono::seconds(5))) {
+      if (listener_sp->GetEvent(event_sp, std::chrono::seconds(5)) == false) {
         error.SetErrorString("Resume timed out.");
         if (log)
           log->Printf("ProcessGDBRemote::DoResume: Resume timed out.");
@@ -1882,7 +1833,7 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
           bool handled = false;
           bool did_exec = false;
           if (!reason.empty()) {
-            if (reason == "trace") {
+            if (reason.compare("trace") == 0) {
               addr_t pc = thread_sp->GetRegisterContext()->GetPC();
               lldb::BreakpointSiteSP bp_site_sp = thread_sp->GetProcess()
                                                       ->GetBreakpointSiteList()
@@ -1900,7 +1851,7 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
                 thread_sp->SetStopInfo(
                     StopInfo::CreateStopReasonToTrace(*thread_sp));
               handled = true;
-            } else if (reason == "breakpoint") {
+            } else if (reason.compare("breakpoint") == 0) {
               addr_t pc = thread_sp->GetRegisterContext()->GetPC();
               lldb::BreakpointSiteSP bp_site_sp = thread_sp->GetProcess()
                                                       ->GetBreakpointSiteList()
@@ -1921,9 +1872,9 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
                   thread_sp->SetStopInfo(invalid_stop_info_sp);
                 }
               }
-            } else if (reason == "trap") {
+            } else if (reason.compare("trap") == 0) {
               // Let the trap just use the standard signal stop reason below...
-            } else if (reason == "watchpoint") {
+            } else if (reason.compare("watchpoint") == 0) {
               StringExtractor desc_extractor(description.c_str());
               addr_t wp_addr = desc_extractor.GetU64(LLDB_INVALID_ADDRESS);
               uint32_t wp_index = desc_extractor.GetU32(LLDB_INVALID_INDEX32);
@@ -1955,11 +1906,11 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
               thread_sp->SetStopInfo(StopInfo::CreateStopReasonWithWatchpointID(
                   *thread_sp, watch_id, wp_hit_addr));
               handled = true;
-            } else if (reason == "exception") {
+            } else if (reason.compare("exception") == 0) {
               thread_sp->SetStopInfo(StopInfo::CreateStopReasonWithException(
                   *thread_sp, description.c_str()));
               handled = true;
-            } else if (reason == "exec") {
+            } else if (reason.compare("exec") == 0) {
               did_exec = true;
               thread_sp->SetStopInfo(
                   StopInfo::CreateStopReasonWithExec(*thread_sp));
@@ -1984,7 +1935,7 @@ ThreadSP ProcessGDBRemote::SetThreadStopInfo(
             }
           }
 
-          if (!handled && signo && !did_exec) {
+          if (!handled && signo && did_exec == false) {
             if (signo == SIGTRAP) {
               // Currently we are going to assume SIGTRAP means we are either
               // hitting a breakpoint or hardware single stepping.
@@ -2698,7 +2649,7 @@ void ProcessGDBRemote::SetLastStopPacket(
 
     // We are are not using non-stop mode, there can only be one last stop
     // reply packet, so clear the list.
-    if (!GetTarget().GetNonStopModeEnabled())
+    if (GetTarget().GetNonStopModeEnabled() == false)
       m_stop_packet_stack.clear();
 
     // Add this stop packet to the stop packet stack This stack will get popped
@@ -3428,43 +3379,6 @@ Status ProcessGDBRemote::DoSignal(int signo) {
   return error;
 }
 
-Status ProcessGDBRemote::ConnectToReplayServer(repro::Loader *loader) {
-  if (!loader)
-    return Status("No loader provided.");
-
-  auto provider_info = loader->GetProviderInfo("gdb-remote");
-  if (!provider_info)
-    return Status("No provider for gdb-remote.");
-
-  if (provider_info->files.empty())
-    return Status("Provider for  gdb-remote contains no files.");
-
-  // Construct replay history path.
-  FileSpec history_file = loader->GetRoot().CopyByAppendingPathComponent(
-      provider_info->files.front());
-
-  // Enable replay mode.
-  m_replay_mode = true;
-
-  // Load replay history.
-  if (auto error = m_gdb_replay_server.LoadReplayHistory(history_file))
-    return Status("Unable to load replay history");
-
-  // Make a local connection.
-  if (auto error = GDBRemoteCommunication::ConnectLocally(m_gdb_comm,
-                                                          m_gdb_replay_server))
-    return Status("Unable to connect to replay server");
-
-  // Start server thread.
-  m_gdb_replay_server.StartAsyncThread();
-
-  // Start client thread.
-  StartAsyncThread();
-
-  // Do the usual setup.
-  return ConnectToDebugserver("");
-}
-
 Status
 ProcessGDBRemote::EstablishConnectionIfNeeded(const ProcessInfo &process_info) {
   // Make sure we aren't already connected?
@@ -3474,9 +3388,6 @@ ProcessGDBRemote::EstablishConnectionIfNeeded(const ProcessInfo &process_info) {
   PlatformSP platform_sp(GetTarget().GetPlatform());
   if (platform_sp && !platform_sp->IsHost())
     return Status("Lost debug server connection");
-
-  if (repro::Loader *loader = repro::Reproducer::Instance().GetLoader())
-    return ConnectToReplayServer(loader);
 
   auto error = LaunchAndConnectToDebugserver(process_info);
   if (error.Fail()) {
@@ -3574,7 +3485,7 @@ Status ProcessGDBRemote::LaunchAndConnectToDebugserver(
     if (m_gdb_comm.IsConnected()) {
       // Finish the connection process by doing the handshake without
       // connecting (send NULL URL)
-      error = ConnectToDebugserver("");
+      ConnectToDebugserver("");
     } else {
       error.SetErrorString("connection failed");
     }
@@ -3587,7 +3498,7 @@ bool ProcessGDBRemote::MonitorDebugserverProcess(
     bool exited,    // True if the process did exit
     int signo,      // Zero for no signal
     int exit_status // Exit value of process if signal is zero
-) {
+    ) {
   // "debugserver_pid" argument passed in is the process ID for debugserver
   // that we are tracking...
   Log *log(ProcessGDBRemoteLog::GetLogIfAllCategoriesSet(GDBR_LOG_PROCESS));
@@ -3648,7 +3559,7 @@ void ProcessGDBRemote::KillDebugserverProcess() {
 }
 
 void ProcessGDBRemote::Initialize() {
-  static llvm::once_flag g_once_flag;
+  static std::once_flag g_once_flag;
 
   llvm::call_once(g_once_flag, []() {
     PluginManager::RegisterPlugin(GetPluginNameStatic(),
@@ -4359,9 +4270,8 @@ bool ParseRegisters(XMLNode feature_node, GdbServerTargetInfo &target_info,
     return false;
 
   feature_node.ForEachChildElementWithName(
-      "reg",
-      [&target_info, &dyn_reg_info, &cur_reg_num, &reg_offset,
-       &abi_sp](const XMLNode &reg_node) -> bool {
+      "reg", [&target_info, &dyn_reg_info, &cur_reg_num, &reg_offset,
+              &abi_sp](const XMLNode &reg_node) -> bool {
         std::string gdb_group;
         std::string gdb_type;
         ConstString reg_name;
@@ -4523,7 +4433,7 @@ bool ParseRegisters(XMLNode feature_node, GdbServerTargetInfo &target_info,
   return true;
 }
 
-} // namespace
+} // namespace {}
 
 // query the target of gdb-remote for extended target information return:
 // 'true'  on success
@@ -4858,8 +4768,7 @@ size_t ProcessGDBRemote::LoadModules(LoadedModuleInfoList &module_list) {
     if (!modInfo.get_link_map(link_map))
       link_map = LLDB_INVALID_ADDRESS;
 
-    FileSpec file(mod_name);
-    FileSystem::Instance().Resolve(file);
+    FileSpec file(mod_name, true);
     lldb::ModuleSP module_sp =
         LoadModuleAtAddress(file, link_map, mod_base, mod_base_is_offset);
 

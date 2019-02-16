@@ -7,8 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Project includes
 #include "RegisterContextMinidump_x86_32.h"
 
+// Other libraries and framework includes
 #include "lldb/Utility/DataBufferHeap.h"
 
 // C includes

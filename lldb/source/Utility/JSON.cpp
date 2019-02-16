@@ -9,15 +9,15 @@
 
 #include "lldb/Utility/JSON.h"
 
-#include "lldb/Utility/Stream.h"
+#include "lldb/Utility/Stream.h" // for Stream
 #include "lldb/Utility/StreamString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ErrorHandling.h"
 
-#include <inttypes.h>
+#include <inttypes.h> // for PRIu64, PRId64
 #include <limits.h>
-#include <stddef.h>
-#include <utility>
+#include <stddef.h> // for size_t
+#include <utility>  // for pair
 
 using namespace lldb_private;
 

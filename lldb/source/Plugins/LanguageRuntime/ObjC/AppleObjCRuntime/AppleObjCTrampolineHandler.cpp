@@ -10,6 +10,10 @@
 
 #include "AppleObjCTrampolineHandler.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "AppleThreadPlanStepThroughObjCTrampoline.h"
 
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
@@ -76,7 +80,7 @@ extern \"C\" void * __lldb_objc_find_implementation_for_selector (           \n\
         void *super_ptr;                                                     \n\
     };                                                                       \n\
     struct __lldb_objc_super {                                               \n\
-        void *receiver;                                                      \n\
+        void *reciever;                                                      \n\
         struct __lldb_objc_class *class_ptr;                                 \n\
     };                                                                       \n\
     struct __lldb_msg_ref {                                                  \n\
@@ -198,7 +202,7 @@ extern \"C\" void * __lldb_objc_find_implementation_for_selector (void *object, 
         void *super_ptr;                                                     \n\
     };                                                                       \n\
     struct __lldb_objc_super {                                               \n\
-        void *receiver;                                                      \n\
+        void *reciever;                                                      \n\
         struct __lldb_objc_class *class_ptr;                                 \n\
     };                                                                       \n\
     struct __lldb_msg_ref {                                                  \n\

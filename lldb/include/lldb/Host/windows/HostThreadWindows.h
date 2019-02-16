@@ -29,7 +29,6 @@ public:
   virtual Status Join(lldb::thread_result_t *result);
   virtual Status Cancel();
   virtual void Reset();
-  virtual bool EqualsThread(lldb::thread_t thread) const;
 
   lldb::tid_t GetThreadId() const;
 

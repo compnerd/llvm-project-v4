@@ -10,23 +10,23 @@
 #include "lldb/Core/ValueObjectRegister.h"
 
 #include "lldb/Core/Module.h"
-#include "lldb/Core/Value.h"
+#include "lldb/Core/Scalar.h" // for Scalar
+#include "lldb/Core/Value.h"  // for Value, Value::ContextType:...
 #include "lldb/Symbol/CompilerType.h"
-#include "lldb/Symbol/TypeSystem.h"
+#include "lldb/Symbol/TypeSystem.h" // for TypeSystem
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
-#include "lldb/Target/StackFrame.h"
+#include "lldb/Target/StackFrame.h" // for StackFrame
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/DataExtractor.h"
-#include "lldb/Utility/Scalar.h"
-#include "lldb/Utility/Status.h"
-#include "lldb/Utility/Stream.h"
+#include "lldb/Utility/DataExtractor.h" // for DataExtractor
+#include "lldb/Utility/Status.h"        // for Status
+#include "lldb/Utility/Stream.h"        // for Stream
 
-#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringRef.h" // for StringRef
 
-#include <assert.h>
-#include <memory>
+#include <assert.h> // for assert
+#include <memory>   // for shared_ptr
 
 namespace lldb_private {
 class ExecutionContextScope;

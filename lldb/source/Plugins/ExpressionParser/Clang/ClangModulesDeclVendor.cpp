@@ -7,8 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <mutex>
 
+// Other libraries and framework includes
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -21,6 +24,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Threading.h"
 
+// Project includes
 #include "ClangHost.h"
 #include "ClangModulesDeclVendor.h"
 
@@ -139,6 +143,11 @@ void StoringDiagnosticConsumer::DumpDiagnostics(Stream &error_stream) {
       break;
     }
   }
+}
+
+static FileSpec GetResourceDir() {
+  static FileSpec g_cached_resource_dir = GetClangResourceDir();
+  return g_cached_resource_dir;
 }
 
 ClangModulesDeclVendor::ClangModulesDeclVendor() {}
@@ -597,7 +606,7 @@ ClangModulesDeclVendor::Create(Target &target) {
   {
     FileSpec clang_resource_dir = GetClangResourceDir();
 
-    if (FileSystem::Instance().IsDirectory(clang_resource_dir.GetPath())) {
+    if (llvm::sys::fs::is_directory(clang_resource_dir.GetPath())) {
       compiler_invocation_arguments.push_back("-resource-dir");
       compiler_invocation_arguments.push_back(clang_resource_dir.GetPath());
     }
@@ -608,8 +617,7 @@ ClangModulesDeclVendor::Create(Target &target) {
                                                  new StoringDiagnosticConsumer);
 
   std::vector<const char *> compiler_invocation_argument_cstrs;
-  compiler_invocation_argument_cstrs.reserve(
-      compiler_invocation_arguments.size());
+
   for (const std::string &arg : compiler_invocation_arguments) {
     compiler_invocation_argument_cstrs.push_back(arg.c_str());
   }
@@ -630,7 +638,7 @@ ClangModulesDeclVendor::Create(Target &target) {
                                                     source_buffer.release());
 
   std::unique_ptr<clang::CompilerInstance> instance(
-      new clang::CompilerInstance);
+      new clang::CompilerInstance());
 
   instance->setDiagnostics(diagnostics_engine.get());
   instance->setInvocation(invocation);

@@ -7,9 +7,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 
+// Project includes
 #include "lldb/Expression/FunctionCaller.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Core/State.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Core/ValueObjectList.h"
 #include "lldb/Expression/DiagnosticManager.h"
@@ -26,7 +31,6 @@
 #include "lldb/Target/ThreadPlanCallFunction.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/State.h"
 
 using namespace lldb_private;
 
@@ -94,18 +98,9 @@ bool FunctionCaller::WriteFunctionWrapper(
     return false;
   }
 
-  if (m_parser->GetGenerateDebugInfo()) {
-    lldb::ModuleSP jit_module_sp(m_execution_unit_sp->GetJITModule());
+  if (m_parser->GetGenerateDebugInfo())
+    m_execution_unit_sp->CreateJITModule(FunctionName());
 
-    if (jit_module_sp) {
-      ConstString const_func_name(FunctionName());
-      FileSpec jit_file;
-      jit_file.GetFilename() = const_func_name;
-      jit_module_sp->SetFileSpecAndObjectName(jit_file, ConstString());
-      m_jit_module_wp = jit_module_sp;
-      process->GetTarget().GetImages().Append(jit_module_sp);
-    }
-  }
   if (process && m_jit_start_addr)
     m_jit_process_wp = process->shared_from_this();
 

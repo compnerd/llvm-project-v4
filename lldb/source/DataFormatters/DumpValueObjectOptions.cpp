@@ -10,6 +10,10 @@
 
 #include "lldb/DataFormatters/DumpValueObjectOptions.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/ValueObject.h"
 
 using namespace lldb;
@@ -67,7 +71,7 @@ DumpValueObjectOptions &DumpValueObjectOptions::SetUseObjectiveC(bool use) {
 }
 
 DumpValueObjectOptions &DumpValueObjectOptions::SetShowSummary(bool show) {
-  if (!show)
+  if (show == false)
     SetOmitSummaryDepth(UINT32_MAX);
   else
     SetOmitSummaryDepth(0);

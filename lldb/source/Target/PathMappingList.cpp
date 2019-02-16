@@ -7,16 +7,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <climits>
 #include <cstring>
 
-#include "lldb/Host/FileSystem.h"
+// Other libraries and framework includes
+// Project includes
+#include "lldb/lldb-private-enumerations.h"
 #include "lldb/Host/PosixApi.h"
 #include "lldb/Target/PathMappingList.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/lldb-private-enumerations.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -34,7 +37,7 @@ namespace {
   ConstString NormalizePath(const ConstString &path) {
     // If we use "path" to construct a FileSpec, it will normalize the path for
     // us. We then grab the string and turn it back into a ConstString.
-    return ConstString(FileSpec(path.GetStringRef()).GetPath());
+    return ConstString(FileSpec(path.GetStringRef(), false).GetPath());
   }
 }
 //----------------------------------------------------------------------
@@ -173,13 +176,13 @@ bool PathMappingList::RemapPath(llvm::StringRef path,
       // We need to figure out if the "path" argument is relative. If it is,
       // then we should remap, else skip this entry.
       if (path_is_relative == eLazyBoolCalculate) {
-        path_is_relative =
-            FileSpec(path).IsRelative() ? eLazyBoolYes : eLazyBoolNo;
+        path_is_relative = FileSpec(path, false).IsRelative() ? eLazyBoolYes :
+        eLazyBoolNo;
       }
       if (!path_is_relative)
         continue;
     }
-    FileSpec remapped(it.second.GetStringRef());
+    FileSpec remapped(it.second.GetStringRef(), false);
     remapped.AppendPathComponent(path);
     new_path = remapped.GetPath();
     return true;
@@ -193,7 +196,7 @@ bool PathMappingList::ReverseRemapPath(const FileSpec &file, FileSpec &fixed) co
   for (const auto &it : m_pairs) {
     if (!path_ref.consume_front(it.second.GetStringRef()))
       continue;
-    fixed.SetFile(it.first.GetStringRef(), FileSpec::Style::native);
+    fixed.SetFile(it.first.GetStringRef(), false, FileSpec::Style::native);
     fixed.AppendPathComponent(path_ref);
     return true;
   }
@@ -202,26 +205,46 @@ bool PathMappingList::ReverseRemapPath(const FileSpec &file, FileSpec &fixed) co
 
 bool PathMappingList::FindFile(const FileSpec &orig_spec,
                                FileSpec &new_spec) const {
-  if (!m_pairs.empty()) {
-    char orig_path[PATH_MAX];
-    const size_t orig_path_len =
-        orig_spec.GetPath(orig_path, sizeof(orig_path));
-    if (orig_path_len > 0) {
-      const_iterator pos, end = m_pairs.end();
-      for (pos = m_pairs.begin(); pos != end; ++pos) {
-        const size_t prefix_len = pos->first.GetLength();
+  if (m_pairs.empty())
+    return false;
+  
+  std::string orig_path = orig_spec.GetPath();
+    
+  if (orig_path.empty())
+    return false;
+      
+  bool orig_is_relative = orig_spec.IsRelative();
 
-        if (orig_path_len >= prefix_len) {
-          if (::strncmp(pos->first.GetCString(), orig_path, prefix_len) == 0) {
-            new_spec.SetFile(pos->second.GetCString(), FileSpec::Style::native);
-            new_spec.AppendPathComponent(orig_path + prefix_len);
-            if (FileSystem::Instance().Exists(new_spec))
-              return true;
-          }
-        }
+  const_iterator pos, end = m_pairs.end();
+  for (pos = m_pairs.begin(); pos != end; ++pos) {
+    llvm::StringRef orig_ref(orig_path);
+    llvm::StringRef prefix_ref = pos->first.GetStringRef();
+    if (orig_ref.size() >= prefix_ref.size()) {
+      // We consider a relative prefix or one of just "." to
+      // mean "only apply to relative paths".
+      bool prefix_is_relative = false;
+      
+      if (prefix_ref == ".") {
+        prefix_is_relative = true;
+        // Remove the "." since it will have been removed from the
+        // FileSpec paths already.
+        prefix_ref = prefix_ref.drop_front();
+      } else {
+        FileSpec prefix_spec(prefix_ref, false, FileSpec::Style::native);
+        prefix_is_relative = prefix_spec.IsRelative();
+      }
+      if (prefix_is_relative != orig_is_relative)
+        continue;
+
+      if (orig_ref.consume_front(prefix_ref)) {
+        new_spec.SetFile(pos->second.GetCString(), false, FileSpec::Style::native);
+        new_spec.AppendPathComponent(orig_ref);
+        if (new_spec.Exists())
+          return true;
       }
     }
   }
+  
   new_spec.Clear();
   return false;
 }

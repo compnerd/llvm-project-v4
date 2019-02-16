@@ -128,7 +128,10 @@ bool CMICmdFactory::CmdRegister(const CMIUtilString &vMiCmd,
 bool CMICmdFactory::HaveAlready(const CMIUtilString &vMiCmd) const {
   const MapMiCmdToCmdCreatorFn_t::const_iterator it =
       m_mapMiCmdToCmdCreatorFn.find(vMiCmd);
-  return it != m_mapMiCmdToCmdCreatorFn.end();
+  if (it != m_mapMiCmdToCmdCreatorFn.end())
+    return true;
+
+  return false;
 }
 
 //++

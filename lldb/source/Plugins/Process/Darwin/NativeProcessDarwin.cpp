@@ -19,10 +19,10 @@
 
 // C++ includes
 // LLDB includes
+#include "lldb/Core/State.h"
 #include "lldb/Host/PseudoTerminal.h"
 #include "lldb/Target/ProcessLaunchInfo.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/State.h"
 #include "lldb/Utility/StreamString.h"
 
 #include "CFBundle.h"
@@ -63,13 +63,12 @@ Status NativeProcessProtocol::Launch(
 
   // Verify the working directory is valid if one was specified.
   FileSpec working_dir(launch_info.GetWorkingDirectory());
-  if (working_dir) {
-    FileInstance::Instance().Resolve(working_dir);
-    if (!FileSystem::Instance().IsDirectory(working_dir)) {
-      error.SetErrorStringWithFormat("No such file or directory: %s",
+  if (working_dir &&
+      (!working_dir.ResolvePath() ||
+       !llvm::sys::fs::is_directory(working_dir.GetPath())) {
+    error.SetErrorStringWithFormat("No such file or directory: %s",
                                    working_dir.GetCString());
-      return error;
-    }
+    return error;
   }
 
   // Launch the inferior.
@@ -283,7 +282,7 @@ bool NativeProcessDarwin::ProcessUsingBackBoard() const {
 // has already been copied.
 void NativeProcessDarwin::ExceptionMessageReceived(
     const MachException::Message &message) {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
 
   std::lock_guard<std::recursive_mutex> locker(m_exception_messages_mutex);
   if (m_exception_messages.empty()) {
@@ -301,7 +300,7 @@ void NativeProcessDarwin::ExceptionMessageReceived(
 }
 
 void *NativeProcessDarwin::ExceptionThread(void *arg) {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
   if (!arg) {
     if (log)
       log->Printf("NativeProcessDarwin::%s(): cannot run mach exception "
@@ -314,7 +313,7 @@ void *NativeProcessDarwin::ExceptionThread(void *arg) {
 }
 
 void *NativeProcessDarwin::DoExceptionThread() {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
 
   if (log)
     log->Printf("NativeProcessDarwin::%s(arg=%p) starting thread...",
@@ -1379,7 +1378,7 @@ NativeProcessDarwin::GetTaskBasicInfo(task_t task,
   }
 
   Log *verbose_log(
-      GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_VERBOSE));
+      GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS ));
   if (verbose_log) {
     float user = (float)info->user_time.seconds +
                  (float)info->user_time.microseconds / 1000000.0f;

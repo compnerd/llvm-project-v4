@@ -1,7 +1,13 @@
 add_lldb_unittest(LLDBCoreTests
+  BroadcasterTest.cpp
+  DataExtractorTest.cpp
+  EventTest.cpp
+  ListenerTest.cpp
   MangledTest.cpp
   RangeTest.cpp
   RichManglingContextTest.cpp
+  ScalarTest.cpp
+  StateTest.cpp
   StreamCallbackTest.cpp
 
   LINK_LIBS
@@ -11,6 +17,7 @@ add_lldb_unittest(LLDBCoreTests
     lldbPluginObjectFileELF
     lldbPluginSymbolVendorELF
     lldbUtilityHelpers
+    LLVMTestingSupport
   LINK_COMPONENTS
     Support
   )

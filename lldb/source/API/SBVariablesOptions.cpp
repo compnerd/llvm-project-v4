@@ -9,10 +9,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/API/SBVariablesOptions.h"
-#include "lldb/API/SBTarget.h"
-#include "lldb/Target/Target.h"
-
-#include "lldb/lldb-private.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -20,10 +16,9 @@ using namespace lldb_private;
 class VariablesOptionsImpl {
 public:
   VariablesOptionsImpl()
-      : m_include_arguments(false), m_include_locals(false),
-        m_include_statics(false), m_in_scope_only(false),
-        m_include_runtime_support_values(false),
-        m_include_recognized_arguments(eLazyBoolCalculate),
+      : m_include_arguments(false), m_include_recognized_arguments(false),
+        m_include_locals(false), m_include_statics(false),
+        m_in_scope_only(false), m_include_runtime_support_values(false),
         m_use_dynamic(lldb::eNoDynamicValues) {}
 
   VariablesOptionsImpl(const VariablesOptionsImpl &) = default;
@@ -36,14 +31,12 @@ public:
 
   void SetIncludeArguments(bool b) { m_include_arguments = b; }
 
-  bool GetIncludeRecognizedArguments(const lldb::TargetSP &target_sp) const {
-    if (m_include_recognized_arguments != eLazyBoolCalculate)
-        return m_include_recognized_arguments;
-    return target_sp ? target_sp->GetDisplayRecognizedArguments() : false;
+  bool GetIncludeRecognizedArguments() const {
+    return m_include_recognized_arguments;
   }
 
   void SetIncludeRecognizedArguments(bool b) {
-    m_include_recognized_arguments = b ? eLazyBoolYes : eLazyBoolNo;
+    m_include_recognized_arguments = b;
   }
 
   bool GetIncludeLocals() const { return m_include_locals; }
@@ -72,11 +65,11 @@ public:
 
 private:
   bool m_include_arguments : 1;
+  bool m_include_recognized_arguments : 1;
   bool m_include_locals : 1;
   bool m_include_statics : 1;
   bool m_in_scope_only : 1;
   bool m_include_runtime_support_values : 1;
-  LazyBool m_include_recognized_arguments; // can be overridden with a setting
   lldb::DynamicValueType m_use_dynamic;
 };
 
@@ -94,7 +87,9 @@ operator=(const SBVariablesOptions &options) {
 
 SBVariablesOptions::~SBVariablesOptions() = default;
 
-bool SBVariablesOptions::IsValid() const { return m_opaque_ap != nullptr; }
+bool SBVariablesOptions::IsValid() const {
+  return m_opaque_ap.get() != nullptr;
+}
 
 bool SBVariablesOptions::GetIncludeArguments() const {
   return m_opaque_ap->GetIncludeArguments();
@@ -104,9 +99,8 @@ void SBVariablesOptions::SetIncludeArguments(bool arguments) {
   m_opaque_ap->SetIncludeArguments(arguments);
 }
 
-bool SBVariablesOptions::GetIncludeRecognizedArguments(
-    const lldb::SBTarget &target) const {
-  return m_opaque_ap->GetIncludeRecognizedArguments(target.GetSP());
+bool SBVariablesOptions::GetIncludeRecognizedArguments() const {
+  return m_opaque_ap->GetIncludeRecognizedArguments();
 }
 
 void SBVariablesOptions::SetIncludeRecognizedArguments(bool arguments) {

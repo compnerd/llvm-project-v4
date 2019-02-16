@@ -149,7 +149,7 @@ bool lldb_private::formatters::CFBitVectorSummaryProvider(
     }
   }
 
-  if (!is_type_ok)
+  if (is_type_ok == false)
     return false;
 
   Status error;

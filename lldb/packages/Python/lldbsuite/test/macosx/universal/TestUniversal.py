@@ -31,6 +31,7 @@ class UniversalTestCase(TestBase):
     @unittest2.skipUnless(hasattr(os, "uname") and os.uname()[4] in
                           ['x86_64'], "requires x86_64")
     @skipIfDarwinEmbedded # this test file assumes we're targetting an x86 system
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_sbdebugger_create_target_with_file_and_target_triple(self):
         """Test the SBDebugger.CreateTargetWithFileAndTargetTriple() API."""
         # Invoke the default build rule.
@@ -54,6 +55,7 @@ class UniversalTestCase(TestBase):
     @unittest2.skipUnless(hasattr(os, "uname") and os.uname()[4] in
                           ['x86_64'], "requires x86_64")
     @skipIfDarwinEmbedded # this test file assumes we're targetting an x86 system
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_process_launch_for_universal(self):
         """Test process launch of a universal binary."""
         from lldbsuite.test.lldbutil import print_registers
@@ -109,6 +111,7 @@ class UniversalTestCase(TestBase):
     @unittest2.skipUnless(hasattr(os, "uname") and os.uname()[4] in
                           ['x86_64'], "requires x86_64")
     @skipIfDarwinEmbedded # this test file assumes we're targetting an x86 system
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_process_attach_with_wrong_arch(self):
         """Test that when we attach to a binary from the wrong fork of
             a universal binary, we fix up the ABI correctly."""

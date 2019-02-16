@@ -15,10 +15,14 @@
 #if defined(__APPLE__) // This Plugin uses the Mac-specific
                        // source/Host/macosx/cfcpp utilities
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "lldb/Utility/FileSpec.h"
 
 #include "llvm/Support/FileSystem.h"
 
+// Project includes
 #include "PlatformDarwin.h"
 
 class PlatformDarwinKernel : public PlatformDarwin {
@@ -102,25 +106,26 @@ protected:
 
   void AddSDKSubdirsToSearchPaths(const std::string &dir);
 
-  static lldb_private::FileSystem::EnumerateDirectoryResult
+  static lldb_private::FileSpec::EnumerateDirectoryResult
   FindKDKandSDKDirectoriesInDirectory(void *baton, llvm::sys::fs::file_type ft,
-                                      llvm::StringRef path);
+                                      const lldb_private::FileSpec &file_spec);
 
   void SearchForKextsAndKernelsRecursively();
 
-  static lldb_private::FileSystem::EnumerateDirectoryResult
-  GetKernelsAndKextsInDirectoryWithRecursion(void *baton,
-                                             llvm::sys::fs::file_type ft,
-                                             llvm::StringRef path);
+  static lldb_private::FileSpec::EnumerateDirectoryResult
+  GetKernelsAndKextsInDirectoryWithRecursion(
+      void *baton, llvm::sys::fs::file_type ft,
+      const lldb_private::FileSpec &file_spec);
 
-  static lldb_private::FileSystem::EnumerateDirectoryResult
-  GetKernelsAndKextsInDirectoryNoRecursion(void *baton,
-                                           llvm::sys::fs::file_type ft,
-                                           llvm::StringRef path);
+  static lldb_private::FileSpec::EnumerateDirectoryResult
+  GetKernelsAndKextsInDirectoryNoRecursion(
+      void *baton, llvm::sys::fs::file_type ft,
+      const lldb_private::FileSpec &file_spec);
 
-  static lldb_private::FileSystem::EnumerateDirectoryResult
+  static lldb_private::FileSpec::EnumerateDirectoryResult
   GetKernelsAndKextsInDirectoryHelper(void *baton, llvm::sys::fs::file_type ft,
-                                      llvm::StringRef path, bool recurse);
+                                      const lldb_private::FileSpec &file_spec,
+                                      bool recurse);
 
   static std::vector<lldb_private::FileSpec>
   SearchForExecutablesRecursively(const std::string &dir);
@@ -143,7 +148,7 @@ protected:
                              const lldb_private::ArchSpec &arch,
                              lldb::ModuleSP &exe_module_sp);
 
-  // Most of the ivars are assembled under FileSystem::EnumerateDirectory calls
+  // Most of the ivars are assembled under FileSpec::EnumerateDirectory calls
   // where the
   // function being called for each file/directory must be static.  We'll pass a
   // this pointer

@@ -9,13 +9,18 @@
 
 #include "ABISysV_ppc64.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 
+// Project includes
 #include "Utility/PPC64LE_DWARF_Registers.h"
 #include "Utility/PPC64_DWARF_Registers.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/RegisterValue.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectMemory.h"
@@ -30,7 +35,6 @@
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegisterValue.h"
 #include "lldb/Utility/Status.h"
 
 #include "clang/AST/ASTContext.h"

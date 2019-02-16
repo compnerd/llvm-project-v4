@@ -8,6 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
 #include <errno.h>
 #include <pthread.h>
 #include <pthread_np.h>
@@ -17,17 +18,18 @@
 #include <sys/user.h>
 #include <machine/elf.h>
 
+// C++ Includes
 #include <mutex>
 #include <unordered_map>
 
+// Other libraries and framework includes
 #include "lldb/Core/PluginManager.h"
-#include "lldb/Host/FileSystem.h"
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/State.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/DynamicLoader.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/State.h"
 
 #include "FreeBSDThread.h"
 #include "Plugins/Process/POSIX/ProcessPOSIXLog.h"
@@ -36,11 +38,13 @@
 #include "ProcessFreeBSD.h"
 #include "ProcessMonitor.h"
 
+// Other libraries and framework includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Breakpoint/Watchpoint.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/State.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/DynamicLoader.h"
@@ -48,7 +52,6 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/FileSpec.h"
-#include "lldb/Utility/State.h"
 
 #include "lldb/Host/posix/Fcntl.h"
 
@@ -80,7 +83,7 @@ ProcessFreeBSD::CreateInstance(lldb::TargetSP target_sp,
 }
 
 void ProcessFreeBSD::Initialize() {
-  static llvm::once_flag g_once_flag;
+  static std::once_flag g_once_flag;
 
   llvm::call_once(g_once_flag, []() {
     PluginManager::RegisterPlugin(GetPluginNameStatic(),
@@ -284,7 +287,7 @@ bool ProcessFreeBSD::CanDebug(lldb::TargetSP target_sp,
   // For now we are just making sure the file exists for a given module
   ModuleSP exe_module_sp(target_sp->GetExecutableModule());
   if (exe_module_sp.get())
-    return FileSystem::Instance().Exists(exe_module_sp->GetFileSpec());
+    return exe_module_sp->GetFileSpec().Exists();
   // If there is no executable module, we return true since we might be
   // preparing to attach.
   return true;
@@ -332,7 +335,7 @@ ProcessFreeBSD::DoAttachToProcessWithID(lldb::pid_t pid,
     GetTarget().SetArchitecture(module_arch);
 
   // Initialize the target module list
-  GetTarget().SetExecutableModule(exe_module_sp, eLoadDependentsYes);
+  GetTarget().SetExecutableModule(exe_module_sp, true);
 
   SetSTDIOFileDescriptor(m_monitor->GetTerminalFD());
 
@@ -370,13 +373,12 @@ Status ProcessFreeBSD::DoLaunch(Module *module,
   assert(m_monitor == NULL);
 
   FileSpec working_dir = launch_info.GetWorkingDirectory();
-  if (working_dir) {
-    FileSystem::Instance().Resolve(working_dir);
-    if (!FileSystem::Instance().IsDirectory(working_dir.GetPath())) {
-      error.SetErrorStringWithFormat("No such file or directory: %s",
+  namespace fs = llvm::sys::fs;
+  if (working_dir && (!working_dir.ResolvePath() ||
+                      !fs::is_directory(working_dir.GetPath()))) {
+    error.SetErrorStringWithFormat("No such file or directory: %s",
                                    working_dir.GetCString());
-      return error;
-    }
+    return error;
   }
 
   SetPrivateState(eStateLaunching);
@@ -388,7 +390,8 @@ Status ProcessFreeBSD::DoLaunch(Module *module,
   FileSpec stdout_file_spec{};
   FileSpec stderr_file_spec{};
 
-  const FileSpec dbg_pts_file_spec{launch_info.GetPTY().GetSlaveName(NULL, 0)};
+  const FileSpec dbg_pts_file_spec{launch_info.GetPTY().GetSlaveName(NULL, 0),
+                                   false};
 
   file_action = launch_info.GetFileActionForFD(STDIN_FILENO);
   stdin_file_spec =
@@ -516,7 +519,7 @@ void ProcessFreeBSD::DoDidExec() {
           executable_search_paths.GetSize() ? &executable_search_paths : NULL);
       if (!error.Success())
         return;
-      target->SetExecutableModule(exe_module_sp, eLoadDependentsYes);
+      target->SetExecutableModule(exe_module_sp, true);
     }
   }
 }

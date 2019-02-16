@@ -10,12 +10,16 @@
 #ifndef lldb_FormatManager_h_
 #define lldb_FormatManager_h_
 
+// C Includes
+// C++ Includes
 #include <atomic>
 #include <initializer_list>
 #include <map>
 #include <mutex>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-public.h"
 
@@ -229,6 +233,7 @@ private:
   ConstString m_default_category_name;
   ConstString m_system_category_name;
   ConstString m_vectortypes_category_name;
+  ConstString m_runtime_synths_category_name;
 
   lldb::TypeFormatImplSP GetHardcodedFormat(FormattersMatchData &);
 

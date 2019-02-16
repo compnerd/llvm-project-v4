@@ -11,7 +11,12 @@
 
 #include "llvm/ADT/STLExtras.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 
+#include "Plugins/ScriptInterpreter/Python/lldb-python.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/LanguageCategory.h"
@@ -293,7 +298,7 @@ FormatManager::GetFormatForType(lldb::TypeNameSpecifierImplSP type_sp) {
   uint32_t prio_category = UINT32_MAX;
   for (uint32_t category_id = 0; category_id < num_categories; category_id++) {
     category_sp = GetCategoryAtIndex(category_id);
-    if (!category_sp->IsEnabled())
+    if (category_sp->IsEnabled() == false)
       continue;
     lldb::TypeFormatImplSP format_current_sp =
         category_sp->GetFormatForType(type_sp);
@@ -317,7 +322,7 @@ FormatManager::GetSummaryForType(lldb::TypeNameSpecifierImplSP type_sp) {
   uint32_t prio_category = UINT32_MAX;
   for (uint32_t category_id = 0; category_id < num_categories; category_id++) {
     category_sp = GetCategoryAtIndex(category_id);
-    if (!category_sp->IsEnabled())
+    if (category_sp->IsEnabled() == false)
       continue;
     lldb::TypeSummaryImplSP summary_current_sp =
         category_sp->GetSummaryForType(type_sp);
@@ -341,7 +346,7 @@ FormatManager::GetFilterForType(lldb::TypeNameSpecifierImplSP type_sp) {
   uint32_t prio_category = UINT32_MAX;
   for (uint32_t category_id = 0; category_id < num_categories; category_id++) {
     category_sp = GetCategoryAtIndex(category_id);
-    if (!category_sp->IsEnabled())
+    if (category_sp->IsEnabled() == false)
       continue;
     lldb::TypeFilterImplSP filter_current_sp(
         (TypeFilterImpl *)category_sp->GetFilterForType(type_sp).get());
@@ -366,7 +371,7 @@ FormatManager::GetSyntheticForType(lldb::TypeNameSpecifierImplSP type_sp) {
   uint32_t prio_category = UINT32_MAX;
   for (uint32_t category_id = 0; category_id < num_categories; category_id++) {
     category_sp = GetCategoryAtIndex(category_id);
-    if (!category_sp->IsEnabled())
+    if (category_sp->IsEnabled() == false)
       continue;
     lldb::ScriptedSyntheticChildrenSP synth_current_sp(
         (ScriptedSyntheticChildren *)category_sp->GetSyntheticForType(type_sp)
@@ -406,7 +411,7 @@ FormatManager::GetValidatorForType(lldb::TypeNameSpecifierImplSP type_sp) {
   uint32_t prio_category = UINT32_MAX;
   for (uint32_t category_id = 0; category_id < num_categories; category_id++) {
     category_sp = GetCategoryAtIndex(category_id);
-    if (!category_sp->IsEnabled())
+    if (category_sp->IsEnabled() == false)
       continue;
     lldb::TypeValidatorImplSP validator_current_sp(
         category_sp->GetValidatorForType(type_sp).get());
@@ -479,7 +484,7 @@ lldb::Format FormatManager::GetSingleItemFormat(lldb::Format vector_format) {
 bool FormatManager::ShouldPrintAsOneLiner(ValueObject &valobj) {
   // if settings say no oneline whatsoever
   if (valobj.GetTargetSP().get() &&
-      !valobj.GetTargetSP()->GetDebugger().GetAutoOneLineSummaries())
+      valobj.GetTargetSP()->GetDebugger().GetAutoOneLineSummaries() == false)
     return false; // then don't oneline
 
   // if this object has a summary, then ask the summary
@@ -535,7 +540,7 @@ bool FormatManager::ShouldPrintAsOneLiner(ValueObject &valobj) {
       if (!synth_sp)
         return false;
       // but if we only have them to provide a value, keep going
-      if (!synth_sp->MightHaveChildren() &&
+      if (synth_sp->MightHaveChildren() == false &&
           synth_sp->DoesProvideSyntheticValue())
         is_synth_val = true;
       else
@@ -598,6 +603,10 @@ FormatManager::GetCandidateLanguages(ValueObject &valobj) {
 std::vector<lldb::LanguageType>
 FormatManager::GetCandidateLanguages(lldb::LanguageType lang_type) {
   switch (lang_type) {
+  case lldb::eLanguageTypeSwift:
+    return {lldb::eLanguageTypeSwift, lldb::eLanguageTypeObjC};
+  case lldb::eLanguageTypeObjC:
+    return {lldb::eLanguageTypeObjC, lldb::eLanguageTypeSwift};
   case lldb::eLanguageTypeC:
   case lldb::eLanguageTypeC89:
   case lldb::eLanguageTypeC99:
@@ -945,12 +954,20 @@ FormatManager::FormatManager()
       m_language_categories_map(), m_named_summaries_map(this),
       m_categories_map(this), m_default_category_name(ConstString("default")),
       m_system_category_name(ConstString("system")),
-      m_vectortypes_category_name(ConstString("VectorTypes")) {
+      m_vectortypes_category_name(ConstString("VectorTypes")),
+      m_runtime_synths_category_name(ConstString("runtime-synthetics")) {
   LoadSystemFormatters();
   LoadVectorFormatters();
 
+  GetCategory(m_runtime_synths_category_name); // EnableCategory() won't enable
+                                               // a non-existant category, so
+                                               // create this one first even if
+                                               // empty
+
   EnableCategory(m_vectortypes_category_name, TypeCategoryMap::Last,
                  lldb::eLanguageTypeObjC_plus_plus);
+  EnableCategory(m_runtime_synths_category_name, TypeCategoryMap::Last,
+                 {lldb::eLanguageTypeObjC_plus_plus, lldb::eLanguageTypeSwift});
   EnableCategory(m_system_category_name, TypeCategoryMap::Last,
                  lldb::eLanguageTypeObjC_plus_plus);
 }

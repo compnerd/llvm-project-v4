@@ -9,10 +9,10 @@
 
 #include "lldb/Utility/DataExtractor.h"
 
-#include "lldb/lldb-defines.h"
-#include "lldb/lldb-enumerations.h"
-#include "lldb/lldb-forward.h"
-#include "lldb/lldb-types.h"
+#include "lldb/lldb-defines.h"      // for LLDB_INVALID_ADDRESS
+#include "lldb/lldb-enumerations.h" // for ByteOrder::eByteOrderBig
+#include "lldb/lldb-forward.h"      // for DataBufferSP
+#include "lldb/lldb-types.h"        // for offset_t
 
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/DataBufferHeap.h"
@@ -28,15 +28,15 @@
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/MathExtras.h"
 
-#include <algorithm>
-#include <array>
+#include <algorithm> // for min
+#include <array>     // for array
 #include <cassert>
-#include <cstdint>
+#include <cstdint> // for uint8_t, uint32_t, uint64_t
 #include <string>
 
-#include <ctype.h>
-#include <inttypes.h>
-#include <string.h>
+#include <ctype.h>    // for isprint
+#include <inttypes.h> // for PRIx64, PRId64
+#include <string.h>   // for memcpy, memset, memchr
 
 using namespace lldb;
 using namespace lldb_private;

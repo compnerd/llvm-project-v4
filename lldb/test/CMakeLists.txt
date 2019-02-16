@@ -25,12 +25,22 @@ set(LLDB_TEST_ARCH
   ${LLDB_DEFAULT_TEST_ARCH}
   CACHE STRING "Specify the architecture to run LLDB tests as (x86|x64).  Determines whether tests are compiled with -m32 or -m64")
 
+# BEGIN - Swift Mods
+option(LLDB_TEST_SWIFT "Use in-tree swift when testing lldb" On)
+
+if(LLDB_TEST_SWIFT)
+  set(SWIFT_TEST_ARGS
+    --swift-compiler ${LLDB_SWIFTC}
+    --swift-library ${LLDB_SWIFT_LIBS})
+endif()
+# END - Swift Mods
+
 # Users can override LLDB_TEST_USER_ARGS to specify arbitrary arguments to pass to the script
 set(LLDB_TEST_USER_ARGS
   ""
   CACHE STRING "Specify additional arguments to pass to test runner. For example: '-C gcc -C clang -A i386 -A x86_64'")
 
-# The .noindex suffix is a marker for Spotlight to never index the
+# The .nodindex suffix is a marker for Spotlight to never index the
 # build directory.  LLDB queries Spotlight to locate .dSYM bundles
 # based on the UUID embedded in a binary, and because the UUID is a
 # hash of filename and .text section, there *will* be conflicts inside
@@ -51,6 +61,7 @@ list(APPEND LLDB_TEST_COMMON_ARGS
   --dsymutil ${LLDB_TEST_DSYMUTIL}
   --filecheck ${LLDB_TEST_FILECHECK}
   -C ${LLDB_TEST_C_COMPILER}
+  ${SWIFT_TEST_ARGS}
   )
 
 if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
@@ -85,12 +96,6 @@ endif()
 if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows|Darwin")
   list(APPEND LLDB_TEST_COMMON_ARGS
     --env ARCHIVER=${CMAKE_AR} --env OBJCOPY=${CMAKE_OBJCOPY})
-endif()
-
-if (NOT "${LLDB_LIT_TOOLS_DIR}" STREQUAL "")
-  if (NOT EXISTS "${LLDB_LIT_TOOLS_DIR}")
-    message(WARNING "LLDB_LIT_TOOLS_DIR ${LLDB_LIT_TOOLS_DIR} does not exist.")
-  endif()
 endif()
 
 if(CMAKE_HOST_APPLE)
@@ -133,6 +138,6 @@ endif ()
 add_dependencies(check-lldb check-lldb-lit)
 
 add_custom_target(lldb-test-depends DEPENDS ${LLDB_TEST_DEPENDS})
-# This will add LLDB's test dependencies to the dependencies for check-all and
+# This will add LLDB's test dependencies to the depenednecies for check-all and
 # include them in the test-depends target.
 set_property(GLOBAL APPEND PROPERTY LLVM_LIT_DEPENDS ${ARG_DEPENDS})

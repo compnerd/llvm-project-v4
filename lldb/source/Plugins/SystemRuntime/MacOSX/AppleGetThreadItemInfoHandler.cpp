@@ -10,6 +10,10 @@
 
 #include "AppleGetThreadItemInfoHandler.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Value.h"
@@ -140,7 +144,7 @@ void AppleGetThreadItemInfoHandler::Detach() {
 lldb::addr_t AppleGetThreadItemInfoHandler::SetupGetThreadItemInfoFunction(
     Thread &thread, ValueList &get_thread_item_info_arglist) {
   ThreadSP thread_sp(thread.shared_from_this());
-  ExecutionContext exe_ctx(thread_sp);
+  ExecutionContext exe_ctx(thread.shared_from_this());
   Address impl_code_address;
   DiagnosticManager diagnostics;
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SYSTEM_RUNTIME));
@@ -248,7 +252,7 @@ AppleGetThreadItemInfoHandler::GetThreadItemInfo(Thread &thread,
 
   error.Clear();
 
-  if (!thread.SafeToCallFunctions()) {
+  if (thread.SafeToCallFunctions() == false) {
     if (log)
       log->Printf("Not safe to call functions on thread 0x%" PRIx64,
                   thread.GetID());

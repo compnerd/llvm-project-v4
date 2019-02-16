@@ -26,6 +26,7 @@
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
+#include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
@@ -44,11 +45,29 @@ IRExecutionUnit::IRExecutionUnit(std::unique_ptr<llvm::LLVMContext> &context_ap,
                                  const SymbolContext &sym_ctx,
                                  std::vector<std::string> &cpu_features)
     : IRMemoryMap(target_sp), m_context_ap(context_ap.release()),
-      m_module_ap(module_ap.release()), m_module(m_module_ap.get()),
-      m_cpu_features(cpu_features), m_name(name), m_sym_ctx(sym_ctx),
-      m_did_jit(false), m_function_load_addr(LLDB_INVALID_ADDRESS),
+      m_module_ap(module_ap.release()), m_jit_module_wp(),
+      m_module(m_module_ap.get()), m_cpu_features(cpu_features), m_name(name),
+      m_sym_ctx(sym_ctx), m_did_jit(false),
+      m_function_load_addr(LLDB_INVALID_ADDRESS),
       m_function_end_load_addr(LLDB_INVALID_ADDRESS),
       m_reported_allocations(false) {}
+
+IRExecutionUnit::~IRExecutionUnit() {
+  std::lock_guard<std::recursive_mutex> global_context_locker(
+      IRExecutionUnit::GetLLVMGlobalContextMutex());
+
+  m_module_ap.reset();
+  m_execution_engine_ap.reset();
+  m_context_ap.reset();
+
+  lldb::ModuleSP jit_module_sp(m_jit_module_wp.lock());
+  if (jit_module_sp) {
+    ExecutionContext exe_ctx(GetBestExecutionContextScope());
+    Target *target = exe_ctx.GetTargetPtr();
+    if (target)
+      target->GetImages().Remove(jit_module_sp);
+  }
+}
 
 lldb::addr_t IRExecutionUnit::WriteNow(const uint8_t *bytes, size_t size,
                                        Status &error) {
@@ -488,12 +507,6 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
   return;
 }
 
-IRExecutionUnit::~IRExecutionUnit() {
-  m_module_ap.reset();
-  m_execution_engine_ap.reset();
-  m_context_ap.reset();
-}
-
 IRExecutionUnit::MemoryManager::MemoryManager(IRExecutionUnit &parent)
     : m_default_mm_ap(new llvm::SectionMemoryManager()), m_parent(parent) {}
 
@@ -553,8 +566,6 @@ lldb::SectionType IRExecutionUnit::GetSectionTypeFromSectionName(
           sect_type = lldb::eSectionTypeDWARFDebugLine;
         else if (dwarf_name.equals("loc"))
           sect_type = lldb::eSectionTypeDWARFDebugLoc;
-        else if (dwarf_name.equals("loclists"))
-          sect_type = lldb::eSectionTypeDWARFDebugLocLists;
         break;
 
       case 'm':
@@ -709,10 +720,9 @@ FindBestAlternateMangledName(const ConstString &demangled,
 
 struct IRExecutionUnit::SearchSpec {
   ConstString name;
-  lldb::FunctionNameType mask;
+  uint32_t mask;
 
-  SearchSpec(ConstString n,
-             lldb::FunctionNameType m = lldb::eFunctionNameTypeFull)
+  SearchSpec(ConstString n, uint32_t m = lldb::eFunctionNameTypeFull)
       : name(n), mask(m) {}
 };
 
@@ -1013,7 +1023,7 @@ IRExecutionUnit::MemoryManager::getSymbolAddress(const std::string &Name) {
           Name.c_str());
 
     m_parent.ReportSymbolLookupError(name_cs);
-    return 0;
+    return 0xbad0bad0;
   } else {
     if (log)
       log->Printf("IRExecutionUnit::getSymbolAddress(Name=\"%s\") = %" PRIx64,
@@ -1091,7 +1101,6 @@ bool IRExecutionUnit::CommitOneAllocation(lldb::ProcessSP &process_sp,
   case lldb::eSectionTypeDWARFDebugInfo:
   case lldb::eSectionTypeDWARFDebugLine:
   case lldb::eSectionTypeDWARFDebugLoc:
-  case lldb::eSectionTypeDWARFDebugLocLists:
   case lldb::eSectionTypeDWARFDebugMacInfo:
   case lldb::eSectionTypeDWARFDebugPubNames:
   case lldb::eSectionTypeDWARFDebugPubTypes:
@@ -1195,7 +1204,90 @@ uint32_t IRExecutionUnit::GetAddressByteSize() const {
 
 void IRExecutionUnit::PopulateSymtab(lldb_private::ObjectFile *obj_file,
                                      lldb_private::Symtab &symtab) {
-  // No symbols yet...
+  if (m_execution_engine_ap) {
+    uint32_t symbol_id = 0;
+    lldb_private::SectionList *section_list = obj_file->GetSectionList();
+    for (llvm::Function &function : *m_module) {
+      if (function.isDeclaration() ||
+          !(function.hasExternalLinkage() || function.hasLinkOnceODRLinkage()))
+        continue;
+
+      const lldb::addr_t function_addr =
+          (intptr_t)m_execution_engine_ap->getPointerToFunction(&function);
+
+      if (function_addr != 0) {
+        lldb::SectionSP section_sp(
+            section_list->FindSectionContainingFileAddress(function_addr));
+        const lldb::addr_t section_addr =
+            section_sp ? section_sp->GetFileAddress() : 0;
+        const lldb::addr_t function_offset = function_addr - section_addr;
+        llvm::GlobalValue::LinkageTypes linkage = function.getLinkage();
+        llvm::StringRef function_name_ref = function.getName();
+        std::string function_name = function_name_ref.str();
+        bool is_mangled = SwiftLanguageRuntime::IsSwiftMangledName(function_name.c_str())
+                          || function_name_ref.startswith("_Z");
+        Symbol symbol(++symbol_id, function_name.c_str(),
+                      is_mangled,
+                      lldb::eSymbolTypeCode,
+                      linkage ==
+                          llvm::GlobalValue::ExternalLinkage, //  external
+                      false,                                  // is_debug,
+                      false,                                  // is_trampoline,
+                      false,                                  // is_artificial,
+                      section_sp,                             // section
+                      function_offset,                        // offset
+                      0,     // Don't know the size of functions that I know of
+                      false, // size_is_valid
+                      false, // contains_linker_annotations
+                      0);    // flags
+        symbol.SetType(ObjectFile::GetSymbolTypeFromName(
+            symbol.GetMangled().GetMangledName().GetStringRef(),
+            symbol.GetType()));
+        symtab.AddSymbol(symbol);
+      }
+    }
+
+    for (llvm::GlobalVariable &global_var : m_module->getGlobalList()) {
+      if (global_var.isDeclaration() ||
+          !(global_var.hasExternalLinkage() ||
+            global_var.hasLinkOnceODRLinkage()))
+        continue;
+      llvm::StringRef global_name = global_var.getName();
+      if (global_name.empty())
+        continue;
+      const lldb::addr_t global_addr =
+          m_execution_engine_ap->getGlobalValueAddress(global_name.str());
+      if (global_addr != 0) {
+        lldb::SectionSP section_sp(
+            section_list->FindSectionContainingFileAddress(global_addr));
+        const lldb::addr_t section_addr =
+            section_sp ? section_sp->GetFileAddress() : 0;
+        const lldb::addr_t global_offset = global_addr - section_addr;
+        llvm::StringRef global_name_ref = global_var.getName();
+        std::string global_name = global_name_ref.str();
+        bool is_mangled = SwiftLanguageRuntime::IsSwiftMangledName(global_name.c_str())
+                          || global_name_ref.startswith("_Z");
+        Symbol symbol(++symbol_id, global_name_ref.str().c_str(),
+                      is_mangled,
+                      lldb::eSymbolTypeData,
+                      global_var.hasExternalLinkage(), // is_external
+                      false,                           // is_debug,
+                      false,                           // is_trampoline,
+                      false,                           // is_artificial,
+                      section_sp,                      // section
+                      global_offset,                   // offset
+                      0,     // Don't know the size of functions that I know of
+                      false, // size_is_valid
+                      false, // contains_linker_annotations
+                      0);    // flags
+        symbol.SetType(ObjectFile::GetSymbolTypeFromName(
+            symbol.GetMangled().GetMangledName().GetStringRef(),
+            symbol.GetType()));
+        symtab.AddSymbol(symbol);
+      }
+    }
+    symtab.CalculateSymbolSizes();
+  }
 }
 
 void IRExecutionUnit::PopulateSectionList(
@@ -1217,28 +1309,71 @@ void IRExecutionUnit::PopulateSectionList(
   }
 }
 
-ArchSpec IRExecutionUnit::GetArchitecture() {
+bool IRExecutionUnit::GetArchitecture(lldb_private::ArchSpec &arch) {
   ExecutionContext exe_ctx(GetBestExecutionContextScope());
-  if(Target *target = exe_ctx.GetTargetPtr())
-    return target->GetArchitecture();
-  return ArchSpec();
+  Target *target = exe_ctx.GetTargetPtr();
+  if (target)
+    arch = target->GetArchitecture();
+  else
+    arch.Clear();
+  return arch.IsValid();
 }
 
 lldb::ModuleSP IRExecutionUnit::GetJITModule() {
-  ExecutionContext exe_ctx(GetBestExecutionContextScope());
-  Target *target = exe_ctx.GetTargetPtr();
-  if (!target)
-    return nullptr;
+  // Accessor only, might return empty shared pointer
+  return m_jit_module_wp.lock();
+}
 
-  auto Delegate = std::static_pointer_cast<lldb_private::ObjectFileJITDelegate>(
-      shared_from_this());
+lldb::ModuleSP IRExecutionUnit::CreateJITModule(const char *name,
+                                                const FileSpec *limit_file_ptr,
+                                                uint32_t limit_start_line,
+                                                uint32_t limit_end_line) {
+  lldb::ModuleSP jit_module_sp(m_jit_module_wp.lock());
+  if (jit_module_sp)
+    return jit_module_sp;
 
-  lldb::ModuleSP jit_module_sp =
-      lldb_private::Module::CreateModuleFromObjectFile<ObjectFileJIT>(Delegate);
-  if (!jit_module_sp)
-    return nullptr;
+  // Only create a JIT module if we are going to run it in the target
+  if (m_execution_engine_ap) {
+    ExecutionContext exe_ctx(GetBestExecutionContextScope());
+    Target *target = exe_ctx.GetTargetPtr();
+    if (target) {
+      auto Delegate =
+          std::static_pointer_cast<lldb_private::ObjectFileJITDelegate>(
+              shared_from_this());
 
-  bool changed = false;
-  jit_module_sp->SetLoadAddress(*target, 0, true, changed);
-  return jit_module_sp;
+      lldb::ModuleSP jit_module_sp =
+          lldb_private::Module::CreateModuleFromObjectFile<ObjectFileJIT>(
+              Delegate);
+      if (!jit_module_sp)
+        return nullptr;
+
+      m_jit_module_wp = jit_module_sp;
+      bool changed = false;
+      jit_module_sp->SetLoadAddress(*target, 0, true, changed);
+
+      jit_module_sp->SetTypeSystemMap(target->GetTypeSystemMap());
+
+      ConstString const_name(name);
+      FileSpec jit_file;
+      jit_file.GetFilename() = const_name;
+      jit_module_sp->SetFileSpecAndObjectName(jit_file, ConstString());
+
+      if (limit_file_ptr) {
+        SymbolVendor *symbol_vendor = jit_module_sp->GetSymbolVendor();
+        if (symbol_vendor)
+          symbol_vendor->SetLimitSourceFileRange(
+              *limit_file_ptr, limit_start_line, limit_end_line);
+      }
+
+      target->GetImages().Append(jit_module_sp);
+      return jit_module_sp;
+    }
+  }
+  return lldb::ModuleSP();
+}
+
+std::recursive_mutex &IRExecutionUnit::GetLLVMGlobalContextMutex() {
+  static std::recursive_mutex s_llvm_context_mutex;
+
+  return s_llvm_context_mutex;
 }

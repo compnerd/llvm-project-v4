@@ -10,17 +10,21 @@
 #ifndef liblldb_Thread_h_
 #define liblldb_Thread_h_
 
+// C Includes
+// C++ Includes
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
+#include "lldb/Core/Broadcaster.h"
+#include "lldb/Core/Event.h"
 #include "lldb/Core/UserSettingsController.h"
 #include "lldb/Target/ExecutionContextScope.h"
 #include "lldb/Target/RegisterCheckpoint.h"
 #include "lldb/Target/StackFrameList.h"
-#include "lldb/Utility/Broadcaster.h"
-#include "lldb/Utility/Event.h"
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/Utility/UserID.h"
 #include "lldb/lldb-private.h"
@@ -280,7 +284,7 @@ public:
   /// message).
   //------------------------------------------------------------------
   StructuredData::ObjectSP GetExtendedInfo() {
-    if (!m_extended_info_fetched) {
+    if (m_extended_info_fetched == false) {
       m_extended_info = FetchThreadExtendedInfo();
       m_extended_info_fetched = true;
     }
@@ -775,6 +779,13 @@ public:
       LazyBool step_in_avoids_code_without_debug_info = eLazyBoolCalculate,
       LazyBool step_out_avoids_code_without_debug_info = eLazyBoolCalculate);
 
+  virtual lldb::ThreadPlanSP QueueThreadPlanForStepInRangeNoShouldStop(
+      bool abort_other_plans, const AddressRange &range,
+      const SymbolContext &addr_context, const char *step_in_target,
+      lldb::RunMode stop_other_threads, Status &status,
+      LazyBool step_in_avoids_code_without_debug_info = eLazyBoolCalculate,
+      LazyBool step_out_avoids_code_without_debug_info = eLazyBoolCalculate);
+
   // Helper function that takes a LineEntry to step, insted of an AddressRange.
   // This may combine multiple LineEntries of the same source line number to
   // step over a longer address range in a single operation.
@@ -992,11 +1003,15 @@ public:
   //------------------------------------------------------------------
   /// Gets the outer-most return value from the completed plans
   ///
+  /// @param[out] is_swift_error_value
+  ///     If non-NULL, will be set to true if this is a Swift error value
+  ///     not a true return.
+  ///
   /// @return
   ///     A ValueObjectSP, either empty if there is no return value,
   ///     or containing the return value.
   //------------------------------------------------------------------
-  lldb::ValueObjectSP GetReturnValueObject();
+  lldb::ValueObjectSP GetReturnValueObject(bool *is_swift_error_value);
 
   //------------------------------------------------------------------
   /// Gets the outer-most expression variable from the completed plans
@@ -1252,10 +1267,6 @@ public:
   ///     LLDB_INVALID_ADDRESS is returned if no token is available.
   //----------------------------------------------------------------------
   virtual uint64_t GetExtendedBacktraceToken() { return LLDB_INVALID_ADDRESS; }
-
-  lldb::ValueObjectSP GetCurrentException();
-
-  lldb::ThreadSP GetCurrentExceptionBacktrace();
 
 protected:
   friend class ThreadPlan;

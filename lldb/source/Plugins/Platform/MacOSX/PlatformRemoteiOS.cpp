@@ -9,6 +9,10 @@
 
 #include "PlatformRemoteiOS.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
@@ -71,7 +75,7 @@ PlatformSP PlatformRemoteiOS::CreateInstance(bool force, const ArchSpec *arch) {
   }
 
   bool create = force;
-  if (!create && arch && arch->IsValid()) {
+  if (create == false && arch && arch->IsValid()) {
     switch (arch->GetMachine()) {
     case llvm::Triple::arm:
     case llvm::Triple::aarch64:

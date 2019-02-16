@@ -8,39 +8,39 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/ModuleList.h"
-#include "lldb/Core/FileSpecList.h"
+#include "lldb/Core/FileSpecList.h" // for FileSpecList
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Symbols.h"
-#include "lldb/Interpreter/OptionValueFileSpec.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
+#include "lldb/Interpreter/OptionValueFileSpec.h"
 #include "lldb/Interpreter/Property.h"
 #include "lldb/Symbol/ObjectFile.h"
-#include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Symbol/SymbolContext.h" // for SymbolContextList, SymbolCon...
 #include "lldb/Symbol/VariableList.h"
-#include "lldb/Utility/ArchSpec.h"
-#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/ArchSpec.h"    // for ArchSpec
+#include "lldb/Utility/ConstString.h" // for ConstString
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
-#include "lldb/Utility/UUID.h"
-#include "lldb/lldb-defines.h"
+#include "lldb/Utility/Logging.h" // for GetLogIfAnyCategoriesSet
+#include "lldb/Utility/UUID.h"    // for UUID, operator!=, operator==
+#include "lldb/lldb-defines.h"    // for LLDB_INVALID_INDEX32
 
 #if defined(_WIN32)
-#include "lldb/Host/windows/PosixApi.h"
+#include "lldb/Host/windows/PosixApi.h" // for PATH_MAX
 #endif
 
-#include "clang/Driver/Driver.h"
-#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringRef.h" // for StringRef
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Threading.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/raw_ostream.h" // for fs
+#include "clang/Driver/Driver.h"
 
-#include <chrono>
-#include <memory>
+#include <chrono> // for operator!=, time_point
+#include <memory> // for shared_ptr
 #include <mutex>
-#include <string>
-#include <utility>
+#include <string>  // for string
+#include <utility> // for distance
 
 namespace lldb_private {
 class Function;
@@ -64,21 +64,16 @@ class TypeList;
 using namespace lldb;
 using namespace lldb_private;
 
+static bool KeepLookingInDylinker(SymbolContextList &sc_list, size_t start_idx);
+
 namespace {
 
 static constexpr PropertyDefinition g_properties[] = {
     {"enable-external-lookup", OptionValue::eTypeBoolean, true, true, nullptr,
      {},
-     "Control the use of external sources to locate symbol files. "
-     "Directories listed in target.debug-file-search-paths and directory of "
-     "the executable are always checked first for separate debug info files. "
-     "Then depending on this setting: "
-     "On macOS, Spotlight would be also used to locate a matching .dSYM "
-     "bundle based on the UUID of the executable. "
-     "On NetBSD, directory /usr/libdata/debug would be also searched. "
-     "On platforms other than NetBSD directory /usr/lib/debug would be "
-     "also searched."
-    },
+     "Control the use of external tools or libraries to locate symbol files. "
+     "On macOS, Spotlight is used to locate a matching .dSYM bundle based on "
+     "the UUID of the executable."},
     {"clang-modules-cache-path", OptionValue::eTypeFileSpec, true, 0, nullptr,
      {},
      "The path to the clang modules cache directory (-fmodules-cache-path)."}};
@@ -345,9 +340,8 @@ ModuleSP ModuleList::GetModuleAtIndexUnlocked(size_t idx) const {
 }
 
 size_t ModuleList::FindFunctions(const ConstString &name,
-                                 FunctionNameType name_type_mask,
-                                 bool include_symbols, bool include_inlines,
-                                 bool append,
+                                 uint32_t name_type_mask, bool include_symbols,
+                                 bool include_inlines, bool append,
                                  SymbolContextList &sc_list) const {
   if (!append)
     sc_list.Clear();
@@ -381,7 +375,7 @@ size_t ModuleList::FindFunctions(const ConstString &name,
 }
 
 size_t ModuleList::FindFunctionSymbols(const ConstString &name,
-                                       lldb::FunctionNameType name_type_mask,
+                                       uint32_t name_type_mask,
                                        SymbolContextList &sc_list) {
   const size_t old_size = sc_list.GetSize();
 
@@ -413,16 +407,27 @@ size_t ModuleList::FindFunctionSymbols(const ConstString &name,
 size_t ModuleList::FindFunctions(const RegularExpression &name,
                                  bool include_symbols, bool include_inlines,
                                  bool append, SymbolContextList &sc_list) {
-  const size_t old_size = sc_list.GetSize();
+  const size_t initial_size = sc_list.GetSize();
 
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
+  collection dylinker_modules;
   for (pos = m_modules.begin(); pos != end; ++pos) {
-    (*pos)->FindFunctions(name, include_symbols, include_inlines, append,
-                          sc_list);
+    if (!(*pos)->GetIsDynamicLinkEditor())
+      (*pos)->FindFunctions(name, include_symbols, include_inlines, append,
+                            sc_list);
+    else
+      dylinker_modules.push_back(*pos);
   }
+  bool keep_looking = KeepLookingInDylinker(sc_list, initial_size);
 
-  return sc_list.GetSize() - old_size;
+  if (keep_looking) {
+    end = dylinker_modules.end();
+    for (pos = dylinker_modules.begin(); pos != end; pos++)
+      (*pos)->FindFunctions(name, include_symbols, include_inlines, append,
+                            sc_list);
+  }
+  return sc_list.GetSize() - initial_size;
 }
 
 size_t ModuleList::FindCompileUnits(const FileSpec &path, bool append,
@@ -463,6 +468,36 @@ size_t ModuleList::FindGlobalVariables(const RegularExpression &regex,
   return variable_list.GetSize() - initial_size;
 }
 
+// We don't want to find symbols in the dylinker file if we've found
+// a viable candidate anywhere else.  This function looks at the symbols
+// added to the sc_list since start_idx, and if there's one in there that
+// looks real, returns false, in which case we should terminate the search.
+// If it returns true, we should go on to look in the dylinker.
+
+static bool KeepLookingInDylinker(SymbolContextList &sc_list,
+                                  size_t start_idx) {
+  bool keep_looking = true;
+  if (sc_list.GetSize() == start_idx) {
+    return true;
+  }
+
+  SymbolContext sc;
+  size_t num_symbols = sc_list.GetSize();
+  for (size_t idx = start_idx; idx < num_symbols; idx++) {
+    sc_list.GetContextAtIndex(idx, sc);
+    if (sc.symbol && sc.symbol->GetType() != lldb::eSymbolTypeUndefined) {
+      keep_looking = false;
+      break;
+    }
+    // If we have a function it's not going to be an undefined symbol...
+    if (sc.function) {
+      keep_looking = false;
+      break;
+    }
+  }
+  return keep_looking;
+}
+
 size_t ModuleList::FindSymbolsWithNameAndType(const ConstString &name,
                                               SymbolType symbol_type,
                                               SymbolContextList &sc_list,
@@ -473,8 +508,24 @@ size_t ModuleList::FindSymbolsWithNameAndType(const ConstString &name,
   size_t initial_size = sc_list.GetSize();
 
   collection::const_iterator pos, end = m_modules.end();
-  for (pos = m_modules.begin(); pos != end; ++pos)
-    (*pos)->FindSymbolsWithNameAndType(name, symbol_type, sc_list);
+  collection dylinker_modules;
+  for (pos = m_modules.begin(); pos != end; ++pos) {
+    if (!(*pos)->GetIsDynamicLinkEditor())
+      (*pos)->FindSymbolsWithNameAndType(name, symbol_type, sc_list);
+    else
+      dylinker_modules.push_back(*pos);
+  }
+
+  // Lets see if we found anything but undefined symbols.  If so, then we'll
+  // also look in the dylinker.
+  bool keep_looking = KeepLookingInDylinker(sc_list, initial_size);
+
+  if (keep_looking) {
+    end = dylinker_modules.end();
+    for (pos = dylinker_modules.begin(); pos != end; ++pos)
+      (*pos)->FindSymbolsWithNameAndType(name, symbol_type, sc_list);
+  }
+
   return sc_list.GetSize() - initial_size;
 }
 
@@ -487,8 +538,21 @@ size_t ModuleList::FindSymbolsMatchingRegExAndType(
   size_t initial_size = sc_list.GetSize();
 
   collection::const_iterator pos, end = m_modules.end();
-  for (pos = m_modules.begin(); pos != end; ++pos)
-    (*pos)->FindSymbolsMatchingRegExAndType(regex, symbol_type, sc_list);
+  collection dylinker_modules;
+  for (pos = m_modules.begin(); pos != end; ++pos) {
+    if (!(*pos)->GetIsDynamicLinkEditor())
+      (*pos)->FindSymbolsMatchingRegExAndType(regex, symbol_type, sc_list);
+    else
+      dylinker_modules.push_back(*pos);
+  }
+
+  bool keep_looking = KeepLookingInDylinker(sc_list, initial_size);
+
+  if (keep_looking) {
+    end = dylinker_modules.end();
+    for (pos = dylinker_modules.begin(); pos != end; ++pos)
+      (*pos)->FindSymbolsMatchingRegExAndType(regex, symbol_type, sc_list);
+  }
   return sc_list.GetSize() - initial_size;
 }
 
@@ -670,10 +734,9 @@ bool ModuleList::ResolveFileAddress(lldb::addr_t vm_addr,
   return false;
 }
 
-uint32_t
-ModuleList::ResolveSymbolContextForAddress(const Address &so_addr,
-                                           SymbolContextItem resolve_scope,
-                                           SymbolContext &sc) const {
+uint32_t ModuleList::ResolveSymbolContextForAddress(const Address &so_addr,
+                                                    uint32_t resolve_scope,
+                                                    SymbolContext &sc) const {
   // The address is already section offset so it has a module
   uint32_t resolved_flags = 0;
   ModuleSP module_sp(so_addr.GetModule());
@@ -696,15 +759,15 @@ ModuleList::ResolveSymbolContextForAddress(const Address &so_addr,
 
 uint32_t ModuleList::ResolveSymbolContextForFilePath(
     const char *file_path, uint32_t line, bool check_inlines,
-    SymbolContextItem resolve_scope, SymbolContextList &sc_list) const {
-  FileSpec file_spec(file_path);
+    uint32_t resolve_scope, SymbolContextList &sc_list) const {
+  FileSpec file_spec(file_path, false);
   return ResolveSymbolContextsForFileSpec(file_spec, line, check_inlines,
                                           resolve_scope, sc_list);
 }
 
 uint32_t ModuleList::ResolveSymbolContextsForFileSpec(
     const FileSpec &file_spec, uint32_t line, bool check_inlines,
-    SymbolContextItem resolve_scope, SymbolContextList &sc_list) const {
+    uint32_t resolve_scope, SymbolContextList &sc_list) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos) {
@@ -864,13 +927,14 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
     const auto num_directories = module_search_paths_ptr->GetSize();
     for (size_t idx = 0; idx < num_directories; ++idx) {
       auto search_path_spec = module_search_paths_ptr->GetFileSpecAtIndex(idx);
-      FileSystem::Instance().Resolve(search_path_spec);
+      if (!search_path_spec.ResolvePath())
+        continue;
       namespace fs = llvm::sys::fs;
-      if (!FileSystem::Instance().IsDirectory(search_path_spec))
+      if (!fs::is_directory(search_path_spec.GetPath()))
         continue;
       search_path_spec.AppendPathComponent(
           module_spec.GetFileSpec().GetFilename().AsCString());
-      if (!FileSystem::Instance().Exists(search_path_spec))
+      if (!search_path_spec.Exists())
         continue;
 
       auto resolved_module_spec(module_spec);
@@ -911,15 +975,13 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
   // Don't look for the file if it appears to be the same one we already
   // checked for above...
   if (located_binary_modulespec.GetFileSpec() != module_file_spec) {
-    if (!FileSystem::Instance().Exists(
-            located_binary_modulespec.GetFileSpec())) {
+    if (!located_binary_modulespec.GetFileSpec().Exists()) {
       located_binary_modulespec.GetFileSpec().GetPath(path, sizeof(path));
       if (path[0] == '\0')
         module_file_spec.GetPath(path, sizeof(path));
       // How can this check ever be true? This branch it is false, and we
       // haven't modified file_spec.
-      if (FileSystem::Instance().Exists(
-              located_binary_modulespec.GetFileSpec())) {
+      if (located_binary_modulespec.GetFileSpec().Exists()) {
         std::string uuid_str;
         if (uuid_ptr && uuid_ptr->IsValid())
           uuid_str = uuid_ptr->GetAsString();
@@ -960,7 +1022,7 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
       // If we didn't have a UUID in mind when looking for the object file,
       // then we should make sure the modification time hasn't changed!
       if (platform_module_spec.GetUUIDPtr() == nullptr) {
-        auto file_spec_mod_time = FileSystem::Instance().GetModificationTime(
+        auto file_spec_mod_time = FileSystem::GetModificationTime(
             located_binary_modulespec.GetFileSpec());
         if (file_spec_mod_time != llvm::sys::TimePoint<>()) {
           if (file_spec_mod_time != module_sp->GetModificationTime()) {
@@ -1063,4 +1125,10 @@ void ModuleList::ForEach(
     if (!callback(module))
       break;
   }
+}
+
+void ModuleList::ClearModuleDependentCaches() {
+  std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
+  for (const auto &module : m_modules)
+    module->ClearModuleDependentCaches();
 }

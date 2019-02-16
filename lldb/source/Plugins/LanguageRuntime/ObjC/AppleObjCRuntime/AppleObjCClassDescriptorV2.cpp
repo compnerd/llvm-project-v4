@@ -264,7 +264,11 @@ bool ClassDescriptorV2::method_t::Read(Process *process, lldb::addr_t addr) {
   }
 
   process->ReadCStringFromMemory(m_types_ptr, m_types, error);
-  return !error.Fail();
+  if (error.Fail()) {
+    return false;
+  }
+
+  return true;
 }
 
 bool ClassDescriptorV2::ivar_list_t::Read(Process *process, lldb::addr_t addr) {
@@ -319,7 +323,11 @@ bool ClassDescriptorV2::ivar_t::Read(Process *process, lldb::addr_t addr) {
   }
 
   process->ReadCStringFromMemory(m_type_ptr, m_type, error);
-  return !error.Fail();
+  if (error.Fail()) {
+    return false;
+  }
+
+  return true;
 }
 
 bool ClassDescriptorV2::Describe(

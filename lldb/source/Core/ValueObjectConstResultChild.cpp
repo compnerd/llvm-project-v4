@@ -9,7 +9,7 @@
 
 #include "lldb/Core/ValueObjectConstResultChild.h"
 
-#include "lldb/lldb-private-enumerations.h"
+#include "lldb/lldb-private-enumerations.h" // for AddressType::eAddressType
 namespace lldb_private {
 class DataExtractor;
 }

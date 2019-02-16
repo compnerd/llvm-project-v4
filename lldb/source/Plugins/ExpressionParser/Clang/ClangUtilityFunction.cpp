@@ -11,11 +11,13 @@
 #include "ClangExpressionDeclMap.h"
 #include "ClangExpressionParser.h"
 
+// C Includes
 #include <stdio.h>
 #if HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
 
+// C++ Includes
 
 #include "lldb/Core/Module.h"
 #include "lldb/Core/StreamFile.h"
@@ -122,18 +124,8 @@ bool ClangUtilityFunction::Install(DiagnosticManager &diagnostic_manager,
 
   if (m_jit_start_addr != LLDB_INVALID_ADDRESS) {
     m_jit_process_wp = process->shared_from_this();
-    if (parser.GetGenerateDebugInfo()) {
-      lldb::ModuleSP jit_module_sp(m_execution_unit_sp->GetJITModule());
-
-      if (jit_module_sp) {
-        ConstString const_func_name(FunctionName());
-        FileSpec jit_file;
-        jit_file.GetFilename() = const_func_name;
-        jit_module_sp->SetFileSpecAndObjectName(jit_file, ConstString());
-        m_jit_module_wp = jit_module_sp;
-        target->GetImages().Append(jit_module_sp);
-      }
-    }
+    if (parser.GetGenerateDebugInfo())
+      m_execution_unit_sp->CreateJITModule(FunctionName());
   }
 
   DeclMap()->DidParse();

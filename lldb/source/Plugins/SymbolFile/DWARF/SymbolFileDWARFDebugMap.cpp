@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "SymbolFileDWARFDebugMap.h"
 
 #include "DWARFDebugAranges.h"
@@ -17,6 +21,7 @@
 #include "lldb/Core/RangeMap.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Host/FileSystem.h"
+#include "lldb/Utility/DataBufferLLVM.h"
 #include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/Timer.h"
 
@@ -86,10 +91,11 @@ SymbolFileDWARFDebugMap::CompileUnitInfo::GetFileRangeMap(
       const uint32_t oso_end_idx = comp_unit_info->last_symbol_index + 1;
       for (uint32_t idx = comp_unit_info->first_symbol_index +
                           2; // Skip the N_SO and N_OSO
-           idx < oso_end_idx; ++idx) {
+           idx < oso_end_idx;
+           ++idx) {
         Symbol *exe_symbol = exe_symtab->SymbolAtIndex(idx);
         if (exe_symbol) {
-          if (!exe_symbol->IsDebug())
+          if (exe_symbol->IsDebug() == false)
             continue;
 
           switch (exe_symbol->GetType()) {
@@ -179,7 +185,7 @@ public:
   GetSymbolVendor(bool can_create = true,
                   lldb_private::Stream *feedback_strm = NULL) override {
     // Scope for locker
-    if (m_symfile_ap.get() || !can_create)
+    if (m_symfile_ap.get() || can_create == false)
       return m_symfile_ap.get();
 
     ModuleSP exe_module_sp(m_exe_module_wp.lock());
@@ -346,7 +352,7 @@ void SymbolFileDWARFDebugMap::InitOSO() {
             so_symbol->GetType() == eSymbolTypeSourceFile &&
             oso_symbol->GetType() == eSymbolTypeObjectFile) {
           m_compile_unit_infos[i].so_file.SetFile(
-              so_symbol->GetName().AsCString(), FileSpec::Style::native);
+              so_symbol->GetName().AsCString(), false, FileSpec::Style::native);
           m_compile_unit_infos[i].oso_path = oso_symbol->GetName();
           m_compile_unit_infos[i].oso_mod_time =
               llvm::sys::toTimePoint(oso_symbol->GetIntegerValue(0));
@@ -416,13 +422,13 @@ Module *SymbolFileDWARFDebugMap::GetModuleByCompUnitInfo(
       m_oso_map[{comp_unit_info->oso_path, comp_unit_info->oso_mod_time}] =
           comp_unit_info->oso_sp;
       const char *oso_path = comp_unit_info->oso_path.GetCString();
-      FileSpec oso_file(oso_path);
+      FileSpec oso_file(oso_path, false);
       ConstString oso_object;
-      if (FileSystem::Instance().Exists(oso_file)) {
+      if (oso_file.Exists()) {
         // The modification time returned by the FS can have a higher precision
         // than the one from the CU.
         auto oso_mod_time = std::chrono::time_point_cast<std::chrono::seconds>(
-            FileSystem::Instance().GetModificationTime(oso_file));
+            FileSystem::GetModificationTime(oso_file));
         if (oso_mod_time != comp_unit_info->oso_mod_time) {
           obj_file->GetModule()->ReportError(
               "debug map object file '%s' has changed (actual time is "
@@ -726,10 +732,8 @@ bool SymbolFileDWARFDebugMap::CompleteType(CompilerType &compiler_type) {
   return success;
 }
 
-uint32_t
-SymbolFileDWARFDebugMap::ResolveSymbolContext(const Address &exe_so_addr,
-                                              SymbolContextItem resolve_scope,
-                                              SymbolContext &sc) {
+uint32_t SymbolFileDWARFDebugMap::ResolveSymbolContext(
+    const Address &exe_so_addr, uint32_t resolve_scope, SymbolContext &sc) {
   uint32_t resolved_flags = 0;
   Symtab *symtab = m_obj_file->GetSymtab();
   if (symtab) {
@@ -771,7 +775,7 @@ SymbolFileDWARFDebugMap::ResolveSymbolContext(const Address &exe_so_addr,
 
 uint32_t SymbolFileDWARFDebugMap::ResolveSymbolContext(
     const FileSpec &file_spec, uint32_t line, bool check_inlines,
-    SymbolContextItem resolve_scope, SymbolContextList &sc_list) {
+    uint32_t resolve_scope, SymbolContextList &sc_list) {
   const uint32_t initial = sc_list.GetSize();
   const uint32_t cu_count = GetNumCompileUnits();
 
@@ -803,7 +807,8 @@ uint32_t SymbolFileDWARFDebugMap::PrivateFindGlobalVariables(
     const ConstString &name, const CompilerDeclContext *parent_decl_ctx,
     const std::vector<uint32_t>
         &indexes, // Indexes into the symbol table that match "name"
-    uint32_t max_matches, VariableList &variables) {
+    uint32_t max_matches,
+    VariableList &variables) {
   const uint32_t original_size = variables.GetSize();
   const size_t match_count = indexes.size();
   for (size_t i = 0; i < match_count; ++i) {
@@ -987,7 +992,7 @@ static void RemoveFunctionsWithModuleNotEqualTo(const ModuleSP &module_sp,
 
 uint32_t SymbolFileDWARFDebugMap::FindFunctions(
     const ConstString &name, const CompilerDeclContext *parent_decl_ctx,
-    FunctionNameType name_type_mask, bool include_inlines, bool append,
+    uint32_t name_type_mask, bool include_inlines, bool append,
     SymbolContextList &sc_list) {
   static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
   Timer scoped_timer(func_cat,
@@ -1042,7 +1047,7 @@ uint32_t SymbolFileDWARFDebugMap::FindFunctions(const RegularExpression &regex,
 }
 
 size_t SymbolFileDWARFDebugMap::GetTypes(SymbolContextScope *sc_scope,
-                                         lldb::TypeClass type_mask,
+                                         uint32_t type_mask,
                                          TypeList &type_list) {
   static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
   Timer scoped_timer(func_cat,
@@ -1155,7 +1160,7 @@ TypeSP SymbolFileDWARFDebugMap::FindCompleteObjCDefinitionTypeForDIE(
   // Only search all .o files for the definition if we don't need the
   // implementation because otherwise, with a valid debug map we should have
   // the ObjC class symbol and the code above should have found it.
-  if (!must_be_implementation) {
+  if (must_be_implementation == false) {
     TypeSP type_sp;
 
     ForEachSymbolFile([&](SymbolFileDWARF *oso_dwarf) -> bool {
@@ -1190,7 +1195,10 @@ uint32_t SymbolFileDWARFDebugMap::FindTypes(
     ForEachSymbolFile([&](SymbolFileDWARF *oso_dwarf) -> bool {
       oso_dwarf->FindTypes(sc, name, parent_decl_ctx, append, max_matches,
                            searched_symbol_files, types);
-      return types.GetSize() >= max_matches;
+      if (types.GetSize() >= max_matches)
+        return true;
+      else
+        return false;
     });
   }
 
@@ -1230,13 +1238,6 @@ CompilerDeclContext SymbolFileDWARFDebugMap::FindNamespace(
   }
 
   return matching_namespace;
-}
-
-void SymbolFileDWARFDebugMap::DumpClangAST(Stream &s) {
-  ForEachSymbolFile([&s](SymbolFileDWARF *oso_dwarf) -> bool {
-    oso_dwarf->DumpClangAST(s);
-    return true;
-  });
 }
 
 //------------------------------------------------------------------
@@ -1448,4 +1449,76 @@ SymbolFileDWARFDebugMap::AddOSOARanges(SymbolFileDWARF *dwarf2Data,
     }
   }
   return num_line_entries_added;
+}
+
+std::vector<DataBufferSP>
+SymbolFileDWARFDebugMap::GetASTData(lldb::LanguageType language) {
+  Log *log(LogChannelDWARF::GetLogIfAll(DWARF_LOG_DEBUG_MAP));
+
+  std::vector<DataBufferSP> ast_datas;
+  if (language != eLanguageTypeSwift) {
+    if (log)
+      log->Printf("SymbolFileDWARFDebugMap::%s() - ignoring because not Swift",
+                  __FUNCTION__);
+    return ast_datas;
+  }
+
+  Symtab *symtab = m_obj_file->GetSymtab();
+  if (!symtab) {
+    if (log)
+      log->Printf("SymbolFileDWARFDebugMap::%s() - ignoring because the obj "
+                  "file has no symbol table",
+                  __FUNCTION__);
+    return ast_datas;
+  }
+
+  uint32_t next_idx = 0;
+  bool done = false;
+  do {
+    Symbol *symbol =
+        symtab->FindSymbolWithType(eSymbolTypeASTFile, Symtab::eDebugAny,
+                                   Symtab::eVisibilityAny, next_idx);
+    if (symbol == nullptr) {
+      // We didn't find any more symbols of type eSymbolTypeASTFile.  We are
+      // done looping for them.
+      done = true;
+    } else {
+      // Try to load the specified file.
+      FileSpec file_spec(symbol->GetName().GetCString(), false);
+      if (file_spec.Exists()) {
+        // We found the source data for the AST data blob.
+        // Read it in and add it to our return vector.
+        std::shared_ptr<DataBufferLLVM> data_buf_sp 
+                = DataBufferLLVM::CreateFromPath(file_spec.GetPath());
+        if (data_buf_sp) {
+          ast_datas.push_back(data_buf_sp);
+          if (log)
+            log->Printf("SymbolFileDWARFDebugMap::%s() - found and loaded AST "
+                        "data from file %s",
+                        __FUNCTION__, file_spec.GetPath().c_str());
+        } else if (log) {
+          if (log)
+            log->Printf("SymbolFileDWARFDebugMap::%s() - got empty data buffer "
+                        "SP from extant file %s",
+                        __FUNCTION__, file_spec.GetPath().c_str());        
+        }
+      } else {
+        if (log)
+          log->Printf("SymbolFileDWARFDebugMap::%s() - found reference to AST "
+                      "file %s, but could not find the file, ignoring",
+                      __FUNCTION__, file_spec.GetPath().c_str());
+      }
+
+      // Regardless of whether we could find the specified file, start the next
+      // symbol search at the index past the one we just found.
+      ++next_idx;
+    }
+  } while (!done);
+
+  // Return the vector of AST data blobs
+  if (log)
+    log->Printf("SymbolFileDWARFDebugMap::%s() - returning %d AST data blobs",
+                __FUNCTION__, (int)ast_datas.size());
+
+  return ast_datas;
 }

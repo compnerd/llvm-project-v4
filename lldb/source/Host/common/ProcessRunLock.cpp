@@ -30,7 +30,7 @@ ProcessRunLock::~ProcessRunLock() {
 
 bool ProcessRunLock::ReadTryLock() {
   ::pthread_rwlock_rdlock(&m_rwlock);
-  if (!m_running) {
+  if (m_running == false) {
     return true;
   }
   ::pthread_rwlock_unlock(&m_rwlock);

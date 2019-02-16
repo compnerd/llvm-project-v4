@@ -9,6 +9,10 @@
 
 #include "PlatformPOSIX.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
@@ -124,25 +128,23 @@ PlatformPOSIX::ResolveExecutable(const ModuleSpec &module_spec,
   if (IsHost()) {
     // If we have "ls" as the exe_file, resolve the executable location based
     // on the current path variables
-    if (!FileSystem::Instance().Exists(resolved_module_spec.GetFileSpec())) {
+    if (!resolved_module_spec.GetFileSpec().Exists()) {
       resolved_module_spec.GetFileSpec().GetPath(exe_path, sizeof(exe_path));
-      resolved_module_spec.GetFileSpec().SetFile(exe_path,
+      resolved_module_spec.GetFileSpec().SetFile(exe_path, true,
                                                  FileSpec::Style::native);
-      FileSystem::Instance().Resolve(resolved_module_spec.GetFileSpec());
     }
 
-    if (!FileSystem::Instance().Exists(resolved_module_spec.GetFileSpec()))
-      FileSystem::Instance().ResolveExecutableLocation(
-          resolved_module_spec.GetFileSpec());
+    if (!resolved_module_spec.GetFileSpec().Exists())
+      resolved_module_spec.GetFileSpec().ResolveExecutableLocation();
 
     // Resolve any executable within a bundle on MacOSX
     Host::ResolveExecutableInBundle(resolved_module_spec.GetFileSpec());
 
-    if (FileSystem::Instance().Exists(resolved_module_spec.GetFileSpec()))
+    if (resolved_module_spec.GetFileSpec().Exists())
       error.Clear();
     else {
-      const uint32_t permissions = FileSystem::Instance().GetPermissions(
-          resolved_module_spec.GetFileSpec());
+      const uint32_t permissions =
+          resolved_module_spec.GetFileSpec().GetPermissions();
       if (permissions && (permissions & eFilePermissionsEveryoneR) == 0)
         error.SetErrorStringWithFormat(
             "executable '%s' is not readable",
@@ -164,7 +166,7 @@ PlatformPOSIX::ResolveExecutable(const ModuleSpec &module_spec,
       // Resolve any executable within a bundle on MacOSX
       Host::ResolveExecutableInBundle(resolved_module_spec.GetFileSpec());
 
-      if (FileSystem::Instance().Exists(resolved_module_spec.GetFileSpec()))
+      if (resolved_module_spec.GetFileSpec().Exists())
         error.Clear();
       else
         error.SetErrorStringWithFormat("the platform is not currently "
@@ -235,8 +237,7 @@ PlatformPOSIX::ResolveExecutable(const ModuleSpec &module_spec,
       }
 
       if (error.Fail() || !exe_module_sp) {
-        if (FileSystem::Instance().Readable(
-                resolved_module_spec.GetFileSpec())) {
+        if (resolved_module_spec.GetFileSpec().Readable()) {
           error.SetErrorStringWithFormat(
               "'%s' doesn't contain any '%s' platform architectures: %s",
               resolved_module_spec.GetFileSpec().GetPath().c_str(),
@@ -454,7 +455,7 @@ lldb::user_id_t PlatformPOSIX::GetFileSize(const FileSpec &file_spec) {
 
 Status PlatformPOSIX::CreateSymlink(const FileSpec &src, const FileSpec &dst) {
   if (IsHost())
-    return FileSystem::Instance().Symlink(src, dst);
+    return FileSystem::Symlink(src, dst);
   else if (m_remote_platform_sp)
     return m_remote_platform_sp->CreateSymlink(src, dst);
   else
@@ -463,7 +464,7 @@ Status PlatformPOSIX::CreateSymlink(const FileSpec &src, const FileSpec &dst) {
 
 bool PlatformPOSIX::GetFileExists(const FileSpec &file_spec) {
   if (IsHost())
-    return FileSystem::Instance().Exists(file_spec);
+    return file_spec.Exists();
   else if (m_remote_platform_sp)
     return m_remote_platform_sp->GetFileExists(file_spec);
   else
@@ -1281,7 +1282,8 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
       std::string name_string;
       process->ReadCStringFromMemory(buffer_addr, name_string, utility_error);
       if (utility_error.Success())
-        loaded_image->SetFile(name_string, llvm::sys::path::Style::posix);
+        loaded_image->SetFile(name_string, false, 
+                              llvm::sys::path::Style::posix);
     }
     return process->AddImageToken(token);
   }

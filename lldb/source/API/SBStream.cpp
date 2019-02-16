@@ -10,7 +10,6 @@
 #include "lldb/API/SBStream.h"
 
 #include "lldb/Core/StreamFile.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
@@ -25,12 +24,12 @@ SBStream::SBStream(SBStream &&rhs)
 
 SBStream::~SBStream() {}
 
-bool SBStream::IsValid() const { return (m_opaque_ap != NULL); }
+bool SBStream::IsValid() const { return (m_opaque_ap.get() != NULL); }
 
 // If this stream is not redirected to a file, it will maintain a local cache
 // for the stream data which can be accessed using this accessor.
 const char *SBStream::GetData() {
-  if (m_is_file || m_opaque_ap == NULL)
+  if (m_is_file || m_opaque_ap.get() == NULL)
     return NULL;
 
   return static_cast<StreamString *>(m_opaque_ap.get())->GetData();
@@ -39,7 +38,7 @@ const char *SBStream::GetData() {
 // If this stream is not redirected to a file, it will maintain a local cache
 // for the stream output whose length can be accessed using this accessor.
 size_t SBStream::GetSize() {
-  if (m_is_file || m_opaque_ap == NULL)
+  if (m_is_file || m_opaque_ap.get() == NULL)
     return 0;
 
   return static_cast<StreamString *>(m_opaque_ap.get())->GetSize();
@@ -59,7 +58,7 @@ void SBStream::RedirectToFile(const char *path, bool append) {
     return;
 
   std::string local_data;
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     // See if we have any locally backed data. If so, copy it so we can then
     // redirect it to the file so we don't lose the data
     if (!m_is_file)
@@ -71,12 +70,12 @@ void SBStream::RedirectToFile(const char *path, bool append) {
     open_options |= File::eOpenOptionAppend;
   else
     open_options |= File::eOpenOptionTruncate;
+  stream_file->GetFile().Open(path, open_options,
+                              lldb::eFilePermissionsFileDefault);
 
-  FileSystem::Instance().Open(stream_file->GetFile(), FileSpec(path),
-                              open_options);
   m_opaque_ap.reset(stream_file);
 
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     m_is_file = true;
 
     // If we had any data locally in our StreamString, then pass that along to
@@ -92,7 +91,7 @@ void SBStream::RedirectToFileHandle(FILE *fh, bool transfer_fh_ownership) {
     return;
 
   std::string local_data;
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     // See if we have any locally backed data. If so, copy it so we can then
     // redirect it to the file so we don't lose the data
     if (!m_is_file)
@@ -100,7 +99,7 @@ void SBStream::RedirectToFileHandle(FILE *fh, bool transfer_fh_ownership) {
   }
   m_opaque_ap.reset(new StreamFile(fh, transfer_fh_ownership));
 
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     m_is_file = true;
 
     // If we had any data locally in our StreamString, then pass that along to
@@ -113,7 +112,7 @@ void SBStream::RedirectToFileHandle(FILE *fh, bool transfer_fh_ownership) {
 
 void SBStream::RedirectToFileDescriptor(int fd, bool transfer_fh_ownership) {
   std::string local_data;
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     // See if we have any locally backed data. If so, copy it so we can then
     // redirect it to the file so we don't lose the data
     if (!m_is_file)
@@ -121,7 +120,7 @@ void SBStream::RedirectToFileDescriptor(int fd, bool transfer_fh_ownership) {
   }
 
   m_opaque_ap.reset(new StreamFile(::fdopen(fd, "w"), transfer_fh_ownership));
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     m_is_file = true;
 
     // If we had any data locally in our StreamString, then pass that along to
@@ -137,13 +136,13 @@ lldb_private::Stream *SBStream::operator->() { return m_opaque_ap.get(); }
 lldb_private::Stream *SBStream::get() { return m_opaque_ap.get(); }
 
 lldb_private::Stream &SBStream::ref() {
-  if (m_opaque_ap == NULL)
+  if (m_opaque_ap.get() == NULL)
     m_opaque_ap.reset(new StreamString());
-  return *m_opaque_ap;
+  return *m_opaque_ap.get();
 }
 
 void SBStream::Clear() {
-  if (m_opaque_ap) {
+  if (m_opaque_ap.get()) {
     // See if we have any locally backed data. If so, copy it so we can then
     // redirect it to the file so we don't lose the data
     if (m_is_file)

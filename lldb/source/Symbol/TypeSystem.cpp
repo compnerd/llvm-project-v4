@@ -19,6 +19,7 @@
 
 #include <set>
 
+#include "lldb/Utility/Status.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Symbol/CompilerType.h"
 
@@ -30,13 +31,14 @@ TypeSystem::TypeSystem(LLVMCastKind kind) : m_kind(kind), m_sym_file(nullptr) {}
 TypeSystem::~TypeSystem() {}
 
 static lldb::TypeSystemSP CreateInstanceHelper(lldb::LanguageType language,
-                                               Module *module, Target *target) {
+                                               Module *module, Target *target,
+                                               const char *compiler_options) {
   uint32_t i = 0;
   TypeSystemCreateInstance create_callback;
   while ((create_callback = PluginManager::GetTypeSystemCreateCallbackAtIndex(
               i++)) != nullptr) {
     lldb::TypeSystemSP type_system_sp =
-        create_callback(language, module, target);
+        create_callback(language, module, target, compiler_options);
     if (type_system_sp)
       return type_system_sp;
   }
@@ -46,12 +48,18 @@ static lldb::TypeSystemSP CreateInstanceHelper(lldb::LanguageType language,
 
 lldb::TypeSystemSP TypeSystem::CreateInstance(lldb::LanguageType language,
                                               Module *module) {
-  return CreateInstanceHelper(language, module, nullptr);
+  return CreateInstanceHelper(language, module, nullptr, nullptr);
+}
+
+lldb::TypeSystemSP TypeSystem::CreateInstance(lldb::LanguageType language,
+                                              Target *target,
+                                              const char *compiler_options) {
+  return CreateInstanceHelper(language, nullptr, target, compiler_options);
 }
 
 lldb::TypeSystemSP TypeSystem::CreateInstance(lldb::LanguageType language,
                                               Target *target) {
-  return CreateInstanceHelper(language, nullptr, target);
+  return CreateInstanceHelper(language, nullptr, target, nullptr);
 }
 
 bool TypeSystem::IsAnonymousType(lldb::opaque_compiler_type_t type) {
@@ -101,10 +109,6 @@ CompilerType TypeSystem::GetTypeForFormatters(void *type) {
   return CompilerType(this, type);
 }
 
-size_t TypeSystem::GetNumTemplateArguments(lldb::opaque_compiler_type_t type) {
-  return 0;
-}
-
 TemplateArgumentKind
 TypeSystem::GetTemplateArgumentKind(opaque_compiler_type_t type, size_t idx) {
   return eTemplateArgumentKindNull;
@@ -112,6 +116,14 @@ TypeSystem::GetTemplateArgumentKind(opaque_compiler_type_t type, size_t idx) {
 
 CompilerType TypeSystem::GetTypeTemplateArgument(opaque_compiler_type_t type,
                                                  size_t idx) {
+  return CompilerType();
+}
+
+GenericKind TypeSystem::GetGenericArgumentKind(void *type, size_t idx) {
+  return eNullGenericKindType;
+}
+
+CompilerType TypeSystem::GetGenericArgumentType(void *type, size_t idx) {
   return CompilerType();
 }
 
@@ -127,6 +139,24 @@ LazyBool TypeSystem::ShouldPrintAsOneLiner(void *type, ValueObject *valobj) {
 
 bool TypeSystem::IsMeaninglessWithoutDynamicResolution(void *type) {
   return false;
+}
+
+Status TypeSystem::IsCompatible() {
+  // Assume a language is compatible. Override this virtual function
+  // in your TypeSystem plug-in if version checking is desired.
+  return Status();
+}
+
+ConstString TypeSystem::GetDisplayTypeName(void *type) {
+  return GetTypeName(type);
+}
+
+ConstString TypeSystem::GetTypeSymbolName(void *type) {
+  return GetTypeName(type);
+}
+
+ConstString TypeSystem::GetMangledTypeName(void *type) {
+  return GetTypeName(type);
 }
 
 ConstString TypeSystem::DeclGetMangledName(void *opaque_decl) {
@@ -161,6 +191,8 @@ TypeSystemMap::TypeSystemMap()
 
 TypeSystemMap::~TypeSystemMap() {}
 
+void TypeSystemMap::operator=(const TypeSystemMap &rhs) { m_map = rhs.m_map; }
+
 void TypeSystemMap::Clear() {
   collection map;
   {
@@ -193,7 +225,7 @@ void TypeSystemMap::ForEach(std::function<bool(TypeSystem *)> const &callback) {
     TypeSystem *type_system = pair.second.get();
     if (type_system && !visited.count(type_system)) {
       visited.insert(type_system);
-      if (!callback(type_system))
+      if (callback(type_system) == false)
         break;
     }
   }
@@ -226,9 +258,10 @@ TypeSystem *TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
   return type_system_sp.get();
 }
 
-TypeSystem *TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
-                                                    Target *target,
-                                                    bool can_create) {
+TypeSystem *
+TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
+                                        Target *target, bool can_create,
+                                        const char *compiler_options) {
   std::lock_guard<std::mutex> guard(m_mutex);
   collection::iterator pos = m_map.find(language);
   if (pos != m_map.end())
@@ -250,10 +283,22 @@ TypeSystem *TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
   // Cache even if we get a shared pointer that contains null type system back
   lldb::TypeSystemSP type_system_sp;
   if (!m_clear_in_progress)
-    type_system_sp = TypeSystem::CreateInstance(language, target);
+    type_system_sp =
+        TypeSystem::CreateInstance(language, target, compiler_options);
 
   AddToMap(language, type_system_sp);
   return type_system_sp.get();
+}
+
+void TypeSystemMap::RemoveTypeSystemsForLanguage(lldb::LanguageType language) {
+  std::lock_guard<std::mutex> guard(m_mutex);
+  collection::iterator pos = m_map.find(language);
+  // If we are clearing the map, we don't need to remove this individual
+  // item.  It will go away soon enough.
+  if (!m_clear_in_progress) {
+    if (pos != m_map.end())
+      m_map.erase(pos);
+  }
 }
 
 void TypeSystemMap::AddToMap(lldb::LanguageType language,

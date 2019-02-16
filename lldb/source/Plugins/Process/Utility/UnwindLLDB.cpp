@@ -212,15 +212,15 @@ UnwindLLDB::CursorSP UnwindLLDB::GetOneMoreFrame(ABI *abi) {
     // On Mac OS X, the _sigtramp asynchronous signal trampoline frame may not
     // have its (constructed) CFA aligned correctly -- don't do the abi
     // alignment check for these.
-    if (!reg_ctx_sp->IsTrapHandlerFrame()) {
+    if (reg_ctx_sp->IsTrapHandlerFrame() == false) {
       // See if we can find a fallback unwind plan for THIS frame.  It may be
       // that the UnwindPlan we're using for THIS frame was bad and gave us a
       // bad CFA. If that's not it, then see if we can change the UnwindPlan
       // for the frame below us ("NEXT") -- see if using that other UnwindPlan
       // gets us a better unwind state.
-      if (!reg_ctx_sp->TryFallbackUnwindPlan() ||
-          !reg_ctx_sp->GetCFA(cursor_sp->cfa) ||
-          !abi->CallFrameAddressIsValid(cursor_sp->cfa)) {
+      if (reg_ctx_sp->TryFallbackUnwindPlan() == false ||
+          reg_ctx_sp->GetCFA(cursor_sp->cfa) == false ||
+          abi->CallFrameAddressIsValid(cursor_sp->cfa) == false) {
         if (prev_frame->reg_ctx_lldb_sp->TryFallbackUnwindPlan()) {
           // TryFallbackUnwindPlan for prev_frame succeeded and updated
           // reg_ctx_lldb_sp field of prev_frame. However, cfa field of
@@ -385,8 +385,10 @@ bool UnwindLLDB::AddOneMoreFrame(ABI *abi) {
     // Cursor::m_frames[m_frames.size() - 2], reg_ctx_lldb_sp field was already
     // updated during TryFallbackUnwindPlan call above. However, cfa field
     // still needs to be updated. Hence updating it here and then returning.
-    return m_frames[m_frames.size() - 2]->reg_ctx_lldb_sp->GetCFA(
-        m_frames[m_frames.size() - 2]->cfa);
+    if (!(m_frames[m_frames.size() - 2]->reg_ctx_lldb_sp->GetCFA(
+            m_frames[m_frames.size() - 2]->cfa)))
+      return false;
+    return true;
   }
 
   // The new frame hasn't helped in unwinding. Fall back to the original one as
@@ -468,7 +470,10 @@ bool UnwindLLDB::SearchForSavedLocationForRegister(
     UnwindLLDB::RegisterSearchResult result;
     result = m_frames[frame_num]->reg_ctx_lldb_sp->SavedLocationForRegister(
         lldb_regnum, regloc);
-    return result == UnwindLLDB::RegisterSearchResult::eRegisterFound;
+    if (result == UnwindLLDB::RegisterSearchResult::eRegisterFound)
+      return true;
+    else
+      return false;
   }
   while (frame_num >= 0) {
     UnwindLLDB::RegisterSearchResult result;

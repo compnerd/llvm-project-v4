@@ -7,11 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/Host/macosx/HostInfoMacOSX.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
+#include "lldb/Host/macosx/HostInfoMacOSX.h"
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/SafeMachO.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
@@ -97,13 +97,14 @@ FileSpec HostInfoMacOSX::GetProgramFileSpec() {
     uint32_t len = sizeof(program_fullpath);
     int err = _NSGetExecutablePath(program_fullpath, &len);
     if (err == 0)
-      g_program_filespec.SetFile(program_fullpath, FileSpec::Style::native);
+      g_program_filespec.SetFile(program_fullpath, false,
+                                 FileSpec::Style::native);
     else if (err == -1) {
       char *large_program_fullpath = (char *)::malloc(len + 1);
 
       err = _NSGetExecutablePath(large_program_fullpath, &len);
       if (err == 0)
-        g_program_filespec.SetFile(large_program_fullpath,
+        g_program_filespec.SetFile(large_program_fullpath, false,
                                    FileSpec::Style::native);
 
       ::free(large_program_fullpath);
@@ -139,9 +140,8 @@ bool HostInfoMacOSX::ComputeSupportExeDirectory(FileSpec &file_spec) {
     // as in the case of a python script, the executable is python, not
     // the lldb driver.
     raw_path.append("/../bin");
-    FileSpec support_dir_spec(raw_path);
-    FileSystem::Instance().Resolve(support_dir_spec);
-    if (!FileSystem::Instance().IsDirectory(support_dir_spec)) {
+    FileSpec support_dir_spec(raw_path, true);
+    if (!llvm::sys::fs::is_directory(support_dir_spec.GetPath())) {
       Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_HOST);
       if (log)
         log->Printf("HostInfoMacOSX::%s(): failed to find support directory",
@@ -164,6 +164,11 @@ bool HostInfoMacOSX::ComputeSupportExeDirectory(FileSpec &file_spec) {
   file_spec.GetDirectory().SetString(
       llvm::StringRef(raw_path.c_str(), raw_path.size()));
   return (bool)file_spec.GetDirectory();
+}
+
+bool HostInfoMacOSX::ComputeSupportFileDirectory(FileSpec &file_spec) {
+  // The bundle's Resources directory, just like for executables
+  return HostInfoMacOSX::ComputeSupportExeDirectory(file_spec);
 }
 
 bool HostInfoMacOSX::ComputeHeaderDirectory(FileSpec &file_spec) {
@@ -204,8 +209,7 @@ bool HostInfoMacOSX::ComputeSystemPluginsDirectory(FileSpec &file_spec) {
 }
 
 bool HostInfoMacOSX::ComputeUserPluginsDirectory(FileSpec &file_spec) {
-  FileSpec temp_file("~/Library/Application Support/LLDB/PlugIns");
-  FileSystem::Instance().Resolve(temp_file);
+  FileSpec temp_file("~/Library/Application Support/LLDB/PlugIns", true);
   file_spec.GetDirectory().SetCString(temp_file.GetPath().c_str());
   return true;
 }
@@ -277,4 +281,25 @@ void HostInfoMacOSX::ComputeHostArchitectureSupport(ArchSpec &arch_32,
       arch_64.Clear();
     }
   }
+}
+
+// Swift additions.
+
+bool HostInfoMacOSX::ComputeSwiftDirectory(FileSpec &file_spec) {
+  FileSpec lldb_file_spec = GetShlibDir();
+  if (!lldb_file_spec)
+    return false;
+
+  std::string raw_path = lldb_file_spec.GetPath();
+  size_t framework_pos = raw_path.find("LLDB.framework");
+  if (framework_pos == std::string::npos)
+    return HostInfoPosix::ComputeSwiftDirectory(file_spec);
+
+  if (framework_pos != std::string::npos) {
+    framework_pos += strlen("LLDB.framework");
+    raw_path.resize(framework_pos);
+    raw_path.append("/Resources/Swift");
+  }
+  file_spec.SetFile(raw_path.c_str(), true, FileSpec::Style::native);
+  return true;
 }

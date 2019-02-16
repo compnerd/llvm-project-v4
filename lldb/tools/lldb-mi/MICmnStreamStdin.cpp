@@ -11,7 +11,7 @@
 #ifdef _MSC_VER
 #include <windows.h>
 #endif
-#include <string.h>
+#include <string.h> // For std::strerror()
 
 // In-house headers:
 #include "MICmnLog.h"

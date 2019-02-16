@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/ABI.h"
 #include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "lldb/Core/PluginManager.h"
@@ -98,11 +102,16 @@ ValueObjectSP ABI::GetReturnValueObject(Thread &thread, CompilerType &ast_type,
   // work.
 
   if (persistent) {
+    lldb::LanguageType lang = ast_type.GetMinimumLanguage();
+    PersistentExpressionState *persistent_expression_state;
     Target &target = *thread.CalculateTarget();
-    PersistentExpressionState *persistent_expression_state =
-        target.GetPersistentExpressionStateForLanguage(
-            ast_type.GetMinimumLanguage());
-
+    if (lang == lldb::eLanguageTypeSwift)
+      persistent_expression_state = 
+        target.GetSwiftPersistentExpressionState(thread);
+    else
+      persistent_expression_state =
+        target.GetPersistentExpressionStateForLanguage(lang);
+    
     if (!persistent_expression_state)
       return ValueObjectSP();
 

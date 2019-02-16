@@ -9,6 +9,10 @@
 
 #include "lldb/Target/ThreadPlanBase.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 //
 #include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Breakpoint/BreakpointLocation.h"
@@ -57,7 +61,10 @@ bool ThreadPlanBase::ValidatePlan(Stream *error) { return true; }
 bool ThreadPlanBase::DoPlanExplainsStop(Event *event_ptr) {
   // The base plan should defer to its tracer, since by default it always
   // handles the stop.
-  return !TracerExplainsStop();
+  if (TracerExplainsStop())
+    return false;
+  else
+    return true;
 }
 
 Vote ThreadPlanBase::ShouldReportStop(Event *event_ptr) {

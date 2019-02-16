@@ -11,15 +11,15 @@
 #define LLDB_UTILITY_STATUS_H
 
 #include "lldb/lldb-defines.h"
-#include "lldb/lldb-enumerations.h"
-#include "llvm/ADT/StringRef.h"
+#include "lldb/lldb-enumerations.h" // for ErrorType, ErrorType...
+#include "llvm/ADT/StringRef.h"     // for StringRef
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
 #include <cstdarg>
-#include <stdint.h>
+#include <stdint.h> // for uint32_t
 #include <string>
-#include <system_error>
-#include <type_traits>
+#include <system_error> // for error_code
+#include <type_traits>  // for forward
 
 namespace llvm {
 class raw_ostream;

@@ -409,12 +409,15 @@ const char *CommandObject::GetArgumentName(CommandArgumentType arg_type) {
 }
 
 bool CommandObject::IsPairType(ArgumentRepetitionType arg_repeat_type) {
-  return (arg_repeat_type == eArgRepeatPairPlain) ||
-         (arg_repeat_type == eArgRepeatPairOptional) ||
-         (arg_repeat_type == eArgRepeatPairPlus) ||
-         (arg_repeat_type == eArgRepeatPairStar) ||
-         (arg_repeat_type == eArgRepeatPairRange) ||
-         (arg_repeat_type == eArgRepeatPairRangeOptional);
+  if ((arg_repeat_type == eArgRepeatPairPlain) ||
+      (arg_repeat_type == eArgRepeatPairOptional) ||
+      (arg_repeat_type == eArgRepeatPairPlus) ||
+      (arg_repeat_type == eArgRepeatPairStar) ||
+      (arg_repeat_type == eArgRepeatPairRange) ||
+      (arg_repeat_type == eArgRepeatPairRangeOptional))
+    return true;
+
+  return false;
 }
 
 static CommandObject::CommandArgumentEntry

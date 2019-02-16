@@ -155,8 +155,7 @@ void ClangHighlighter::Highlight(const HighlightStyle &options,
   // Let's just enable the latest ObjC and C++ which should get most tokens
   // right.
   LangOptions Opts;
-  Opts.ObjC = true;
-  // FIXME: This should probably set CPlusPlus, CPlusPlus11, ... too
+  Opts.ObjC2 = true;
   Opts.CPlusPlus17 = true;
   Opts.LineComment = true;
 

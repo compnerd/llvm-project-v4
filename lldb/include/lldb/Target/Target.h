@@ -10,27 +10,41 @@
 #ifndef liblldb_Target_h_
 #define liblldb_Target_h_
 
+// C Includes
+// C++ Includes
 #include <list>
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
+#include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
+#include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "lldb/Breakpoint/BreakpointList.h"
 #include "lldb/Breakpoint/BreakpointName.h"
 #include "lldb/Breakpoint/WatchpointList.h"
 #include "lldb/Core/Architecture.h"
+#include "lldb/Core/Broadcaster.h"
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/UserSettingsController.h"
 #include "lldb/Expression/Expression.h"
+#include "lldb/Interpreter/OptionValueBoolean.h"
+#include "lldb/Interpreter/OptionValueEnumeration.h"
+#include "lldb/Interpreter/OptionValueFileSpec.h"
+#include "lldb/Symbol/SwiftASTContext.h"
+#include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/TypeSystem.h"
+#include "lldb/Target/ABI.h"
 #include "lldb/Target/ExecutionContextScope.h"
 #include "lldb/Target/PathMappingList.h"
 #include "lldb/Target/ProcessLaunchInfo.h"
 #include "lldb/Target/SectionLoadHistory.h"
 #include "lldb/Utility/ArchSpec.h"
-#include "lldb/Utility/Broadcaster.h"
+#include "lldb/Utility/Args.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Timeout.h"
 #include "lldb/lldb-public.h"
@@ -126,9 +140,19 @@ public:
 
   FileSpecList &GetDebugFileSearchPaths();
 
+  FileSpec &GetSDKPath();
+
   FileSpecList &GetClangModuleSearchPaths();
 
+  FileSpecList &GetSwiftFrameworkSearchPaths();
+
+  FileSpecList &GetSwiftModuleSearchPaths();
+
+  bool GetSwiftCreateModuleContextsInParallel() const;
+
   bool GetEnableAutoImportClangModules() const;
+
+  bool GetUseAllCompilerFlags() const;
 
   bool GetEnableAutoApplyFixIts() const;
 
@@ -187,10 +211,6 @@ public:
   bool GetDisplayRuntimeSupportValues() const;
 
   void SetDisplayRuntimeSupportValues(bool b);
-
-  bool GetDisplayRecognizedArguments() const;
-
-  void SetDisplayRecognizedArguments(bool b);
 
   const ProcessLaunchInfo &GetProcessLaunchInfo();
 
@@ -348,6 +368,14 @@ public:
 
   void SetREPLEnabled(bool b) { m_repl = b; }
 
+  bool GetPlaygroundTransformEnabled() const { return m_playground; }
+
+  void SetPlaygroundTransformEnabled(bool b) {
+    m_playground = b;
+    if (b)
+      m_language = lldb::eLanguageTypeSwift;
+  }
+
   void SetCancelCallback(lldb::ExpressionCancelCallback callback, void *baton) {
     m_cancel_callback_baton = baton;
     m_cancel_callback = callback;
@@ -377,6 +405,8 @@ public:
 
   uint32_t GetPoundLineLine() const { return m_pound_line_line; }
 
+  uint32_t GetExpressionNumber() const;
+
   void SetResultIsInternal(bool b) { m_result_is_internal = b; }
 
   bool GetResultIsInternal() const { return m_result_is_internal; }
@@ -388,6 +418,10 @@ public:
   bool IsForUtilityExpr() const { return m_running_utility_expression; }
 
   void SetIsForUtilityExpr(bool b) { m_running_utility_expression = b; }
+
+  void SetPreparePlaygroundStubFunctions(bool b) { m_prepare_playground_stub_functions = b; }
+
+  bool GetPreparePlaygroundStubFunctions() const { return m_prepare_playground_stub_functions; }
 
 private:
   ExecutionPolicy m_execution_policy = default_execution_policy;
@@ -402,6 +436,7 @@ private:
   bool m_debug = false;
   bool m_trap_exceptions = true;
   bool m_repl = false;
+  bool m_playground = false;
   bool m_generate_debug_info = false;
   bool m_ansi_color_errors = false;
   bool m_result_is_internal = false;
@@ -414,12 +449,16 @@ private:
   Timeout<std::micro> m_timeout = default_timeout;
   Timeout<std::micro> m_one_thread_timeout = llvm::None;
   lldb::ExpressionCancelCallback m_cancel_callback = nullptr;
+  mutable uint32_t m_expr_number = 0; // A 1 based integer that increases with
+                                      // each expression type (normal, expr,
+                                      // function, etc)
   void *m_cancel_callback_baton = nullptr;
   // If m_pound_line_file is not empty and m_pound_line_line is non-zero, use
   // #line %u "%s" before the expression content to remap where the source
   // originates
   mutable std::string m_pound_line_file;
   mutable uint32_t m_pound_line_line;
+  bool m_prepare_playground_stub_functions = true;
 };
 
 //----------------------------------------------------------------------
@@ -612,12 +651,14 @@ public:
   // eLazyBoolCalculate, we use the current target setting, else we use the
   // values passed in. func_name_type_mask is or'ed values from the
   // FunctionNameType enum.
-  lldb::BreakpointSP CreateBreakpoint(
-      const FileSpecList *containingModules,
-      const FileSpecList *containingSourceFiles, const char *func_name,
-      lldb::FunctionNameType func_name_type_mask, lldb::LanguageType language,
-      lldb::addr_t offset, LazyBool skip_prologue, bool internal,
-      bool request_hardware);
+  lldb::BreakpointSP CreateBreakpoint(const FileSpecList *containingModules,
+                                      const FileSpecList *containingSourceFiles,
+                                      const char *func_name,
+                                      uint32_t func_name_type_mask,
+                                      lldb::LanguageType language,
+                                      lldb::addr_t offset,
+                                      LazyBool skip_prologue, bool internal,
+                                      bool request_hardware);
 
   lldb::BreakpointSP
   CreateExceptionBreakpoint(enum lldb::LanguageType language, bool catch_bp,
@@ -639,20 +680,20 @@ public:
   // the case where you just want to set a breakpoint on a set of names you
   // already know. func_name_type_mask is or'ed values from the
   // FunctionNameType enum.
-  lldb::BreakpointSP CreateBreakpoint(
-      const FileSpecList *containingModules,
-      const FileSpecList *containingSourceFiles, const char *func_names[],
-      size_t num_names, lldb::FunctionNameType func_name_type_mask,
-      lldb::LanguageType language, lldb::addr_t offset, LazyBool skip_prologue,
-      bool internal, bool request_hardware);
+  lldb::BreakpointSP
+  CreateBreakpoint(const FileSpecList *containingModules,
+                   const FileSpecList *containingSourceFiles,
+                   const char *func_names[], size_t num_names,
+                   uint32_t func_name_type_mask, lldb::LanguageType language,
+                   lldb::addr_t offset, LazyBool skip_prologue, bool internal,
+                   bool request_hardware);
 
   lldb::BreakpointSP
   CreateBreakpoint(const FileSpecList *containingModules,
                    const FileSpecList *containingSourceFiles,
                    const std::vector<std::string> &func_names,
-                   lldb::FunctionNameType func_name_type_mask,
-                   lldb::LanguageType language, lldb::addr_t m_offset,
-                   LazyBool skip_prologue, bool internal,
+                   uint32_t func_name_type_mask, lldb::LanguageType language,
+                   lldb::addr_t m_offset, LazyBool skip_prologue, bool internal,
                    bool request_hardware);
 
   // Use this to create a general breakpoint:
@@ -939,30 +980,28 @@ public:
   /// Set the architecture for this target.
   ///
   /// If the current target has no Images read in, then this just sets the
-  /// architecture, which will be used to select the architecture of the
-  /// ExecutableModule when that is set. If the current target has an
-  /// ExecutableModule, then calling SetArchitecture with a different
+  /// architecture, which will
+  /// be used to select the architecture of the ExecutableModule when that is
+  /// set.
+  /// If the current target has an ExecutableModule, then calling
+  /// SetArchitecture with a different
   /// architecture from the currently selected one will reset the
-  /// ExecutableModule to that slice of the file backing the ExecutableModule.
-  /// If the file backing the ExecutableModule does not contain a fork of this
-  /// architecture, then this code will return false, and the architecture
-  /// won't be changed. If the input arch_spec is the same as the already set
-  /// architecture, this is a no-op.
+  /// ExecutableModule to that slice
+  /// of the file backing the ExecutableModule.  If the file backing the
+  /// ExecutableModule does not
+  /// contain a fork of this architecture, then this code will return false, and
+  /// the architecture
+  /// won't be changed.
+  /// If the input arch_spec is the same as the already set architecture, this
+  /// is a no-op.
   ///
   /// @param[in] arch_spec
   ///     The new architecture.
   ///
-  /// @param[in] set_platform
-  ///     If \b true, then the platform will be adjusted if the currently
-  ///     selected platform is not compatible with the archicture being set.
-  ///     If \b false, then just the architecture will be set even if the
-  ///     currently selected platform isn't compatible (in case it might be
-  ///     manually set following this function call).
-  ///
   /// @return
   ///     \b true if the architecture was successfully set, \bfalse otherwise.
   //------------------------------------------------------------------
-  bool SetArchitecture(const ArchSpec &arch_spec, bool set_platform = false);
+  bool SetArchitecture(const ArchSpec &arch_spec);
 
   bool MergeArchitecture(const ArchSpec &arch_spec);
 
@@ -1028,18 +1067,59 @@ public:
 
   PathMappingList &GetImageSearchPathList();
 
-  TypeSystem *GetScratchTypeSystemForLanguage(Status *error,
-                                              lldb::LanguageType language,
-                                              bool create_on_demand = true);
+#ifdef __clang_analyzer__
+  // This enables an analyzer warning for unchecked use of the TypeSystem *
+  // returned by this call.
+  // It tells the analyzer that the return value is something that has been
+  // null-checked once.
+  // The analyzer will then assume that it must be null-checked at every use,
+  // which is what we want.
+  TypeSystem *GetScratchTypeSystemForLanguage(
+      Status *error, lldb::LanguageType language, bool create_on_demand = true,
+      const char *compiler_options = nullptr) __attribute__((always_inline)) {
+    TypeSystem *ret =
+        GetScratchTypeSystemForLanguageImpl(error, language, create_on_demand);
+    return ret ? ret : nullptr;
+  }
+
+  TypeSystem *GetScratchTypeSystemForLanguageImpl(
+      Status *error, lldb::LanguageType language, bool create_on_demand = true,
+      const char *compiler_options = nullptr);
+#else
+  TypeSystem *
+  GetScratchTypeSystemForLanguage(Status *error, lldb::LanguageType language,
+                                  bool create_on_demand = true,
+                                  const char *compiler_options = nullptr);
+#endif
+
+#ifdef __clang_analyzer__
+  // See GetScratchTypeSystemForLanguage
+  PersistentExpressionState *
+  GetPersistentExpressionStateForLanguage(lldb::LanguageType language)
+      __attribute__((always_inline)) {
+    PersistentExpressionState *ret =
+        GetPersistentExpressionStateForLanguageImpl(language);
+    return ret ? ret : nullptr;
+  }
 
   PersistentExpressionState *
+  GetPersistentExpressionStateForLanguageImpl(lldb::LanguageType language);
+#else
+  PersistentExpressionState *
   GetPersistentExpressionStateForLanguage(lldb::LanguageType language);
+#endif
+
+  SwiftPersistentExpressionState *
+  GetSwiftPersistentExpressionState(ExecutionContextScope &exe_scope);
+
+  const TypeSystemMap &GetTypeSystemMap();
 
   // Creates a UserExpression for the given language, the rest of the
   // parameters have the same meaning as for the UserExpression constructor.
   // Returns a new-ed object which the caller owns.
 
   UserExpression *GetUserExpressionForLanguage(
+      ExecutionContext &exe_ctx,
       llvm::StringRef expr, llvm::StringRef prefix, lldb::LanguageType language,
       Expression::ResultType desired_type,
       const EvaluateExpressionOptions &options, Status &error);
@@ -1067,10 +1147,35 @@ public:
                                                  const char *name,
                                                  Status &error);
 
+#ifdef __clang_analyzer__
+  // See GetScratchTypeSystemForLanguage()
+  ClangASTContext *GetScratchClangASTContext(bool create_on_demand = true)
+      __attribute__((always_inline)) {
+    ClangASTContext *ret = GetScratchClangASTContextImpl(create_on_demand);
+
+    return ret ? ret : nullptr;
+  }
+
+  ClangASTContext *GetScratchClangASTContextImpl(bool create_on_demand = true);
+#else
   ClangASTContext *GetScratchClangASTContext(bool create_on_demand = true);
+#endif
 
   lldb::ClangASTImporterSP GetClangASTImporter();
 
+  /// Get the lock guarding the scratch typesystem from being re-initialized.
+  SharedMutex &GetSwiftScratchContextLock() {
+    return m_scratch_typesystem_lock;
+  }
+
+  SwiftASTContextReader
+  GetScratchSwiftASTContext(Status &error, ExecutionContextScope &exe_scope,
+                            bool create_on_demand = true);
+
+private:
+  void DisplayFallbackSwiftContextErrors(SwiftASTContext *swift_ast_ctx);
+public:
+  
   //----------------------------------------------------------------------
   // Install any files through the platform that need be to installed prior to
   // launching or attaching.
@@ -1107,6 +1212,14 @@ public:
       lldb::ValueObjectSP &result_valobj_sp,
       const EvaluateExpressionOptions &options = EvaluateExpressionOptions(),
       std::string *fixed_expression = nullptr);
+
+  // Look up a symbol by name and type in both the target's symbols and the
+  // persistent symbols from the
+  // expression parser.  The symbol_type is ignored in that case, for now we
+  // don't have symbol types for the
+  // persistent variables.
+  lldb::addr_t FindLoadAddrForNameInSymbolsAndPersistentVariables(
+      ConstString name_const_str, lldb::SymbolType symbol_type);
 
   lldb::ExpressionVariableSP GetPersistentVariable(const ConstString &name);
 
@@ -1235,6 +1348,24 @@ public:
 
   void SetREPL(lldb::LanguageType language, lldb::REPLSP repl_sp);
 
+  /// Enable the use of a separate sscratch type system per lldb::Module.
+  void SetUseScratchTypesystemPerModule(bool value) {
+    m_use_scratch_typesystem_per_module = value;
+  }
+  bool UseScratchTypesystemPerModule() const {
+    return m_use_scratch_typesystem_per_module;
+  }
+
+private:
+  std::mutex m_swift_messages_mutex;
+  std::unordered_set<std::string> m_swift_messages_issued;
+
+public:
+  /// Register that a message (uniquely identified by \p Key) about a Swift
+  /// context is about to be displayed to the user. Returns true iff the message
+  /// has not already been displayed.
+  bool RegisterSwiftContextMessageKey(std::string Key);
+
 protected:
   //------------------------------------------------------------------
   /// Implementing of ModuleList::Notifier.
@@ -1289,6 +1420,7 @@ protected:
   lldb::SearchFilterSP m_search_filter_sp;
   PathMappingList m_image_search_paths;
   TypeSystemMap m_scratch_type_system_map;
+  std::map<lldb::LanguageType, bool> m_cant_make_scratch_type_system;
 
   typedef std::map<lldb::LanguageType, lldb::REPLSP> REPLMap;
   REPLMap m_repl_map;
@@ -1305,6 +1437,15 @@ protected:
   bool m_suppress_stop_hooks;
   bool m_is_dummy_target;
   unsigned m_next_persistent_variable_index = 0;
+
+  bool m_use_scratch_typesystem_per_module = false;
+  bool m_did_display_scratch_fallback_warning = false;
+  typedef std::pair<lldb_private::Module *, char> ModuleLanguage;
+  llvm::DenseMap<ModuleLanguage, lldb::TypeSystemSP>
+      m_scratch_typesystem_for_module;
+
+  /// Guards the scratch typesystem from being re-initialized.
+  SharedMutex m_scratch_typesystem_lock;
 
   static void ImageSearchPathsChanged(const PathMappingList &path_list,
                                       void *baton);

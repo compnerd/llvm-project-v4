@@ -9,21 +9,22 @@
 
 #include "lldb/Core/ValueObjectChild.h"
 
-#include "lldb/Core/Value.h"
+#include "lldb/Core/Scalar.h" // for Scalar
+#include "lldb/Core/Value.h"  // for Value, Value::ValueType::e...
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/ExecutionContext.h"
+#include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/Process.h"
-#include "lldb/Utility/Flags.h"
-#include "lldb/Utility/Scalar.h"
-#include "lldb/Utility/Status.h"
-#include "lldb/lldb-forward.h"
+#include "lldb/Utility/Flags.h"  // for Flags
+#include "lldb/Utility/Status.h" // for Status
+#include "lldb/lldb-forward.h"   // for ProcessSP, ModuleSP
 
-#include <functional>
-#include <memory>
-#include <vector>
+#include <functional> // for _Func_impl<>::_Mybase
+#include <memory>     // for shared_ptr
+#include <vector>     // for vector
 
-#include <stdio.h>
-#include <string.h>
+#include <stdio.h>  // for snprintf, size_t
+#include <string.h> // for strlen
 
 using namespace lldb_private;
 
@@ -124,11 +125,21 @@ bool ValueObjectChild::UpdateValue() {
 
       Flags parent_type_flags(parent_type.GetTypeInfo());
       const bool is_instance_ptr_base =
-          ((m_is_base_class) &&
+          ((m_is_base_class == true) &&
            (parent_type_flags.AnySet(lldb::eTypeInstanceIsPointer)));
 
       if (parent->GetCompilerType().ShouldTreatScalarValueAsAddress()) {
         lldb::addr_t addr = parent->GetPointerValue();
+
+        // BEGIN Swift
+        if (parent_type_flags.AnySet(lldb::eTypeInstanceIsPointer))
+          if (auto process_sp = GetProcessSP())
+            if (auto runtime = process_sp->GetLanguageRuntime(
+                    parent_type.GetMinimumLanguage()))
+              if (!runtime->FixupReference(addr, parent_type))
+                m_error.SetErrorString("reference fixup failed.");
+        // END Swift
+
         m_value.GetScalar() = addr;
 
         if (addr == LLDB_INVALID_ADDRESS) {
@@ -142,7 +153,7 @@ bool ValueObjectChild::UpdateValue() {
           switch (addr_type) {
           case eAddressTypeFile: {
             lldb::ProcessSP process_sp(GetProcessSP());
-            if (process_sp && process_sp->IsAlive())
+            if (process_sp && process_sp->IsAlive() == true)
               m_value.SetValueType(Value::eValueTypeLoadAddress);
             else
               m_value.SetValueType(Value::eValueTypeFileAddress);
@@ -202,9 +213,12 @@ bool ValueObjectChild::UpdateValue() {
         ExecutionContext exe_ctx(
             GetExecutionContextRef().Lock(thread_and_frame_only_if_stopped));
         if (GetCompilerType().GetTypeInfo() & lldb::eTypeHasValue) {
-          Value &value = is_instance_ptr_base ? m_parent->GetValue() : m_value;
-          m_error =
-              value.GetValueAsData(&exe_ctx, m_data, 0, GetModule().get());
+          if (!is_instance_ptr_base)
+            m_error =
+                m_value.GetValueAsData(&exe_ctx, m_data, 0, GetModule().get());
+          else
+            m_error = m_parent->GetValue().GetValueAsData(&exe_ctx, m_data, 0,
+                                                          GetModule().get());
         } else {
           m_error.Clear(); // No value so nothing to read...
         }

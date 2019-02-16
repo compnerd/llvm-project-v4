@@ -14,12 +14,12 @@
 #include "lldb/Core/Address.h"
 #include "lldb/Core/Opcode.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/RegisterValue.h"
 #include "lldb/Host/PosixApi.h"
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/DataExtractor.h"
-#include "lldb/Utility/RegisterValue.h"
 #include "lldb/Utility/Stream.h"
 #include "llvm-c/Disassembler.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -207,8 +207,10 @@ EmulateInstructionMIPS64::CreateInstance(const ArchSpec &arch,
 }
 
 bool EmulateInstructionMIPS64::SetTargetTriple(const ArchSpec &arch) {
-  return arch.GetTriple().getArch() == llvm::Triple::mips64 ||
-         arch.GetTriple().getArch() == llvm::Triple::mips64el;
+  if (arch.GetTriple().getArch() == llvm::Triple::mips64 ||
+      arch.GetTriple().getArch() == llvm::Triple::mips64el)
+    return true;
+  return false;
 }
 
 const char *EmulateInstructionMIPS64::GetRegisterName(unsigned reg_num,
@@ -981,10 +983,13 @@ bool EmulateInstructionMIPS64::EvaluateInstruction(uint32_t evaluate_options) {
    * mc_insn.getOpcode() returns decoded opcode. However to make use
    * of llvm::Mips::<insn> we would need "MipsGenInstrInfo.inc".
   */
-  const char *op_name = m_insn_info->getName(mc_insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(mc_insn.getOpcode());
 
-  if (op_name == NULL)
+  if (op_name_ref.empty())
     return false;
+
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   /*
    * Decoding has been done already. Just get the call-back function
@@ -1238,7 +1243,10 @@ bool EmulateInstructionMIPS64::Emulate_LD(llvm::MCInst &insn) {
     Context context;
     context.type = eContextRegisterLoad;
 
-    return WriteRegister(context, &reg_info_src, data_src);
+    if (!WriteRegister(context, &reg_info_src, data_src))
+      return false;
+
+    return true;
   }
 
   return false;
@@ -1257,8 +1265,11 @@ bool EmulateInstructionMIPS64::Emulate_LUI(llvm::MCInst &insn) {
   context.SetImmediateSigned(imm);
   context.type = eContextImmediate;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF,
-                               dwarf_zero_mips64 + rt, imm);
+  if (WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_zero_mips64 + rt,
+                            imm))
+    return true;
+
+  return false;
 }
 
 bool EmulateInstructionMIPS64::Emulate_DSUBU_DADDU(llvm::MCInst &insn) {
@@ -1269,7 +1280,9 @@ bool EmulateInstructionMIPS64::Emulate_DSUBU_DADDU(llvm::MCInst &insn) {
   bool success = false;
   uint64_t result;
   uint8_t src, dst, rt;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   dst = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   src = m_reg_info->getEncodingValue(insn.getOperand(1).getReg());
@@ -1348,7 +1361,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs, rt;
   int64_t offset, pc, rs_val, rt_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   rt = m_reg_info->getEncodingValue(insn.getOperand(1).getReg());
@@ -1386,8 +1401,11 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops(llvm::MCInst &insn) {
   context.type = eContextRelativeBranchImmediate;
   context.SetImmediate(offset);
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 /*
@@ -1400,7 +1418,9 @@ bool EmulateInstructionMIPS64::Emulate_Bcond_Link(llvm::MCInst &insn) {
   uint32_t rs;
   int64_t offset, pc, target = 0;
   int64_t rs_val;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();
@@ -1510,7 +1530,9 @@ bool EmulateInstructionMIPS64::Emulate_Bcond_Link_C(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs;
   int64_t offset, pc, rs_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();
@@ -1578,7 +1600,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs;
   int64_t offset, pc, rs_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();
@@ -1622,8 +1646,11 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops(llvm::MCInst &insn) {
   context.type = eContextRelativeBranchImmediate;
   context.SetImmediate(offset);
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_BC(llvm::MCInst &insn) {
@@ -1645,8 +1672,11 @@ bool EmulateInstructionMIPS64::Emulate_BC(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 static int IsAdd64bitOverflow(int64_t a, int64_t b) {
@@ -1663,7 +1693,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops_C(llvm::MCInst &insn) {
   bool success = false;
   uint32_t rs, rt;
   int64_t offset, pc, rs_val, rt_val, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
   uint32_t current_inst_size = m_insn_info->get(insn.getOpcode()).getSize();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
@@ -1730,8 +1762,11 @@ bool EmulateInstructionMIPS64::Emulate_BXX_3ops_C(llvm::MCInst &insn) {
   context.type = eContextRelativeBranchImmediate;
   context.SetImmediate(current_inst_size + offset);
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 /*
@@ -1743,7 +1778,9 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops_C(llvm::MCInst &insn) {
   uint32_t rs;
   int64_t offset, pc, target = 0;
   int64_t rs_val;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
   uint32_t current_inst_size = m_insn_info->get(insn.getOpcode()).getSize();
 
   rs = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
@@ -1794,8 +1831,11 @@ bool EmulateInstructionMIPS64::Emulate_BXX_2ops_C(llvm::MCInst &insn) {
   context.type = eContextRelativeBranchImmediate;
   context.SetImmediate(current_inst_size + offset);
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_J(llvm::MCInst &insn) {
@@ -1818,8 +1858,10 @@ bool EmulateInstructionMIPS64::Emulate_J(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               pc);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64, pc))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_JAL(llvm::MCInst &insn) {
@@ -1948,8 +1990,11 @@ bool EmulateInstructionMIPS64::Emulate_JIC(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_JR(llvm::MCInst &insn) {
@@ -1970,8 +2015,11 @@ bool EmulateInstructionMIPS64::Emulate_JR(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               rs_val);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             rs_val))
+    return false;
+
+  return true;
 }
 
 /*
@@ -1983,7 +2031,9 @@ bool EmulateInstructionMIPS64::Emulate_FP_branch(llvm::MCInst &insn) {
   bool success = false;
   uint32_t cc, fcsr;
   int64_t pc, offset, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   /*
    * BC1F cc, offset
@@ -2021,8 +2071,11 @@ bool EmulateInstructionMIPS64::Emulate_FP_branch(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_BC1EQZ(llvm::MCInst &insn) {
@@ -2057,8 +2110,11 @@ bool EmulateInstructionMIPS64::Emulate_BC1EQZ(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_BC1NEZ(llvm::MCInst &insn) {
@@ -2093,8 +2149,11 @@ bool EmulateInstructionMIPS64::Emulate_BC1NEZ(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 /*
@@ -2108,7 +2167,9 @@ bool EmulateInstructionMIPS64::Emulate_3D_branch(llvm::MCInst &insn) {
   bool success = false;
   uint32_t cc, fcsr;
   int64_t pc, offset, target = 0;
-  const char *op_name = m_insn_info->getName(insn.getOpcode()).data();
+  llvm::StringRef op_name_ref = m_insn_info->getName(insn.getOpcode());
+  std::string op_name_str = op_name_ref;
+  const char *op_name = op_name_str.c_str();
 
   cc = m_reg_info->getEncodingValue(insn.getOperand(0).getReg());
   offset = insn.getOperand(1).getImm();
@@ -2153,8 +2214,11 @@ bool EmulateInstructionMIPS64::Emulate_3D_branch(llvm::MCInst &insn) {
 
   Context context;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_BNZB(llvm::MCInst &insn) {
@@ -2245,8 +2309,11 @@ bool EmulateInstructionMIPS64::Emulate_MSA_Branch_DF(llvm::MCInst &insn,
   Context context;
   context.type = eContextRelativeBranchImmediate;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_BNZV(llvm::MCInst &insn) {
@@ -2288,8 +2355,11 @@ bool EmulateInstructionMIPS64::Emulate_MSA_Branch_V(llvm::MCInst &insn,
   Context context;
   context.type = eContextRelativeBranchImmediate;
 
-  return WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
-                               target);
+  if (!WriteRegisterUnsigned(context, eRegisterKindDWARF, dwarf_pc_mips64,
+                             target))
+    return false;
+
+  return true;
 }
 
 bool EmulateInstructionMIPS64::Emulate_LDST_Imm(llvm::MCInst &insn) {

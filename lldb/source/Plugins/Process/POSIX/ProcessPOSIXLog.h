@@ -11,7 +11,11 @@
 #ifndef liblldb_ProcessPOSIXLog_h_
 #define liblldb_ProcessPOSIXLog_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 
+// Project includes
 #include "lldb/Utility/Log.h"
 
 #define POSIX_LOG_PROCESS (1u << 1)

@@ -119,7 +119,7 @@ uint32_t HostInfoPosix::GetEffectiveUserID() { return geteuid(); }
 
 uint32_t HostInfoPosix::GetEffectiveGroupID() { return getegid(); }
 
-FileSpec HostInfoPosix::GetDefaultShell() { return FileSpec("/bin/sh"); }
+FileSpec HostInfoPosix::GetDefaultShell() { return FileSpec("/bin/sh", false); }
 
 bool HostInfoPosix::ComputePathRelativeToLibrary(FileSpec &file_spec,
                                                  llvm::StringRef dir) {
@@ -158,14 +158,35 @@ bool HostInfoPosix::ComputePathRelativeToLibrary(FileSpec &file_spec,
   return (bool)file_spec.GetDirectory();
 }
 
+bool HostInfoPosix::ComputeSupportFileDirectory(FileSpec &file_spec) {
+  FileSpec temp_file_spec;
+
+  if (FileSpec temp_file_spec = GetShlibDir()) {
+    temp_file_spec.AppendPathComponent("lldb");
+    file_spec = temp_file_spec;
+    return true;
+  }
+
+  return false;
+}
+
 bool HostInfoPosix::ComputeSupportExeDirectory(FileSpec &file_spec) {
   return ComputePathRelativeToLibrary(file_spec, "/bin");
 }
 
 bool HostInfoPosix::ComputeHeaderDirectory(FileSpec &file_spec) {
-  FileSpec temp_file("/opt/local/include/lldb");
+  FileSpec temp_file("/opt/local/include/lldb", false);
   file_spec.GetDirectory().SetCString(temp_file.GetPath().c_str());
   return true;
+}
+
+bool HostInfoPosix::ComputeSwiftDirectory(FileSpec &file_spec) {
+  if (FileSpec lldb_file_spec = GetShlibDir()) {
+    lldb_file_spec.AppendPathComponent("swift");
+    file_spec = lldb_file_spec;
+    return true;
+  }
+  return false;
 }
 
 bool HostInfoPosix::GetEnvironmentVar(const std::string &var_name,

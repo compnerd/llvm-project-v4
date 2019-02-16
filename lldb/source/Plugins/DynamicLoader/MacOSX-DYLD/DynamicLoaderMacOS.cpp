@@ -12,6 +12,7 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Core/State.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolVendor.h"
@@ -20,7 +21,6 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/State.h"
 
 #include "DynamicLoaderDarwin.h"
 #include "DynamicLoaderMacOS.h"
@@ -65,7 +65,7 @@ DynamicLoader *DynamicLoaderMacOS::CreateInstance(Process *process,
     }
   }
 
-  if (!UseDYLDSPI(process)) {
+  if (UseDYLDSPI(process) == false) {
     create = false;
   }
 
@@ -79,8 +79,7 @@ DynamicLoader *DynamicLoaderMacOS::CreateInstance(Process *process,
 //----------------------------------------------------------------------
 DynamicLoaderMacOS::DynamicLoaderMacOS(Process *process)
     : DynamicLoaderDarwin(process), m_image_infos_stop_id(UINT32_MAX),
-      m_break_id(LLDB_INVALID_BREAK_ID), m_mutex(),
-      m_maybe_image_infos_address(LLDB_INVALID_ADDRESS) {}
+      m_break_id(LLDB_INVALID_BREAK_ID), m_mutex() {}
 
 //----------------------------------------------------------------------
 // Destructor
@@ -96,31 +95,16 @@ bool DynamicLoaderMacOS::ProcessDidExec() {
   if (m_process) {
     // If we are stopped after an exec, we will have only one thread...
     if (m_process->GetThreadList().GetSize() == 1) {
-      // Maybe we still have an image infos address around?  If so see
-      // if that has changed, and if so we have exec'ed.
-      if (m_maybe_image_infos_address != LLDB_INVALID_ADDRESS) {
-        lldb::addr_t image_infos_address = m_process->GetImageInfoAddress();
-        if (image_infos_address != m_maybe_image_infos_address) {
-          // We don't really have to reset this here, since we are going to
-          // call DoInitialImageFetch right away to handle the exec.  But in
-          // case anybody looks at it in the meantime, it can't hurt.
-          m_maybe_image_infos_address = image_infos_address;
-          did_exec = true;
-        }
-      }
-
-      if (!did_exec) {
-        // See if we are stopped at '_dyld_start'
-        ThreadSP thread_sp(m_process->GetThreadList().GetThreadAtIndex(0));
-        if (thread_sp) {
-          lldb::StackFrameSP frame_sp(thread_sp->GetStackFrameAtIndex(0));
-          if (frame_sp) {
-            const Symbol *symbol =
-                frame_sp->GetSymbolContext(eSymbolContextSymbol).symbol;
-            if (symbol) {
-              if (symbol->GetName() == ConstString("_dyld_start"))
-                did_exec = true;
-            }
+      // See if we are stopped at '_dyld_start'
+      ThreadSP thread_sp(m_process->GetThreadList().GetThreadAtIndex(0));
+      if (thread_sp) {
+        lldb::StackFrameSP frame_sp(thread_sp->GetStackFrameAtIndex(0));
+        if (frame_sp) {
+          const Symbol *symbol =
+              frame_sp->GetSymbolContext(eSymbolContextSymbol).symbol;
+          if (symbol) {
+            if (symbol->GetName() == ConstString("_dyld_start"))
+              did_exec = true;
           }
         }
       }
@@ -196,7 +180,6 @@ void DynamicLoaderMacOS::DoInitialImageFetch() {
   }
 
   m_dyld_image_infos_stop_id = m_process->GetStopID();
-  m_maybe_image_infos_address = m_process->GetImageInfoAddress();
 }
 
 bool DynamicLoaderMacOS::NeedToDoInitialImageFetch() { return true; }
@@ -503,7 +486,8 @@ bool DynamicLoaderMacOS::GetSharedCacheInformation(
           info_dict->GetValueForKey("shared_cache_uuid")->GetStringValue();
       if (!uuid_str.empty())
         uuid.SetFromStringRef(uuid_str);
-      if (!info_dict->GetValueForKey("no_shared_cache")->GetBooleanValue())
+      if (info_dict->GetValueForKey("no_shared_cache")->GetBooleanValue() ==
+          false)
         using_shared_cache = eLazyBoolYes;
       else
         using_shared_cache = eLazyBoolNo;

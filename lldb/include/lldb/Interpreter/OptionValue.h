@@ -10,6 +10,10 @@
 #ifndef liblldb_OptionValue_h_
 #define liblldb_OptionValue_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/FormatEntity.h"
 #include "lldb/Utility/CompletionRequest.h"
 #include "lldb/Utility/ConstString.h"
@@ -54,11 +58,9 @@ public:
     eDumpOptionValue = (1u << 2),
     eDumpOptionDescription = (1u << 3),
     eDumpOptionRaw = (1u << 4),
-    eDumpOptionCommand = (1u << 5),
     eDumpGroupValue = (eDumpOptionName | eDumpOptionType | eDumpOptionValue),
     eDumpGroupHelp =
-        (eDumpOptionName | eDumpOptionType | eDumpOptionDescription),
-    eDumpGroupExport = (eDumpOptionCommand | eDumpOptionName | eDumpOptionValue)
+        (eDumpOptionName | eDumpOptionType | eDumpOptionDescription)
   };
 
   OptionValue()

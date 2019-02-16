@@ -13,7 +13,6 @@
 
 #include "lldb/Host/ConnectionFileDescriptor.h"
 #include "lldb/Host/Editline.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/LLDBAssert.h"
@@ -173,8 +172,7 @@ private:
 
   const char *GetHistoryFilePath() {
     if (m_path.empty() && m_history && !m_prefix.empty()) {
-      FileSpec parent_path("~/.lldb");
-      FileSystem::Instance().Resolve(parent_path);
+      FileSpec parent_path{"~/.lldb", true};
       char history_path[PATH_MAX];
       if (!llvm::sys::fs::create_directory(parent_path.GetPath())) {
         snprintf(history_path, sizeof(history_path), "~/.lldb/%s-history",
@@ -183,9 +181,7 @@ private:
         snprintf(history_path, sizeof(history_path), "~/%s-widehistory",
                  m_prefix.c_str());
       }
-      auto file_spec = FileSpec(history_path);
-      FileSystem::Instance().Resolve(file_spec);
-      m_path = file_spec.GetPath();
+      m_path = FileSpec(history_path, true).GetPath();
     }
     if (m_path.empty())
       return NULL;
@@ -430,7 +426,7 @@ unsigned char Editline::RecallHistory(bool earlier) {
 
   // Treat moving from the "live" entry differently
   if (!m_in_history) {
-    if (!earlier)
+    if (earlier == false)
       return CC_ERROR; // Can't go newer than the "live" entry
     if (history_w(pHistory, &history_event, H_FIRST) == -1)
       return CC_ERROR;
@@ -530,7 +526,7 @@ int Editline::GetCharacter(EditLineGetCharType *c) {
         break;
 
       case lldb::eConnectionStatusInterrupted:
-        llvm_unreachable("Interrupts should have been handled above.");
+        lldbassert(0 && "Interrupts should have been handled above.");
 
       case lldb::eConnectionStatusError:        // Check GetError() for details
       case lldb::eConnectionStatusTimedOut:     // Request timed out
@@ -857,45 +853,19 @@ unsigned char Editline::BufferEndCommand(int ch) {
   return CC_NEWLINE;
 }
 
-//------------------------------------------------------------------------------
-/// Prints completions and their descriptions to the given file. Only the
-/// completions in the interval [start, end) are printed.
-//------------------------------------------------------------------------------
-static void PrintCompletion(FILE *output_file, size_t start, size_t end,
-                            StringList &completions, StringList &descriptions) {
-  // This is an 'int' because of printf.
-  int max_len = 0;
-
-  for (size_t i = start; i < end; i++) {
-    const char *completion_str = completions.GetStringAtIndex(i);
-    max_len = std::max((int)strlen(completion_str), max_len);
-  }
-
-  for (size_t i = start; i < end; i++) {
-    const char *completion_str = completions.GetStringAtIndex(i);
-    const char *description_str = descriptions.GetStringAtIndex(i);
-
-    fprintf(output_file, "\n\t%-*s", max_len, completion_str);
-
-    // Print the description if we got one.
-    if (strlen(description_str))
-      fprintf(output_file, " -- %s", description_str);
-  }
-}
-
 unsigned char Editline::TabCommand(int ch) {
   if (m_completion_callback == nullptr)
     return CC_ERROR;
 
   const LineInfo *line_info = el_line(m_editline);
-  StringList completions, descriptions;
+  StringList completions;
   int page_size = 40;
 
   const int num_completions = m_completion_callback(
       line_info->buffer, line_info->cursor, line_info->lastchar,
       0,  // Don't skip any matches (start at match zero)
       -1, // Get all the matches
-      completions, descriptions, m_completion_callback_baton);
+      completions, m_completion_callback_baton);
 
   if (num_completions == 0)
     return CC_ERROR;
@@ -923,8 +893,10 @@ unsigned char Editline::TabCommand(int ch) {
     int num_elements = num_completions + 1;
     fprintf(m_output_file, "\n" ANSI_CLEAR_BELOW "Available completions:");
     if (num_completions < page_size) {
-      PrintCompletion(m_output_file, 1, num_elements, completions,
-                      descriptions);
+      for (int i = 1; i < num_elements; i++) {
+        completion_str = completions.GetStringAtIndex(i);
+        fprintf(m_output_file, "\n\t%s", completion_str);
+      }
       fprintf(m_output_file, "\n");
     } else {
       int cur_pos = 1;
@@ -934,10 +906,10 @@ unsigned char Editline::TabCommand(int ch) {
         int endpoint = cur_pos + page_size;
         if (endpoint > num_elements)
           endpoint = num_elements;
-
-        PrintCompletion(m_output_file, cur_pos, endpoint, completions,
-                        descriptions);
-        cur_pos = endpoint;
+        for (; cur_pos < endpoint; cur_pos++) {
+          completion_str = completions.GetStringAtIndex(cur_pos);
+          fprintf(m_output_file, "\n\t%s", completion_str);
+        }
 
         if (cur_pos >= num_elements) {
           fprintf(m_output_file, "\n");
@@ -1170,7 +1142,7 @@ Editline::Editline(const char *editline_name, FILE *input_file,
     if (term_fd != -1) {
       static std::mutex *g_init_terminal_fds_mutex_ptr = nullptr;
       static std::set<int> *g_init_terminal_fds_ptr = nullptr;
-      static llvm::once_flag g_once_flag;
+      static std::once_flag g_once_flag;
       llvm::call_once(g_once_flag, [&]() {
         g_init_terminal_fds_mutex_ptr =
             new std::mutex(); // NOTE: Leak to avoid C++ destructor chain issues
@@ -1357,7 +1329,8 @@ bool Editline::GetLines(int first_line_number, StringList &lines,
   interrupted = m_editor_status == EditorStatus::Interrupted;
   if (!interrupted) {
     // Save the completed entry in history before returning
-    m_history_sp->Enter(CombineLines(m_input_lines).c_str());
+    if (m_input_lines.size() > 1 || !m_input_lines[0].empty())
+      m_history_sp->Enter(CombineLines(m_input_lines).c_str());
 
     lines = GetInputAsStringList();
   }

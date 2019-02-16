@@ -8,19 +8,19 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/ValueObjectMemory.h"
+#include "lldb/Core/Scalar.h" // for Scalar, operator!=
 #include "lldb/Core/Value.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Symbol/Type.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/DataExtractor.h"
-#include "lldb/Utility/Scalar.h"
-#include "lldb/Utility/Status.h"
-#include "lldb/lldb-types.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "lldb/Utility/DataExtractor.h" // for DataExtractor
+#include "lldb/Utility/Status.h"        // for Status
+#include "lldb/lldb-types.h"            // for addr_t
+#include "llvm/Support/ErrorHandling.h" // for llvm_unreachable
 
-#include <assert.h>
-#include <memory>
+#include <assert.h> // for assert
+#include <memory>   // for shared_ptr
 
 namespace lldb_private {
 class ExecutionContextScope;

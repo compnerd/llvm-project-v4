@@ -9,10 +9,15 @@
 
 #include "lldb/Breakpoint/BreakpointResolverFileLine.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
+#include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/StreamString.h"
 
@@ -88,7 +93,7 @@ BreakpointResolver *BreakpointResolverFileLine::CreateFromStructuredData(
     return nullptr;
   }
 
-  FileSpec file_spec(filename);
+  FileSpec file_spec(filename, false);
 
   return new BreakpointResolverFileLine(bkpt, file_spec, line_no, column,
                                         offset, check_inlines, skip_prologue,
@@ -188,12 +193,8 @@ void BreakpointResolverFileLine::FilterContexts(SymbolContextList &sc_list,
     // inline int foo2() { ... }
     //
     // but that's the best we can do for now.
-    // One complication, if the line number returned from GetStartLineSourceInfo
-    // is 0, then we can't do this calculation.  That can happen if
-    // GetStartLineSourceInfo gets an error, or if the first line number in
-    // the function really is 0 - which happens for some languages.
     const int decl_line_is_too_late_fudge = 1;
-    if (line && m_line_number < line - decl_line_is_too_late_fudge) {
+    if (m_line_number < line - decl_line_is_too_late_fudge) {
       LLDB_LOG(log, "removing symbol context at {0}:{1}", file, line);
       sc_list.RemoveContextAtIndex(i);
       --i;
@@ -231,11 +232,13 @@ BreakpointResolverFileLine::SearchCallback(SearchFilter &filter,
     search_file_spec.GetDirectory().Clear();
 
   const size_t num_comp_units = context.module_sp->GetNumCompileUnits();
+  const bool force_check_inlines =
+      context.module_sp->GetSymbolVendor()->ForceInlineSourceFileCheck();
   for (size_t i = 0; i < num_comp_units; i++) {
     CompUnitSP cu_sp(context.module_sp->GetCompileUnitAtIndex(i));
     if (cu_sp) {
       if (filter.CompUnitPasses(*cu_sp))
-        cu_sp->ResolveSymbolContext(search_file_spec, m_line_number, m_inlines,
+        cu_sp->ResolveSymbolContext(search_file_spec, m_line_number, m_inlines | force_check_inlines,
                                     m_exact_match, eSymbolContextEverything,
                                     sc_list);
     }

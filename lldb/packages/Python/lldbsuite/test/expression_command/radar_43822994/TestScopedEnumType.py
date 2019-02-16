@@ -7,7 +7,7 @@ from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
 
-class ScopedEnumType(TestBase):
+class ExprXValuePrintingTestCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
 
@@ -27,18 +27,3 @@ class ScopedEnumType(TestBase):
         self.assertTrue(value.IsValid())
         self.assertTrue(value.GetError().Success())
         self.assertEqual(value.GetValueAsUnsigned(), 1)
-
-        value = frame.EvaluateExpression("b == BarBar")
-        self.assertTrue(value.IsValid())
-        self.assertTrue(value.GetError().Success())
-        self.assertEqual(value.GetValueAsUnsigned(), 1)
-
-        ## b is not a Foo
-        value = frame.EvaluateExpression("b == Foo::FooBar")
-        self.assertTrue(value.IsValid())
-        self.assertFalse(value.GetError().Success())
-
-        ## integral is not implicitly convertible to a scoped enum
-        value = frame.EvaluateExpression("1 == Foo::FooBar")
-        self.assertTrue(value.IsValid())
-        self.assertFalse(value.GetError().Success())

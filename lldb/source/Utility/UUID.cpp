@@ -9,10 +9,13 @@
 
 #include "lldb/Utility/UUID.h"
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Utility/Stream.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Format.h"
 
+// C Includes
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -51,7 +54,9 @@ std::string UUID::GetAsString(llvm::StringRef separator) const {
   return result;
 }
 
-void UUID::Dump(Stream *s) const { s->PutCString(GetAsString()); }
+void UUID::Dump(Stream *s) const {
+  s->PutCString(GetAsString().c_str());
+}
 
 static inline int xdigit_to_int(char ch) {
   ch = tolower(ch);
@@ -110,3 +115,15 @@ size_t UUID::SetFromStringRef(llvm::StringRef str, uint32_t num_uuid_bytes) {
   // Else return zero to indicate we were not able to parse a UUID value
   return 0;
 }
+
+size_t UUID::SetFromOptionalStringRef(llvm::StringRef str, 
+                                      uint32_t num_uuid_bytes) {
+  size_t num_chars_consumed = SetFromStringRef(str, num_uuid_bytes);
+  if (num_chars_consumed) {
+    if (llvm::all_of(m_bytes, [](uint8_t b) { return b == 0; }))
+        Clear();
+  }
+  
+  return num_chars_consumed;
+}
+

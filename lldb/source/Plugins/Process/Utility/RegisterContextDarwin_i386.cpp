@@ -7,14 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <stddef.h>
+// C Includes
+#include <stddef.h> // offsetof
 
+// C++ Includes
+// Other libraries and framework includes
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/Scalar.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Compiler.h"
 
@@ -24,6 +27,7 @@
 #define LLVM_EXTENSION
 #endif
 
+// Project includes
 #include "RegisterContextDarwin_i386.h"
 
 using namespace lldb;

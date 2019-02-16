@@ -10,13 +10,13 @@
 #include "lldb/Utility/StringList.h"
 
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Stream.h"
+#include "lldb/Utility/Stream.h" // for Stream
 #include "lldb/Utility/StreamString.h"
-#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/ArrayRef.h" // for ArrayRef, makeArrayRef
 
-#include <algorithm>
-#include <stdint.h>
-#include <string.h>
+#include <algorithm> // for min
+#include <stdint.h>  // for SIZE_MAX, uint32_t
+#include <string.h>  // for size_t, strcspn, NULL
 
 using namespace lldb_private;
 
@@ -83,7 +83,7 @@ size_t StringList::GetMaxStringLength() const {
 const char *StringList::GetStringAtIndex(size_t idx) const {
   if (idx < m_strings.size())
     return m_strings[idx].c_str();
-  return nullptr;
+  return NULL;
 }
 
 void StringList::Join(const char *separator, Stream &strm) {

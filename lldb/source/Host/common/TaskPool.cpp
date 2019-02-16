@@ -10,9 +10,9 @@
 #include "lldb/Host/TaskPool.h"
 #include "lldb/Host/ThreadLauncher.h"
 
-#include <cstdint>
-#include <queue>
-#include <thread>
+#include <cstdint> // for uint32_t
+#include <queue>   // for queue
+#include <thread>  // for thread
 
 namespace lldb_private {
 

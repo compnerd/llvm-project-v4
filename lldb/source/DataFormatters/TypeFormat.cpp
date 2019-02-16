@@ -9,9 +9,13 @@
 
 #include "lldb/DataFormatters/TypeFormat.h"
 
+// C Includes
 
+// C++ Includes
 
+// Other libraries and framework includes
 
+// Project includes
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-public.h"
 
@@ -90,7 +94,9 @@ bool TypeFormatImpl_Format::FormatObject(ValueObject *valobj,
         } else {
           Status error;
           valobj->GetData(data, error);
-          if (error.Fail())
+          if (error.Fail() &&
+              !SwiftASTContext::IsPossibleZeroSizeType(
+                  compiler_type, exe_ctx.GetBestExecutionContextScope()))
             return false;
         }
 
@@ -106,7 +112,8 @@ bool TypeFormatImpl_Format::FormatObject(ValueObject *valobj,
                 exe_scope),                 // Byte size of item in "m_data"
             valobj->GetBitfieldBitSize(),   // Bitfield bit size
             valobj->GetBitfieldBitOffset(), // Bitfield bit offset
-            exe_scope);
+            exe_scope,
+            valobj->IsBaseClass());
         // Given that we do not want to set the ValueObject's m_error for a
         // formatting error (or else we wouldn't be able to reformat until a
         // next update), an empty string is treated as a "false" return from
@@ -178,7 +185,7 @@ bool TypeFormatImpl_EnumType::FormatObject(ValueObject *valobj,
     }
   } else
     valobj_enum_type = iter->second;
-  if (!valobj_enum_type.IsValid())
+  if (valobj_enum_type.IsValid() == false)
     return false;
   DataExtractor data;
   Status error;
@@ -187,9 +194,9 @@ bool TypeFormatImpl_EnumType::FormatObject(ValueObject *valobj,
     return false;
   ExecutionContext exe_ctx(valobj->GetExecutionContextRef());
   StreamString sstr;
-  valobj_enum_type.DumpTypeValue(&sstr, lldb::eFormatEnum, data, 0,
-                                 data.GetByteSize(), 0, 0,
-                                 exe_ctx.GetBestExecutionContextScope());
+  valobj_enum_type.DumpTypeValue(
+      &sstr, lldb::eFormatEnum, data, 0, data.GetByteSize(), 0, 0,
+      exe_ctx.GetBestExecutionContextScope(), valobj->IsBaseClass());
   if (!sstr.GetString().empty())
     dest = sstr.GetString();
   return !dest.empty();

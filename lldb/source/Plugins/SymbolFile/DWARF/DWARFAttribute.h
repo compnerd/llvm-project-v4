@@ -11,17 +11,15 @@
 #define SymbolFileDWARF_DWARFAttribute_h_
 
 #include "DWARFDefines.h"
-#include "DWARFFormValue.h"
 #include "llvm/ADT/SmallVector.h"
 #include <vector>
 
 class DWARFUnit;
+class DWARFFormValue;
 
 class DWARFAttribute {
 public:
-  DWARFAttribute(dw_attr_t attr, dw_form_t form,
-                 DWARFFormValue::ValueType value)
-      : m_attr(attr), m_form(form), m_value(value) {}
+  DWARFAttribute(dw_attr_t attr, dw_form_t form) : m_attr(attr), m_form(form) {}
 
   void set(dw_attr_t attr, dw_form_t form) {
     m_attr = attr;
@@ -31,11 +29,9 @@ public:
   void set_form(dw_form_t form) { m_form = form; }
   dw_attr_t get_attr() const { return m_attr; }
   dw_form_t get_form() const { return m_form; }
-  void get(dw_attr_t &attr, dw_form_t &form,
-           DWARFFormValue::ValueType &val) const {
+  void get(dw_attr_t &attr, dw_form_t &form) const {
     attr = m_attr;
     form = m_form;
-    val = m_value;
   }
   bool operator==(const DWARFAttribute &rhs) const {
     return m_attr == rhs.m_attr && m_form == rhs.m_form;
@@ -47,7 +43,6 @@ public:
 protected:
   dw_attr_t m_attr;
   dw_form_t m_form;
-  DWARFFormValue::ValueType m_value;
 };
 
 class DWARFAttributes {

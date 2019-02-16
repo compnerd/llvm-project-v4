@@ -23,6 +23,7 @@ class StaticVariableTestCase(TestBase):
         # Find the line number to break at.
         self.line = line_number('main.cpp', '// Set break point at this line.')
 
+    @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24764")
     def test_with_run_command(self):
         """Test that file and class static variables display correctly."""
         self.build()
@@ -62,6 +63,7 @@ class StaticVariableTestCase(TestBase):
         compiler=["clang"],
         compiler_version=["<", "3.9"],
         bugnumber='llvm.org/pr20550')
+    @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24764")
     def test_with_run_command_complete(self):
         """
         Test that file and class static variables display correctly with
@@ -106,8 +108,8 @@ class StaticVariableTestCase(TestBase):
         compiler=["clang"],
         compiler_version=["<", "3.9"],
         bugnumber='llvm.org/pr20550')
-    @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24764")
     @add_test_categories(['pyapi'])
+    @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24764")
     def test_with_python_api(self):
         """Test Python APIs on file and class static variables."""
         self.build()

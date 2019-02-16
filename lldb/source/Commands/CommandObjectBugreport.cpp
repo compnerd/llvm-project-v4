@@ -9,9 +9,13 @@
 
 #include "CommandObjectBugreport.h"
 
+// C Includes
 #include <cstdio>
 
+// C++ Includes
+// Other libraries and framework includes
 
+// Project includes
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionGroupOutputFile.h"
@@ -68,6 +72,8 @@ protected:
     const FileSpec &outfile_spec =
         m_outfile_options.GetFile().GetCurrentValue();
     if (outfile_spec) {
+      char path[PATH_MAX];
+      outfile_spec.GetPath(path, sizeof(path));
 
       uint32_t open_options =
           File::eOpenOptionWrite | File::eOpenOptionCanCreate |
@@ -78,13 +84,10 @@ protected:
         open_options |= File::eOpenOptionTruncate;
 
       StreamFileSP outfile_stream = std::make_shared<StreamFile>();
-      File &file = outfile_stream->GetFile();
-      Status error =
-          FileSystem::Instance().Open(file, outfile_spec, open_options);
+      Status error = outfile_stream->GetFile().Open(path, open_options);
       if (error.Fail()) {
-        auto path = outfile_spec.GetPath();
         result.AppendErrorWithFormat("Failed to open file '%s' for %s: %s\n",
-                                     path.c_str(), append ? "append" : "write",
+                                     path, append ? "append" : "write",
                                      error.AsCString());
         result.SetStatus(eReturnStatusFailed);
         return false;

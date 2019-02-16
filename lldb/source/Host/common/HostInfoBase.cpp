@@ -42,7 +42,7 @@ namespace {
 
 struct HostInfoBaseFields {
   ~HostInfoBaseFields() {
-    if (FileSystem::Instance().Exists(m_lldb_process_tmp_dir)) {
+    if (m_lldb_process_tmp_dir.Exists()) {
       // Remove the LLDB temporary directory if we have one. Set "recurse" to
       // true to all files that were created for the LLDB process can be
       // cleaned up.
@@ -58,6 +58,7 @@ struct HostInfoBaseFields {
   FileSpec m_lldb_so_dir;
   FileSpec m_lldb_support_exe_dir;
   FileSpec m_lldb_headers_dir;
+  FileSpec m_lldb_swift_resource_dir;
   FileSpec m_lldb_clang_resource_dir;
   FileSpec m_lldb_system_plugin_dir;
   FileSpec m_lldb_user_plugin_dir;
@@ -131,6 +132,18 @@ FileSpec HostInfoBase::GetSupportExeDir() {
     LLDB_LOG(log, "support exe dir -> `{0}`", g_fields->m_lldb_support_exe_dir);
   });
   return success ? g_fields->m_lldb_support_exe_dir : FileSpec();
+}
+
+FileSpec HostInfoBase::GetSwiftDir() {
+    static std::once_flag g_once_flag;
+    static bool success = false;
+    std::call_once(g_once_flag, []() {
+      success =
+          HostInfo::ComputeSwiftDirectory(g_fields->m_lldb_swift_resource_dir);
+      Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_HOST);
+      LLDB_LOG(log, "swift dir -> '{0}'", g_fields->m_lldb_swift_resource_dir);
+    });
+    return success ? g_fields->m_lldb_swift_resource_dir : FileSpec();
 }
 
 FileSpec HostInfoBase::GetHeaderDir() {
@@ -226,7 +239,7 @@ bool HostInfoBase::ComputeSharedLibraryDirectory(FileSpec &file_spec) {
 
   // This is necessary because when running the testsuite the shlib might be a
   // symbolic link inside the Python resource dir.
-  FileSystem::Instance().ResolveSymbolicLink(lldb_file_spec, lldb_file_spec);
+  FileSystem::ResolveSymbolicLink(lldb_file_spec, lldb_file_spec);
 
   // Remove the filename so that this FileSpec only represents the directory.
   file_spec.GetDirectory() = lldb_file_spec.GetDirectory();
@@ -256,8 +269,7 @@ bool HostInfoBase::ComputeProcessTempFileDirectory(FileSpec &file_spec) {
 bool HostInfoBase::ComputeTempFileBaseDirectory(FileSpec &file_spec) {
   llvm::SmallVector<char, 16> tmpdir;
   llvm::sys::path::system_temp_directory(/*ErasedOnReboot*/ true, tmpdir);
-  file_spec = FileSpec(std::string(tmpdir.data(), tmpdir.size()));
-  FileSystem::Instance().Resolve(file_spec);
+  file_spec = FileSpec(std::string(tmpdir.data(), tmpdir.size()), true);
   return true;
 }
 
@@ -285,6 +297,12 @@ bool HostInfoBase::ComputeHeaderDirectory(FileSpec &file_spec) {
 bool HostInfoBase::ComputeSystemPluginsDirectory(FileSpec &file_spec) {
   // TODO(zturner): Figure out how to compute the system plugins directory for
   // all platforms.
+  return false;
+}
+
+bool HostInfoBase::ComputeSwiftDirectory(FileSpec &file_spec) {
+  // TODO(zturner): Figure out how to compute the swift directory for all
+  // platforms.
   return false;
 }
 

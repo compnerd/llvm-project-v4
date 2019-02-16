@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Host/Host.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Target/Process.h"
 #include "gtest/gtest.h"
@@ -18,14 +17,8 @@ using namespace lldb_private;
 namespace {
 class HostTest : public testing::Test {
 public:
-  static void SetUpTestCase() {
-    FileSystem::Initialize();
-    HostInfo::Initialize();
-  }
-  static void TearDownTestCase() {
-    HostInfo::Terminate();
-    FileSystem::Terminate();
-  }
+  static void SetUpTestCase() { HostInfo::Initialize(); }
+  static void TearDownTestCase() { HostInfo::Terminate(); }
 };
 } // namespace
 

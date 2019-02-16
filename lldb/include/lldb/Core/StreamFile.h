@@ -12,11 +12,11 @@
 
 #include "lldb/Host/File.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/lldb-defines.h"
-#include "lldb/lldb-enumerations.h"
+#include "lldb/lldb-defines.h"      // for DISALLOW_COPY_AND_ASSIGN
+#include "lldb/lldb-enumerations.h" // for FilePermissions::eFilePermission...
 
-#include <stdint.h>
-#include <stdio.h>
+#include <stdint.h> // for uint32_t
+#include <stdio.h>  // for size_t, FILE
 
 namespace lldb_private {
 

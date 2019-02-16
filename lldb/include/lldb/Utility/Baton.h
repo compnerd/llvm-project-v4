@@ -10,10 +10,10 @@
 #ifndef lldb_Baton_h_
 #define lldb_Baton_h_
 
-#include "lldb/lldb-enumerations.h"
+#include "lldb/lldb-enumerations.h" // for DescriptionLevel
 #include "lldb/lldb-public.h"
 
-#include <memory>
+#include <memory> // for unique_ptr
 
 namespace lldb_private {
 class Stream;

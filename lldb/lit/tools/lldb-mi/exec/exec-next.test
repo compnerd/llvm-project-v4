@@ -1,4 +1,9 @@
-# RUN: %build %p/inputs/main.c --nodefaultlib -o %t
+# XFAIL: windows
+# -> llvm.org/pr24452
+# REQUIRES: FIX_FOR_RACE_CONDITION
+#
+#
+# RUN: %cc -o %t %p/inputs/main.c -g
 # RUN: %lldbmi %t < %s | FileCheck %s
 
 # Test lldb-mi -exec-next command.

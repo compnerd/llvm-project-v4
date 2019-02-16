@@ -225,8 +225,7 @@ void DebugNamesDWARFIndex::GetFunctions(
     const CompilerDeclContext &parent_decl_ctx, uint32_t name_type_mask,
     std::vector<DWARFDIE> &dies) {
 
-  std::vector<DWARFDIE> v;
-  m_fallback.GetFunctions(name, info, parent_decl_ctx, name_type_mask, v);
+  m_fallback.GetFunctions(name, info, parent_decl_ctx, name_type_mask, dies);
 
   for (const DebugNames::Entry &entry :
        m_debug_names_up->equal_range(name.GetStringRef())) {
@@ -236,13 +235,8 @@ void DebugNamesDWARFIndex::GetFunctions(
 
     if (DIERef ref = ToDIERef(entry))
       ProcessFunctionDIE(name.GetStringRef(), ref, info, parent_decl_ctx,
-                         name_type_mask, v);
+                         name_type_mask, dies);
   }
-
-  std::set<DWARFDebugInfoEntry *> seen;
-  for (DWARFDIE die : v)
-    if (seen.insert(die.GetDIE()).second)
-      dies.push_back(die);
 }
 
 void DebugNamesDWARFIndex::GetFunctions(const RegularExpression &regex,

@@ -80,7 +80,6 @@ private:
   bool OptionFnLanguage(const CMIUtilString::VecString_t &vrWords);
   bool OptionFnDisassemblyFlavor(const CMIUtilString::VecString_t &vrWords);
   bool OptionFnFallback(const CMIUtilString::VecString_t &vrWords);
-  bool OptionFnBreakpoint(const CMIUtilString::VecString_t &vrWords);
 
   // Attributes:
 private:

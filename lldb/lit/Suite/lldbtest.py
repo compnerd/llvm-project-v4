@@ -94,10 +94,7 @@ class LLDBTest(TestFormat):
                 litConfig.maxIndividualTestTime))
 
         if exitCode:
-            if 'FAIL:' in out or 'FAIL:' in err:
-                return lit.Test.FAIL, out + err
-            if 'XPASS:' in out or 'XPASS:' in err:
-                return lit.Test.XPASS, out + err
+            return lit.Test.FAIL, out + err
 
         passing_test_line = 'RESULT: PASSED'
         if passing_test_line not in out and passing_test_line not in err:

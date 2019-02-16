@@ -10,6 +10,10 @@
 
 #include "AppleGetPendingItemsHandler.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Value.h"
@@ -134,7 +138,7 @@ void AppleGetPendingItemsHandler::Detach() {
 lldb::addr_t AppleGetPendingItemsHandler::SetupGetPendingItemsFunction(
     Thread &thread, ValueList &get_pending_items_arglist) {
   ThreadSP thread_sp(thread.shared_from_this());
-  ExecutionContext exe_ctx(thread_sp);
+  ExecutionContext exe_ctx(thread.shared_from_this());
   DiagnosticManager diagnostics;
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SYSTEM_RUNTIME));
 
@@ -241,7 +245,7 @@ AppleGetPendingItemsHandler::GetPendingItems(Thread &thread, addr_t queue,
 
   error.Clear();
 
-  if (!thread.SafeToCallFunctions()) {
+  if (thread.SafeToCallFunctions() == false) {
     if (log)
       log->Printf("Not safe to call functions on thread 0x%" PRIx64,
                   thread.GetID());

@@ -10,23 +10,21 @@
 #ifndef LLDB_INITIALIZATION_SYSTEM_LIFETIME_MANAGER_H
 #define LLDB_INITIALIZATION_SYSTEM_LIFETIME_MANAGER_H
 
-#include "lldb/Initialization/SystemInitializer.h"
 #include "lldb/lldb-private-types.h"
-#include "llvm/Support/Error.h"
 
 #include <memory>
 #include <mutex>
 
 namespace lldb_private {
+class SystemInitializer;
 
 class SystemLifetimeManager {
 public:
   SystemLifetimeManager();
   ~SystemLifetimeManager();
 
-  llvm::Error Initialize(std::unique_ptr<SystemInitializer> initializer,
-                         const InitializerOptions &options,
-                         LoadPluginCallbackType plugin_callback);
+  void Initialize(std::unique_ptr<SystemInitializer> initializer,
+                  LoadPluginCallbackType plugin_callback);
   void Terminate();
 
 private:

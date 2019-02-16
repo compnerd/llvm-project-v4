@@ -115,7 +115,10 @@ bool CMICmdArgValThreadGrp::IsArgThreadGrp(const CMIUtilString &vrTxt) const {
     return false;
 
   const CMIUtilString strNum = vrTxt.substr(1);
-  return strNum.IsNumber();
+  if (!strNum.IsNumber())
+    return false;
+
+  return true;
 }
 
 //++

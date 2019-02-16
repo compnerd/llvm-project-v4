@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/ThreadPlanStepOverRange.h"
 #include "lldb/Symbol/Block.h"
 #include "lldb/Symbol/CompileUnit.h"
@@ -123,7 +127,10 @@ bool ThreadPlanStepOverRange::IsEquivalentContext(
     }
   }
   // Fall back to symbol if we have no decision from comp_unit/function/block.
-  return m_addr_context.symbol && m_addr_context.symbol == context.symbol;
+  if (m_addr_context.symbol && m_addr_context.symbol == context.symbol) {
+    return true;
+  }
+  return false;
 }
 
 bool ThreadPlanStepOverRange::ShouldStop(Event *event_ptr) {

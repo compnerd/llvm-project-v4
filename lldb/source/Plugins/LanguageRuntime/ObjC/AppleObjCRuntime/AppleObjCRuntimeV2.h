@@ -10,10 +10,14 @@
 #ifndef liblldb_AppleObjCRuntimeV2_h_
 #define liblldb_AppleObjCRuntimeV2_h_
 
+// C Includes
+// C++ Includes
 #include <map>
 #include <memory>
 #include <mutex>
 
+// Other libraries and framework includes
+// Project includes
 #include "AppleObjCRuntime.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/lldb-private.h"
@@ -53,6 +57,12 @@ public:
                                 TypeAndOrName &class_type_or_name,
                                 Address &address,
                                 Value::ValueType &value_type) override;
+
+  bool GetDynamicTypeAndAddress(ValueObject &in_value,
+                                lldb::DynamicValueType use_dynamic,
+                                TypeAndOrName &class_type_or_name,
+                                Address &address, Value::ValueType &value_type,
+                                bool allow_swift) override;
 
   UtilityFunction *CreateObjectChecker(const char *) override;
 
@@ -318,6 +328,7 @@ private:
   bool GetCFBooleanValuesIfNeeded();
 
   friend class ClassDescriptorV2;
+  friend class SwiftLanguageRuntime;
 
   std::unique_ptr<UtilityFunction> m_get_class_info_code;
   lldb::addr_t m_get_class_info_args;

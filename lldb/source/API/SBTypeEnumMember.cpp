@@ -94,7 +94,7 @@ SBTypeEnumMemberList::SBTypeEnumMemberList(const SBTypeEnumMemberList &rhs)
     Append(const_cast<SBTypeEnumMemberList &>(rhs).GetTypeEnumMemberAtIndex(i));
 }
 
-bool SBTypeEnumMemberList::IsValid() { return (m_opaque_ap != NULL); }
+bool SBTypeEnumMemberList::IsValid() { return (m_opaque_ap.get() != NULL); }
 
 SBTypeEnumMemberList &SBTypeEnumMemberList::
 operator=(const SBTypeEnumMemberList &rhs) {
@@ -116,7 +116,7 @@ void SBTypeEnumMemberList::Append(SBTypeEnumMember enum_member) {
 
 SBTypeEnumMember
 SBTypeEnumMemberList::GetTypeEnumMemberAtIndex(uint32_t index) {
-  if (m_opaque_ap)
+  if (m_opaque_ap.get())
     return SBTypeEnumMember(m_opaque_ap->GetTypeEnumMemberAtIndex(index));
   return SBTypeEnumMember();
 }

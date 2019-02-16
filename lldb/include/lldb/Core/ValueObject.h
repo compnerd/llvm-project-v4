@@ -10,9 +10,10 @@
 #ifndef liblldb_ValueObject_h_
 #define liblldb_ValueObject_h_
 
+#include "lldb/Core/SwiftASTContextReader.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Symbol/CompilerType.h"
-#include "lldb/Symbol/Type.h"
+#include "lldb/Symbol/Type.h" // for TypeImpl
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/ConstString.h"
@@ -20,26 +21,26 @@
 #include "lldb/Utility/SharedCluster.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/UserID.h"
-#include "lldb/lldb-defines.h"
-#include "lldb/lldb-enumerations.h"
-#include "lldb/lldb-forward.h"
-#include "lldb/lldb-private-enumerations.h"
-#include "lldb/lldb-types.h"
+#include "lldb/lldb-defines.h"              // for LLDB_INVALID...
+#include "lldb/lldb-enumerations.h"         // for DynamicValue...
+#include "lldb/lldb-forward.h"              // for ValueObjectSP
+#include "lldb/lldb-private-enumerations.h" // for AddressType
+#include "lldb/lldb-types.h"                // for addr_t, offs...
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringRef.h" // for StringRef
 
 #include <functional>
 #include <initializer_list>
 #include <map>
-#include <mutex>
-#include <string>
-#include <utility>
+#include <mutex>   // for recursive_mutex
+#include <string>  // for string
+#include <utility> // for pair
 
-#include <stddef.h>
-#include <stdint.h>
+#include <stddef.h> // for size_t
+#include <stdint.h> // for uint32_t
 namespace lldb_private {
 class Declaration;
 }
@@ -390,6 +391,8 @@ public:
   //------------------------------------------------------------------
   // Subclasses can implement the functions below.
   //------------------------------------------------------------------
+  virtual ConstString GetMangledTypeName();
+
   virtual ConstString GetTypeName();
 
   virtual ConstString GetDisplayTypeName();
@@ -612,6 +615,9 @@ public:
 
   virtual bool HasSyntheticValue();
 
+  SwiftASTContext *GetSwiftASTContext();
+  SwiftASTContextReader GetScratchSwiftASTContext();
+
   virtual bool IsSynthetic() { return false; }
 
   lldb::ValueObjectSP
@@ -634,6 +640,9 @@ public:
 
   virtual void SetLiveAddress(lldb::addr_t addr = LLDB_INVALID_ADDRESS,
                               AddressType address_type = eAddressTypeLoad) {}
+
+  // Find the address of the C++ vtable pointer
+  virtual lldb::addr_t GetCPPVTableAddress(AddressType &address_type);
 
   virtual lldb::ValueObjectSP Cast(const CompilerType &compiler_type);
 
@@ -1014,6 +1023,11 @@ protected:
 
   const char *GetLocationAsCStringImpl(const Value &value,
                                        const DataExtractor &data);
+
+  virtual lldb_private::Status
+  GetValueAsData(ExecutionContext *exe_ctx, DataExtractor &data,
+                 uint32_t data_offset, Module *module,
+                 bool mask_error_on_zerosize_type = true);
 
   bool IsChecksumEmpty();
 

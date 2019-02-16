@@ -32,46 +32,30 @@ public:
     return *this;
   }
 
-  size_t GetSize() const { return m_regions.size(); }
+  uint32_t GetSize() { return m_regions.size(); }
 
-  void Reserve(size_t capacity) { return m_regions.reserve(capacity); }
-
-  void Append(const MemoryRegionInfo &sb_region) {
+  void Append(const lldb::SBMemoryRegionInfo &sb_region) {
     m_regions.push_back(sb_region);
   }
 
   void Append(const MemoryRegionInfoListImpl &list) {
-    Reserve(GetSize() + list.GetSize());
-
-    for (const auto &val : list.m_regions)
+    for (auto val : list.m_regions)
       Append(val);
   }
 
   void Clear() { m_regions.clear(); }
 
-  bool GetMemoryRegionInfoAtIndex(size_t index,
-                                  MemoryRegionInfo &region_info) {
+  bool GetMemoryRegionInfoAtIndex(uint32_t index,
+                                  SBMemoryRegionInfo &region_info) {
     if (index >= GetSize())
       return false;
     region_info = m_regions[index];
     return true;
   }
 
-  MemoryRegionInfos &Ref() { return m_regions; }
-
-  const MemoryRegionInfos &Ref() const { return m_regions; }
-
 private:
-  MemoryRegionInfos m_regions;
+  std::vector<lldb::SBMemoryRegionInfo> m_regions;
 };
-
-MemoryRegionInfos &SBMemoryRegionInfoList::ref() {
-  return m_opaque_ap->Ref();
-}
-
-const MemoryRegionInfos &SBMemoryRegionInfoList::ref() const {
-  return m_opaque_ap->Ref();
-}
 
 SBMemoryRegionInfoList::SBMemoryRegionInfoList()
     : m_opaque_ap(new MemoryRegionInfoListImpl()) {}
@@ -98,7 +82,7 @@ bool SBMemoryRegionInfoList::GetMemoryRegionAtIndex(
     uint32_t idx, SBMemoryRegionInfo &region_info) {
   Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_API));
 
-  bool result = m_opaque_ap->GetMemoryRegionInfoAtIndex(idx, region_info.ref());
+  bool result = m_opaque_ap->GetMemoryRegionInfoAtIndex(idx, region_info);
 
   if (log) {
     SBStream sstr;
@@ -116,7 +100,7 @@ bool SBMemoryRegionInfoList::GetMemoryRegionAtIndex(
 void SBMemoryRegionInfoList::Clear() { m_opaque_ap->Clear(); }
 
 void SBMemoryRegionInfoList::Append(SBMemoryRegionInfo &sb_region) {
-  m_opaque_ap->Append(sb_region.ref());
+  m_opaque_ap->Append(sb_region);
 }
 
 void SBMemoryRegionInfoList::Append(SBMemoryRegionInfoList &sb_region_list) {
@@ -129,5 +113,5 @@ const MemoryRegionInfoListImpl *SBMemoryRegionInfoList::operator->() const {
 
 const MemoryRegionInfoListImpl &SBMemoryRegionInfoList::operator*() const {
   assert(m_opaque_ap.get());
-  return *m_opaque_ap;
+  return *m_opaque_ap.get();
 }

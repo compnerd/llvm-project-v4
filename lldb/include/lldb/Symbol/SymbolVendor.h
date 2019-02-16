@@ -71,12 +71,12 @@ public:
   virtual Type *ResolveTypeUID(lldb::user_id_t type_uid);
 
   virtual uint32_t ResolveSymbolContext(const Address &so_addr,
-                                        lldb::SymbolContextItem resolve_scope,
+                                        uint32_t resolve_scope,
                                         SymbolContext &sc);
 
   virtual uint32_t ResolveSymbolContext(const FileSpec &file_spec,
                                         uint32_t line, bool check_inlines,
-                                        lldb::SymbolContextItem resolve_scope,
+                                        uint32_t resolve_scope,
                                         SymbolContextList &sc_list);
 
   virtual size_t FindGlobalVariables(const ConstString &name,
@@ -90,9 +90,8 @@ public:
 
   virtual size_t FindFunctions(const ConstString &name,
                                const CompilerDeclContext *parent_decl_ctx,
-                               lldb::FunctionNameType name_type_mask,
-                               bool include_inlines, bool append,
-                               SymbolContextList &sc_list);
+                               uint32_t name_type_mask, bool include_inlines,
+                               bool append, SymbolContextList &sc_list);
 
   virtual size_t FindFunctions(const RegularExpression &regex,
                                bool include_inlines, bool append,
@@ -123,8 +122,8 @@ public:
 
   const TypeList &GetTypeList() const { return m_type_list; }
 
-  virtual size_t GetTypes(SymbolContextScope *sc_scope,
-                          lldb::TypeClass type_mask, TypeList &type_list);
+  virtual size_t GetTypes(SymbolContextScope *sc_scope, uint32_t type_mask,
+                          TypeList &type_list);
 
   SymbolFile *GetSymbolFile() { return m_sym_file_ap.get(); }
 
@@ -135,6 +134,14 @@ public:
 
   // Clear module unified section list symbol table.
   virtual void ClearSymtab();
+
+  bool GetCompileOption(const char *option, std::string &value,
+                        CompileUnit *cu = nullptr);
+
+  int GetCompileOptions(const char *option, std::vector<std::string> &values,
+                        CompileUnit *cu = nullptr);
+
+  void GetLoadedModules(lldb::LanguageType language, FileSpecList &modules);
 
   //------------------------------------------------------------------
   /// Notify the SymbolVendor that the file addresses in the Sections
@@ -148,6 +155,17 @@ public:
   ConstString GetPluginName() override;
 
   uint32_t GetPluginVersion() override;
+
+  virtual bool SetLimitSourceFileRange(const FileSpec &file,
+                                       uint32_t first_line, uint32_t last_line);
+
+  virtual bool SymbolContextShouldBeExcluded(const SymbolContext &sc,
+                                             uint32_t actual_line);
+
+  virtual std::vector<lldb::DataBufferSP>
+  GetASTData(lldb::LanguageType language);
+
+  virtual bool ForceInlineSourceFileCheck();
 
 protected:
   //------------------------------------------------------------------
@@ -165,8 +183,6 @@ protected:
                                    // file)
   std::unique_ptr<SymbolFile> m_sym_file_ap; // A single symbol file. Subclasses
                                              // can add more of these if needed.
-  Symtab *m_symtab; // Save a symtab once to not pass it through `AddSymbols` of
-                    // the symbol file each time when it is needed
 
 private:
   //------------------------------------------------------------------

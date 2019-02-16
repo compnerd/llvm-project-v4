@@ -16,10 +16,6 @@
 
 #include "lldb/Symbol/CompilerType.h"
 
-namespace clang {
-class TagDecl;
-}
-
 namespace lldb_private {
 struct ClangUtil {
   static bool IsClangType(const CompilerType &ct);
@@ -29,8 +25,6 @@ struct ClangUtil {
   static clang::QualType GetCanonicalQualType(const CompilerType &ct);
 
   static CompilerType RemoveFastQualifiers(const CompilerType &ct);
-
-  static clang::TagDecl *GetAsTagDecl(const CompilerType &type);
 };
 }
 

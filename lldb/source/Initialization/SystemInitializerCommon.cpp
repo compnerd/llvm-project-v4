@@ -9,17 +9,21 @@
 
 #include "lldb/Initialization/SystemInitializerCommon.h"
 
+#include "Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOSXDYLD.h"
+#include "Plugins/DynamicLoader/POSIX-DYLD/DynamicLoaderPOSIXDYLD.h"
+#include "Plugins/DynamicLoader/Windows-DYLD/DynamicLoaderWindowsDYLD.h"
+#include "Plugins/ExpressionParser/Swift/SwiftREPL.h"
 #include "Plugins/Instruction/ARM/EmulateInstructionARM.h"
 #include "Plugins/Instruction/MIPS/EmulateInstructionMIPS.h"
 #include "Plugins/Instruction/MIPS64/EmulateInstructionMIPS64.h"
 #include "Plugins/ObjectContainer/BSD-Archive/ObjectContainerBSDArchive.h"
 #include "Plugins/ObjectContainer/Universal-Mach-O/ObjectContainerUniversalMachO.h"
 #include "Plugins/Process/gdb-remote/ProcessGDBRemoteLog.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
+#include "lldb/Symbol/ClangASTContext.h"
+#include "lldb/Symbol/SwiftASTContext.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Reproducer.h"
 #include "lldb/Utility/Timer.h"
 
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__)
@@ -36,14 +40,12 @@
 #include <string>
 
 using namespace lldb_private;
-using namespace lldb_private::repro;
 
 SystemInitializerCommon::SystemInitializerCommon() {}
 
 SystemInitializerCommon::~SystemInitializerCommon() {}
 
-llvm::Error
-SystemInitializerCommon::Initialize(const InitializerOptions &options) {
+void SystemInitializerCommon::Initialize() {
 #if defined(_MSC_VER)
   const char *disable_crash_dialog_var = getenv("LLDB_DISABLE_CRASH_DIALOG");
   if (disable_crash_dialog_var &&
@@ -66,16 +68,6 @@ SystemInitializerCommon::Initialize(const InitializerOptions &options) {
   }
 #endif
 
-  ReproducerMode mode = ReproducerMode::Off;
-  if (options.reproducer_capture)
-    mode = ReproducerMode::Capture;
-  if (options.reproducer_replay)
-    mode = ReproducerMode::Replay;
-
-  if (auto e = Reproducer::Initialize(mode, FileSpec(options.reproducer_path)))
-    return e;
-
-  FileSystem::Initialize();
   Log::Initialize();
   HostInfo::Initialize();
   static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
@@ -84,6 +76,11 @@ SystemInitializerCommon::Initialize(const InitializerOptions &options) {
   process_gdb_remote::ProcessGDBRemoteLog::Initialize();
 
   // Initialize plug-ins
+  ClangASTContext::Initialize();
+  SwiftASTContext::Initialize();
+
+  SwiftREPL::Initialize();
+
   ObjectContainerBSDArchive::Initialize();
 
   EmulateInstructionARM::Initialize();
@@ -101,14 +98,17 @@ SystemInitializerCommon::Initialize(const InitializerOptions &options) {
 #if defined(_MSC_VER)
   ProcessWindowsLog::Initialize();
 #endif
-
-  return llvm::Error::success();
 }
 
 void SystemInitializerCommon::Terminate() {
   static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
   Timer scoped_timer(func_cat, LLVM_PRETTY_FUNCTION);
   ObjectContainerBSDArchive::Terminate();
+
+  ClangASTContext::Terminate();
+  SwiftASTContext::Terminate();
+
+  SwiftREPL::Terminate();
 
   EmulateInstructionARM::Terminate();
   EmulateInstructionMIPS::Terminate();
@@ -122,6 +122,4 @@ void SystemInitializerCommon::Terminate() {
 
   HostInfo::Terminate();
   Log::DisableAllLogChannels();
-  FileSystem::Terminate();
-  Reproducer::Terminate();
 }

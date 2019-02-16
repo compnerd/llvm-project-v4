@@ -10,6 +10,10 @@
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/Target/Language.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 
 using namespace lldb;
 using namespace lldb_private;
@@ -35,6 +39,12 @@ static bool IsApplicable(lldb::LanguageType category_lang,
   // Unless we know better, allow only exact equality.
   default:
     return category_lang == valobj_lang;
+
+  // Swift knows about itself, and about ObjC++ bridgings
+  case eLanguageTypeSwift:
+    return valobj_lang == eLanguageTypeSwift ||
+           valobj_lang == eLanguageTypeObjC ||
+           valobj_lang == eLanguageTypeObjC_plus_plus;
 
   // the C family, we consider it as one
   case eLanguageTypeC89:
@@ -157,7 +167,10 @@ bool TypeCategoryImpl::Get(ValueObject &valobj,
 
   else /*if (filter_sp.get() && synth.get())*/
   {
-    pick_synth = filter_sp->GetRevision() <= synth->GetRevision();
+    if (filter_sp->GetRevision() > synth->GetRevision())
+      pick_synth = false;
+    else
+      pick_synth = true;
   }
   if (pick_synth) {
     if (regex_synth && reason)

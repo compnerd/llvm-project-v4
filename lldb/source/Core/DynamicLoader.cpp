@@ -10,22 +10,22 @@
 #include "lldb/Target/DynamicLoader.h"
 
 #include "lldb/Core/Module.h"
-#include "lldb/Core/ModuleList.h"
+#include "lldb/Core/ModuleList.h" // for ModuleList
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
-#include "lldb/Symbol/ObjectFile.h"
+#include "lldb/Symbol/ObjectFile.h" // for ObjectFile
 #include "lldb/Target/MemoryRegionInfo.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/ConstString.h"
-#include "lldb/lldb-private-interfaces.h"
+#include "lldb/Utility/ConstString.h"     // for ConstString
+#include "lldb/lldb-private-interfaces.h" // for DynamicLoaderCreateInstance
 
-#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringRef.h" // for StringRef
 
-#include <memory>
+#include <memory> // for shared_ptr, unique_ptr
 
-#include <assert.h>
+#include <assert.h> // for assert
 
 using namespace lldb;
 using namespace lldb_private;
@@ -81,7 +81,7 @@ ModuleSP DynamicLoader::GetTargetExecutable() {
   ModuleSP executable = target.GetExecutableModule();
 
   if (executable) {
-    if (FileSystem::Instance().Exists(executable->GetFileSpec())) {
+    if (executable->GetFileSpec().Exists()) {
       ModuleSpec module_spec(executable->GetFileSpec(),
                              executable->GetArchitecture());
       auto module_sp = std::make_shared<Module>(module_spec);
@@ -195,8 +195,9 @@ ModuleSP DynamicLoader::LoadModuleAtAddress(const FileSpec &file,
     if (error.Success() && memory_info.GetMapped() &&
         memory_info.GetRange().GetRangeBase() == base_addr && 
         !(memory_info.GetName().IsEmpty())) {
-      ModuleSpec new_module_spec(FileSpec(memory_info.GetName().AsCString()),
-                                 target.GetArchitecture());
+      ModuleSpec new_module_spec(
+          FileSpec(memory_info.GetName().AsCString(), false),
+          target.GetArchitecture());
 
       if ((module_sp = modules.FindFirstModule(new_module_spec))) {
         UpdateLoadedSections(module_sp, link_map_addr, base_addr, false);

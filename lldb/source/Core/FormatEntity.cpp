@@ -10,28 +10,29 @@
 #include "lldb/Core/FormatEntity.h"
 
 #include "lldb/Core/Address.h"
-#include "lldb/Core/AddressRange.h"
+#include "lldb/Core/AddressRange.h" // for AddressRange
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/DumpRegisterValue.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Core/RegisterValue.h" // for RegisterValue
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/DataFormatters/DataVisualization.h"
-#include "lldb/DataFormatters/FormatClasses.h"
+#include "lldb/DataFormatters/FormatClasses.h" // for TypeNameSpecifier...
 #include "lldb/DataFormatters/FormatManager.h"
-#include "lldb/DataFormatters/TypeSummary.h"
+#include "lldb/DataFormatters/TypeSummary.h" // for TypeSummaryImpl::...
 #include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Symbol/Block.h"
 #include "lldb/Symbol/CompileUnit.h"
-#include "lldb/Symbol/CompilerType.h"
+#include "lldb/Symbol/CompilerType.h" // for CompilerType
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/LineEntry.h"
 #include "lldb/Symbol/Symbol.h"
-#include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Symbol/SymbolContext.h" // for SymbolContext
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Target/ExecutionContext.h"
-#include "lldb/Target/ExecutionContextScope.h"
+#include "lldb/Target/ExecutionContextScope.h" // for ExecutionContextS...
 #include "lldb/Target/Language.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
@@ -41,32 +42,31 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/AnsiTerminal.h"
-#include "lldb/Utility/ArchSpec.h"
-#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/ArchSpec.h"    // for ArchSpec
+#include "lldb/Utility/ConstString.h" // for ConstString, oper...
 #include "lldb/Utility/FileSpec.h"
-#include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/SharingPtr.h"
+#include "lldb/Utility/Log.h"        // for Log
+#include "lldb/Utility/Logging.h"    // for GetLogIfAllCatego...
+#include "lldb/Utility/SharingPtr.h" // for SharingPtr
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
-#include "lldb/Utility/StringList.h"
-#include "lldb/Utility/StructuredData.h"
-#include "lldb/lldb-defines.h"
-#include "lldb/lldb-forward.h"
+#include "lldb/Utility/StringList.h"     // for StringList
+#include "lldb/Utility/StructuredData.h" // for StructuredData::O...
+#include "lldb/lldb-defines.h"           // for LLDB_INVALID_ADDRESS
+#include "lldb/lldb-forward.h"           // for ValueObjectSP
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
-#include "llvm/Support/Compiler.h"
+#include "llvm/ADT/Triple.h"       // for Triple, Triple::O...
+#include "llvm/Support/Compiler.h" // for LLVM_FALLTHROUGH
 
-#include <ctype.h>
-#include <inttypes.h>
-#include <memory>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <type_traits>
-#include <utility>
+#include <ctype.h>     // for isxdigit
+#include <inttypes.h>  // for PRIu64, PRIx64
+#include <memory>      // for shared_ptr, opera...
+#include <stdio.h>     // for sprintf
+#include <stdlib.h>    // for strtoul
+#include <string.h>    // for size_t, strchr
+#include <type_traits> // for move
+#include <utility>     // for pair
 
 namespace lldb_private {
 class ScriptInterpreter;
@@ -1304,10 +1304,16 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
       if (thread) {
         StopInfoSP stop_info_sp = thread->GetStopInfo();
         if (stop_info_sp && stop_info_sp->IsValid()) {
-          ValueObjectSP return_valobj_sp =
-              StopInfo::GetReturnValueObject(stop_info_sp);
+          bool is_swift_error_return = false;
+          ValueObjectSP return_valobj_sp = StopInfo::GetReturnValueObject(
+              stop_info_sp, is_swift_error_return);
           if (return_valobj_sp) {
-            return_valobj_sp->Dump(s);
+            DumpValueObjectOptions options;
+            if (return_valobj_sp->IsDynamic())
+              options.SetUseDynamicType(eDynamicCanRunTarget);
+            if (return_valobj_sp->DoesProvideSyntheticValue())
+              options.SetUseSyntheticValue(true);
+            return_valobj_sp->Dump(s, options);
             return true;
           }
         }

@@ -18,6 +18,7 @@ import time
 # Third-party modules
 from six import StringIO as SixStringIO
 import six
+from lldbsuite.support import seven
 
 # LLDB modules
 import lldb
@@ -736,8 +737,6 @@ def is_thread_crashed(test, thread):
     elif test.getPlatform() == "linux":
         return thread.GetStopReason() == lldb.eStopReasonSignal and thread.GetStopReasonDataAtIndex(
             0) == thread.GetProcess().GetUnixSignals().GetSignalNumberFromName("SIGSEGV")
-    elif test.getPlatform() == "windows":
-        return "Exception 0xc0000005" in thread.GetStopDescription(100)
     else:
         return "invalid address" in thread.GetStopDescription(100)
 
@@ -763,7 +762,6 @@ def run_to_breakpoint_make_target(test, exe_name = "a.out", in_cwd = True):
     return target
 
 def run_to_breakpoint_do_run(test, target, bkpt, launch_info = None):
-
     # Launch the process, and do not stop at the entry point.
     if not launch_info:
         launch_info = lldb.SBLaunchInfo(None)
@@ -1276,6 +1274,72 @@ class RecursiveDecentFormatter(BasicFormatter):
 
         return output.getvalue()
 
+
+def check_variable(
+        test,
+        valobj,
+        use_dynamic=False,
+        summary=None,
+        value=None,
+        typename=None,
+        num_children=None,
+        use_synthetic=True):
+    test.assertTrue(
+        valobj.IsValid(),
+        "variable %s is not valid" %
+        (valobj.GetName() if valobj else "<unknown>"))
+    if use_dynamic:
+        valobj = valobj.GetDynamicValue(lldb.eDynamicCanRunTarget)
+        test.assertTrue(
+            valobj.IsValid(),
+            "dynamic value of %s is not valid" %
+            (valobj.GetName() if valobj else "<unknown>"))
+        test.assertTrue(
+            valobj.IsDynamic(),
+            "dynamic value of %s is not dynamic" %
+            (valobj.GetName() if valobj else "<unknown>"))
+    if use_synthetic:
+        valobj.SetPreferSyntheticValue(True)
+    if summary:
+        test.assertTrue(
+            valobj.GetSummary() == summary,
+            "expected summary: '%s' - actual summary: '%s'" %
+            (summary,
+             valobj.GetSummary() if valobj else "<unknown>"))
+    if value:
+        test.assertTrue(
+            valobj.GetValue() == value, "expected value: '%s' - actual value: '%s'" %
+            (value, valobj.GetValue() if valobj else "<unknown>"))
+    if typename:
+        test.assertTrue(
+            valobj.GetTypeName() == typename,
+            "expected typename: '%s' - actual typename: '%s'" %
+            (typename,
+             valobj.GetTypeName() if valobj else "<unknown>"))
+    if num_children:
+        test.assertTrue(
+            valobj.GetNumChildren() == num_children,
+            "expected num children: '%s' - actual num children: '%s'" %
+            (num_children,
+             valobj.GetNumChildren() if valobj else "<unknown>"))
+
+
+def check_children(test, valobj, thecallable):
+    test.assertTrue(
+        valobj.IsValid(),
+        "variable %s is not valid" %
+        (valobj.GetName() if valobj else "<unknown>"))
+    i = 0
+    while i < valobj.GetNumChildren():
+        child = valobj.GetChildAtIndex(i)
+        test.assertTrue(
+            thecallable(
+                child,
+                i),
+            "child %d failed the test" %
+            (i))
+        i = i + 1
+
 # ===========================================================
 # Utility functions for path manipulation on remote platforms
 # ===========================================================
@@ -1389,3 +1453,11 @@ def wait_for_file_on_target(testcase, file_path, max_attempts=6):
             (file_path, max_attempts))
 
     return read_file_on_target(testcase, file_path)
+
+def execute_command(command):
+    #print('%% %s' % (command))
+    (exit_status, output) = seven.get_command_status_output(command)
+    # if output:
+    #    print(output)
+    #print('status = %u' % (exit_status))
+    return exit_status

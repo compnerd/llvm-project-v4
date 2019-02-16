@@ -24,6 +24,8 @@ endif()
 
 set(LLDB_DISABLE_PYTHON ${LLDB_DEFAULT_DISABLE_PYTHON} CACHE BOOL
   "Disables the Python scripting integration.")
+set(LLDB_ALLOW_STATIC_BINDINGS FALSE CACHE BOOL
+  "Enable using static/baked language bindings if swig is not present.")
 set(LLDB_DISABLE_CURSES ${LLDB_DEFAULT_DISABLE_CURSES} CACHE BOOL
   "Disables the Curses integration.")
 
@@ -199,6 +201,15 @@ else ()
 endif ()
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/../clang/include")
 
+if(NOT LLDB_BUILT_STANDALONE)
+  if (LLVM_EXTERNAL_SWIFT_SOURCE_DIR)
+    include_directories(${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}/include)
+  else ()
+    include_directories(${CMAKE_SOURCE_DIR}/tools/swift/include)
+  endif ()
+  include_directories("${CMAKE_CURRENT_BINARY_DIR}/../swift/include")
+endif()
+
 # Disable GCC warnings
 check_cxx_compiler_flag("-Wno-deprecated-declarations"
                         CXX_SUPPORTS_NO_DEPRECATED_DECLARATIONS)
@@ -243,7 +254,6 @@ if( MSVC )
     -wd4018 # Suppress 'warning C4018: '>=' : signed/unsigned mismatch'
     -wd4068 # Suppress 'warning C4068: unknown pragma'
     -wd4150 # Suppress 'warning C4150: deletion of pointer to incomplete type'
-    -wd4201 # Suppress 'warning C4201: nonstandard extension used: nameless struct/union'
     -wd4251 # Suppress 'warning C4251: T must have dll-interface to be used by clients of class U.'
     -wd4521 # Suppress 'warning C4521: 'type' : multiple copy constructors specified'
     -wd4530 # Suppress 'warning C4530: C++ exception handler used, but unwind semantics are not enabled.'
@@ -266,20 +276,9 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 "`CMakeFiles'. Please delete them.")
 endif()
 
-# If LLDB_VERSION_* is specified, use it, if not use LLVM_VERSION_*.
-if(NOT DEFINED LLDB_VERSION_MAJOR)
-  set(LLDB_VERSION_MAJOR ${LLVM_VERSION_MAJOR})
-endif()
-if(NOT DEFINED LLDB_VERSION_MINOR)
-  set(LLDB_VERSION_MINOR ${LLVM_VERSION_MINOR})
-endif()
-if(NOT DEFINED LLDB_VERSION_PATCH)
-  set(LLDB_VERSION_PATCH ${LLVM_VERSION_PATCH})
-endif()
-if(NOT DEFINED LLDB_VERSION_SUFFIX)
-  set(LLDB_VERSION_SUFFIX ${LLVM_VERSION_SUFFIX})
-endif()
-set(LLDB_VERSION "${LLDB_VERSION_MAJOR}.${LLDB_VERSION_MINOR}.${LLDB_VERSION_PATCH}${LLDB_VERSION_SUFFIX}")
+# Compute the LLDB version from the LLVM version.
+string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" LLDB_VERSION
+  ${PACKAGE_VERSION})
 message(STATUS "LLDB version: ${LLDB_VERSION}")
 
 include_directories(BEFORE
@@ -316,7 +315,11 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   endif()
 endif()
 
-if (NOT LIBXML2_FOUND)
+if (NOT LIBXML2_FOUND AND NOT (CMAKE_SYSTEM_NAME MATCHES "Windows"))
+  # Skip Libxml2 on Windows.  In CMake 3.4 and higher, the algorithm for
+  # finding libxml2 got "smarter", and it can now locate the version which is
+  # in gnuwin32, even though that version does not contain the headers that
+  # LLDB uses.
   find_package(LibXml2)
 endif()
 
@@ -344,11 +347,15 @@ if (APPLE)
        ${CORE_SERVICES_LIBRARY}
        ${SECURITY_LIBRARY}
        ${DEBUG_SYMBOLS_LIBRARY})
-  include_directories(${LIBXML2_INCLUDE_DIR})
-elseif(LIBXML2_FOUND AND LIBXML2_VERSION_STRING VERSION_GREATER 2.8)
-  add_definitions( -DLIBXML2_DEFINED )
-  list(APPEND system_libs ${LIBXML2_LIBRARIES})
-  include_directories(${LIBXML2_INCLUDE_DIR})
+
+  include_directories(AFTER "${CMAKE_OSX_SYSROOT}/usr/include/libxml2")
+else()
+  if (LIBXML2_FOUND)
+    add_definitions( -DLIBXML2_DEFINED )
+    list(APPEND system_libs ${LIBXML2_LIBRARIES})
+    include_directories(${LIBXML2_INCLUDE_DIR})
+  endif()
+
 endif()
 
 if( WIN32 AND NOT CYGWIN )
@@ -362,8 +369,6 @@ if(NOT PURE_WINDOWS)
 endif()
 
 list(APPEND system_libs ${CMAKE_DL_LIBS})
-
-SET(SKIP_LLDB_SERVER_BUILD OFF CACHE BOOL "Skip building lldb-server")
 
 # Figure out if lldb could use lldb-server.  If so, then we'll
 # ensure we build lldb-server when an lldb target is being built.

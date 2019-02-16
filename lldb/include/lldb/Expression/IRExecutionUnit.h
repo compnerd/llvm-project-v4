@@ -10,14 +10,19 @@
 #ifndef liblldb_IRExecutionUnit_h_
 #define liblldb_IRExecutionUnit_h_
 
+// C Includes
+// C++ Includes
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/Module.h"
 
+// Project includes
 #include "lldb/Expression/IRMemoryMap.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -108,9 +113,19 @@ public:
   void PopulateSectionList(lldb_private::ObjectFile *obj_file,
                            lldb_private::SectionList &section_list) override;
 
-  ArchSpec GetArchitecture() override;
+  bool GetArchitecture(lldb_private::ArchSpec &arch) override;
 
   lldb::ModuleSP GetJITModule();
+
+  lldb::ModuleSP CreateJITModule(const char *name,
+                                 const FileSpec *limit_file_ptr = NULL,
+                                 uint32_t limit_start_line = 0,
+                                 uint32_t limit_end_line = 0);
+
+  //------------------------------------------------------------------
+  /// Accessor for the mutex that guards LLVM::getGlobalContext()
+  //------------------------------------------------------------------
+  static std::recursive_mutex &GetLLVMGlobalContextMutex();
 
   lldb::addr_t FindSymbol(const ConstString &name);
 
@@ -331,6 +346,10 @@ private:
     void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr,
                           size_t Size) override {}
 
+    virtual void deregisterEHFrames() override {
+      return;
+    }
+
     uint64_t getSymbolAddress(const std::string &Name) override;
 
     void *getPointerToNamedFunction(const std::string &Name,
@@ -397,7 +416,8 @@ private:
   std::unique_ptr<llvm::ExecutionEngine> m_execution_engine_ap;
   std::unique_ptr<llvm::ObjectCache> m_object_cache_ap;
   std::unique_ptr<llvm::Module>
-      m_module_ap;        ///< Holder for the module until it's been handed off
+      m_module_ap; ///< Holder for the module until it's been handed off
+  lldb::ModuleWP m_jit_module_wp;
   llvm::Module *m_module; ///< Owned by the execution engine
   std::vector<std::string> m_cpu_features;
   std::vector<JittedFunction> m_jitted_functions; ///< A vector of all functions

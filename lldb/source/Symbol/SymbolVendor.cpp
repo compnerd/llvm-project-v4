@@ -9,11 +9,17 @@
 
 #include "lldb/Symbol/SymbolVendor.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/Section.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolFile.h"
+#include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/Stream.h"
 
 using namespace lldb;
@@ -57,7 +63,7 @@ SymbolVendor *SymbolVendor::FindPlugin(const lldb::ModuleSP &module_sp,
 //----------------------------------------------------------------------
 SymbolVendor::SymbolVendor(const lldb::ModuleSP &module_sp)
     : ModuleChild(module_sp), m_type_list(), m_compile_units(),
-      m_sym_file_ap(), m_symtab() {}
+      m_sym_file_ap() {}
 
 //----------------------------------------------------------------------
 // Destructor
@@ -231,7 +237,7 @@ Type *SymbolVendor::ResolveTypeUID(lldb::user_id_t type_uid) {
 }
 
 uint32_t SymbolVendor::ResolveSymbolContext(const Address &so_addr,
-                                            SymbolContextItem resolve_scope,
+                                            uint32_t resolve_scope,
                                             SymbolContext &sc) {
   ModuleSP module_sp(GetModule());
   if (module_sp) {
@@ -244,7 +250,7 @@ uint32_t SymbolVendor::ResolveSymbolContext(const Address &so_addr,
 
 uint32_t SymbolVendor::ResolveSymbolContext(const FileSpec &file_spec,
                                             uint32_t line, bool check_inlines,
-                                            SymbolContextItem resolve_scope,
+                                            uint32_t resolve_scope,
                                             SymbolContextList &sc_list) {
   ModuleSP module_sp(GetModule());
   if (module_sp) {
@@ -284,7 +290,7 @@ size_t SymbolVendor::FindGlobalVariables(const RegularExpression &regex,
 
 size_t SymbolVendor::FindFunctions(const ConstString &name,
                                    const CompilerDeclContext *parent_decl_ctx,
-                                   FunctionNameType name_type_mask,
+                                   uint32_t name_type_mask,
                                    bool include_inlines, bool append,
                                    SymbolContextList &sc_list) {
   ModuleSP module_sp(GetModule());
@@ -341,7 +347,7 @@ size_t SymbolVendor::FindTypes(const std::vector<CompilerContext> &context,
   return 0;
 }
 
-size_t SymbolVendor::GetTypes(SymbolContextScope *sc_scope, TypeClass type_mask,
+size_t SymbolVendor::GetTypes(SymbolContextScope *sc_scope, uint32_t type_mask,
                               lldb_private::TypeList &type_list) {
   ModuleSP module_sp(GetModule());
   if (module_sp) {
@@ -434,23 +440,14 @@ FileSpec SymbolVendor::GetMainFileSpec() const {
 
 Symtab *SymbolVendor::GetSymtab() {
   ModuleSP module_sp(GetModule());
-  if (!module_sp)
-    return nullptr;
-
-  std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
-
-  if (m_symtab)
-    return m_symtab;
-
-  ObjectFile *objfile = module_sp->GetObjectFile();
-  if (!objfile)
-    return nullptr;
-
-  m_symtab = objfile->GetSymtab();
-  if (m_symtab && m_sym_file_ap)
-    m_sym_file_ap->AddSymbols(*m_symtab);
-
-  return m_symtab;
+  if (module_sp) {
+    ObjectFile *objfile = module_sp->GetObjectFile();
+    if (objfile) {
+      // Get symbol table from unified section list.
+      return objfile->GetSymtab();
+    }
+  }
+  return nullptr;
 }
 
 void SymbolVendor::ClearSymtab() {
@@ -462,6 +459,37 @@ void SymbolVendor::ClearSymtab() {
       objfile->ClearSymtab();
     }
   }
+}
+
+bool SymbolVendor::GetCompileOption(const char *option, std::string &value,
+                                    lldb_private::CompileUnit *cu) {
+  SymbolFile *sym_file = GetSymbolFile();
+
+  if (sym_file)
+    return sym_file->GetCompileOption(option, value, cu);
+
+  value.clear();
+  return false;
+}
+
+int SymbolVendor::GetCompileOptions(const char *option,
+                                    std::vector<std::string> &values,
+                                    lldb_private::CompileUnit *cu) {
+  SymbolFile *sym_file = GetSymbolFile();
+
+  if (sym_file)
+    return sym_file->GetCompileOptions(option, values, cu);
+
+  values.clear();
+  return false;
+}
+
+void SymbolVendor::GetLoadedModules(lldb::LanguageType language,
+                                    FileSpecList &modules) {
+  SymbolFile *sym_file = GetSymbolFile();
+
+  if (sym_file)
+    sym_file->GetLoadedModules(language, modules);
 }
 
 void SymbolVendor::SectionFileAddressesChanged() {
@@ -489,3 +517,66 @@ lldb_private::ConstString SymbolVendor::GetPluginName() {
 }
 
 uint32_t SymbolVendor::GetPluginVersion() { return 1; }
+
+bool SymbolVendor::SetLimitSourceFileRange(const FileSpec &file,
+                                           uint32_t first_line,
+                                           uint32_t last_line) {
+  SymbolFile *sym_file = GetSymbolFile();
+
+  if (sym_file)
+    return sym_file->SetLimitSourceFileRange(file, first_line, last_line);
+
+  return false;
+}
+
+bool SymbolVendor::SymbolContextShouldBeExcluded(const SymbolContext &sc,
+                                                 uint32_t actual_line) {
+  SymbolFile *sym_file = GetSymbolFile();
+
+  if (sym_file)
+    return sym_file->SymbolContextShouldBeExcluded(sc, actual_line);
+
+  return false;
+}
+
+std::vector<DataBufferSP>
+SymbolVendor::GetASTData(lldb::LanguageType language) {
+  std::vector<DataBufferSP> ast_datas;
+
+  if (language != eLanguageTypeSwift)
+    return ast_datas;
+
+  // Sometimes the AST Section data is found from the module, so look there
+  // first:
+  SectionList *section_list = GetModule()->GetSectionList();
+
+  if (section_list) {
+    SectionSP section_sp(
+        section_list->FindSectionByType(eSectionTypeSwiftModules, true));
+    if (section_sp) {
+      DataExtractor section_data;
+
+      if (section_sp->GetSectionData(section_data)) {
+        ast_datas.push_back(DataBufferSP(
+            new DataBufferHeap((const char *)section_data.GetDataStart(),
+                               section_data.GetByteSize())));
+        return ast_datas;
+      }
+    }
+  }
+
+  // If we couldn't find it in the Module, then look for it in the SymbolFile:
+  SymbolFile *sym_file = GetSymbolFile();
+  if (sym_file)
+    ast_datas = sym_file->GetASTData(language);
+
+  return ast_datas;
+}
+
+bool SymbolVendor::ForceInlineSourceFileCheck() {
+  SymbolFile *sym_file = GetSymbolFile();
+  if (sym_file)
+    return sym_file->ForceInlineSourceFileCheck();
+
+  return false;
+}

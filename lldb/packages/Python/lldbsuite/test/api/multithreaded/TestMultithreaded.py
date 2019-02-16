@@ -11,8 +11,10 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 import subprocess
+import unittest2
 
 
+@unittest2.skip("skipping due to frequent timeouts: rdar://28183131")
 class SBBreakpointCallbackCase(TestBase):
 
     NO_DEBUG_INFO_TESTCASE = True
@@ -68,7 +70,7 @@ class SBBreakpointCallbackCase(TestBase):
     # clang-cl does not support throw or catch (llvm.org/pr24538)
     @skipIfWindows
     @expectedFlakeyFreeBSD
-    @skipIf(oslist=["linux"]) # flakey
+    @expectedFailureAll(oslist=["linux"])
     def test_sb_api_listener_resume(self):
         """ Test that a process can be resumed from a non-main thread. """
         self.build_and_test(

@@ -10,7 +10,11 @@
 #ifndef liblldb_CommandObjectPlugin_h_
 #define liblldb_CommandObjectPlugin_h_
 
+// C Includes
+// C++ Includes
 
+// Other libraries and framework includes
+// Project includes
 
 #include "lldb/Interpreter/CommandObjectMultiword.h"
 #include "lldb/lldb-types.h"

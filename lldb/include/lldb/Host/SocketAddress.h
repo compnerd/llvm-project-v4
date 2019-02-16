@@ -10,6 +10,7 @@
 #ifndef liblldb_SocketAddress_h_
 #define liblldb_SocketAddress_h_
 
+// C Includes
 #include <stdint.h>
 
 #ifdef _WIN32
@@ -27,6 +28,9 @@ typedef ADDRESS_FAMILY sa_family_t;
 #include <sys/types.h>
 #endif
 
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include <string>
 #include <vector>
 

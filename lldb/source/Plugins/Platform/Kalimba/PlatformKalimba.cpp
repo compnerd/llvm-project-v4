@@ -11,6 +11,9 @@
 #include "PlatformKalimba.h"
 #include "lldb/Host/Config.h"
 
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
@@ -30,7 +33,7 @@ static uint32_t g_initialize_count = 0;
 
 PlatformSP PlatformKalimba::CreateInstance(bool force, const ArchSpec *arch) {
   bool create = force;
-  if (!create && arch && arch->IsValid()) {
+  if (create == false && arch && arch->IsValid()) {
     const llvm::Triple &triple = arch->GetTriple();
     switch (triple.getVendor()) {
     case llvm::Triple::CSR:

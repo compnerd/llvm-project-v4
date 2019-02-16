@@ -10,6 +10,8 @@
 #ifndef __JSONGenerator_h_
 #define __JSONGenerator_h_
 
+// C Includes
+// C++ Includes
 
 #include <iomanip>
 #include <sstream>
@@ -182,7 +184,7 @@ public:
     void SetValue(bool value) { m_value = value; }
 
     void Dump(std::ostream &s) const override {
-      if (m_value)
+      if (m_value == true)
         s << "true";
       else
         s << "false";
@@ -262,7 +264,7 @@ public:
       s << "{";
       for (collection::const_iterator iter = m_dict.begin();
            iter != m_dict.end(); ++iter) {
-        if (!have_printed_one_elem) {
+        if (have_printed_one_elem == false) {
           have_printed_one_elem = true;
         } else {
           s << ",";

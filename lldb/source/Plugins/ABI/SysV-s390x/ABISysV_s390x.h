@@ -10,6 +10,10 @@
 #ifndef liblldb_ABISysV_s390x_h_
 #define liblldb_ABISysV_s390x_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/ABI.h"
 #include "lldb/lldb-private.h"
 
@@ -57,7 +61,9 @@ public:
 
   bool CodeAddressIsValid(lldb::addr_t pc) override {
     // Code addressed must be 2 byte aligned
-    return (pc & 1ull) == 0;
+    if (pc & 1ull)
+      return false;
+    return true;
   }
 
   const lldb_private::RegisterInfo *

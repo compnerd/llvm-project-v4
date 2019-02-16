@@ -10,6 +10,10 @@
 #ifndef liblldb_ClangForward_h_
 #define liblldb_ClangForward_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 
 #if defined(__cplusplus)
 
@@ -129,6 +133,11 @@ class APInt;
 class APSInt;
 class LLVMContext;
 class ExecutionEngine;
+class LLVMContext;
+class MemoryBuffer;
+class Module;
+class SourceMgr;
+class TargetOptions;
 }
 
 #endif // #if defined(__cplusplus)

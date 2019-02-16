@@ -190,7 +190,6 @@ class LibcxxListDataFormatterTestCase(TestBase):
 
         self.runCmd("n") # This gets us past the printf
         self.runCmd("n")
-        self.runCmd("n")
 
         # check access-by-index
         self.expect("frame variable text_list[0]",

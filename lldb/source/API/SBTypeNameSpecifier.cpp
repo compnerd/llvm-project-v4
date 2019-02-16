@@ -80,13 +80,13 @@ operator=(const lldb::SBTypeNameSpecifier &rhs) {
 }
 
 bool SBTypeNameSpecifier::operator==(lldb::SBTypeNameSpecifier &rhs) {
-  if (!IsValid())
+  if (IsValid() == false)
     return !rhs.IsValid();
   return m_opaque_sp == rhs.m_opaque_sp;
 }
 
 bool SBTypeNameSpecifier::IsEqualTo(lldb::SBTypeNameSpecifier &rhs) {
-  if (!IsValid())
+  if (IsValid() == false)
     return !rhs.IsValid();
 
   if (IsRegex() != rhs.IsRegex())
@@ -98,7 +98,7 @@ bool SBTypeNameSpecifier::IsEqualTo(lldb::SBTypeNameSpecifier &rhs) {
 }
 
 bool SBTypeNameSpecifier::operator!=(lldb::SBTypeNameSpecifier &rhs) {
-  if (!IsValid())
+  if (IsValid() == false)
     return !rhs.IsValid();
   return m_opaque_sp != rhs.m_opaque_sp;
 }

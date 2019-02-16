@@ -10,9 +10,13 @@
 #ifndef liblldb_PlatformiOSSimulator_h_
 #define liblldb_PlatformiOSSimulator_h_
 
+// C Includes
+// C++ Includes
 #include <mutex>
 #include <string>
 
+// Other libraries and framework includes
+// Project includes
 #include "PlatformAppleSimulator.h"
 
 class PlatformiOSSimulator : public PlatformAppleSimulator {

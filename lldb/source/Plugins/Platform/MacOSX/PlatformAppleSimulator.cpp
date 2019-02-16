@@ -9,12 +9,16 @@
 
 #include "PlatformAppleSimulator.h"
 
+// C Includes
 #if defined(__APPLE__)
 #include <dlfcn.h>
 #endif
 
+// C++ Includes
 #include <mutex>
 #include <thread>
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Host/PseudoTerminal.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/LLDBAssert.h"
@@ -225,8 +229,9 @@ FileSpec PlatformAppleSimulator::GetCoreSimulatorPath() {
       cs_path.Printf(
           "%s/Library/PrivateFrameworks/CoreSimulator.framework/CoreSimulator",
           developer_dir);
-      m_core_simulator_framework_path = FileSpec(cs_path.GetData());
-      FileSystem::Instance().Resolve(*m_core_simulator_framework_path);
+      const bool resolve_path = true;
+      m_core_simulator_framework_path =
+          FileSpec(cs_path.GetData(), resolve_path);
     }
   }
 
@@ -238,7 +243,7 @@ FileSpec PlatformAppleSimulator::GetCoreSimulatorPath() {
 
 void PlatformAppleSimulator::LoadCoreSimulator() {
 #if defined(__APPLE__)
-  static llvm::once_flag g_load_core_sim_flag;
+  static std::once_flag g_load_core_sim_flag;
   llvm::call_once(g_load_core_sim_flag, [this] {
     const std::string core_sim_path(GetCoreSimulatorPath().GetPath());
     if (core_sim_path.size())

@@ -33,8 +33,6 @@ public:
   static int kInvalidDescriptor;
   static FILE *kInvalidStream;
 
-  // NB this enum is used in the lldb platform gdb-remote packet
-  // vFile:open: and existing values cannot be modified.
   enum OpenOptions {
     eOpenOptionRead = (1u << 0),  // Open file for reading
     eOpenOptionWrite = (1u << 1), // Open file for writing
@@ -66,11 +64,56 @@ public:
         m_is_real_terminal(eLazyBoolCalculate),
         m_supports_colors(eLazyBoolCalculate) {}
 
+  //------------------------------------------------------------------
+  /// Constructor with path.
+  ///
+  /// Takes a path to a file which can be just a filename, or a full path. If
+  /// \a path is not nullptr or empty, this function will call File::Open
+  /// (const char *path, uint32_t options, uint32_t permissions).
+  ///
+  /// @param[in] path
+  ///     The full or partial path to a file.
+  ///
+  /// @param[in] options
+  ///     Options to use when opening (see File::OpenOptions)
+  ///
+  /// @param[in] permissions
+  ///     Options to use when opening (see File::Permissions)
+  ///
+  /// @see File::Open (const char *path, uint32_t options, uint32_t
+  /// permissions)
+  //------------------------------------------------------------------
+  File(const char *path, uint32_t options,
+       uint32_t permissions = lldb::eFilePermissionsFileDefault);
+
+  //------------------------------------------------------------------
+  /// Constructor with FileSpec.
+  ///
+  /// Takes a FileSpec pointing to a file which can be just a filename, or a
+  /// full path. If \a path is not nullptr or empty, this function will call
+  /// File::Open (const char *path, uint32_t options, uint32_t permissions).
+  ///
+  /// @param[in] filespec
+  ///     The FileSpec for this file.
+  ///
+  /// @param[in] options
+  ///     Options to use when opening (see File::OpenOptions)
+  ///
+  /// @param[in] permissions
+  ///     Options to use when opening (see File::Permissions)
+  ///
+  /// @see File::Open (const char *path, uint32_t options, uint32_t
+  /// permissions)
+  //------------------------------------------------------------------
+  File(const FileSpec &filespec, uint32_t options,
+       uint32_t permissions = lldb::eFilePermissionsFileDefault);
+
   File(int fd, bool transfer_ownership)
       : IOObject(eFDTypeFile, transfer_ownership), m_descriptor(fd),
         m_stream(kInvalidStream), m_options(0), m_own_stream(false),
         m_is_interactive(eLazyBoolCalculate),
-        m_is_real_terminal(eLazyBoolCalculate) {}
+        m_is_real_terminal(eLazyBoolCalculate),
+        m_supports_colors(eLazyBoolCalculate) {}
 
   //------------------------------------------------------------------
   /// Destructor.
@@ -126,6 +169,23 @@ public:
   ///     A reference to the file specification object.
   //------------------------------------------------------------------
   Status GetFileSpec(FileSpec &file_spec) const;
+
+  //------------------------------------------------------------------
+  /// Open a file for read/writing with the specified options.
+  ///
+  /// Takes a path to a file which can be just a filename, or a full path.
+  ///
+  /// @param[in] path
+  ///     The full or partial path to a file.
+  ///
+  /// @param[in] options
+  ///     Options to use when opening (see File::OpenOptions)
+  ///
+  /// @param[in] permissions
+  ///     Options to use when opening (see File::Permissions)
+  //------------------------------------------------------------------
+  Status Open(const char *path, uint32_t options,
+              uint32_t permissions = lldb::eFilePermissionsFileDefault);
 
   Status Close() override;
 
@@ -360,6 +420,8 @@ public:
   //------------------------------------------------------------------
   uint32_t GetPermissions(Status &error) const;
 
+  static uint32_t GetPermissions(const FileSpec &file_spec, Status &error);
+
   //------------------------------------------------------------------
   /// Return true if this file is interactive.
   ///
@@ -402,10 +464,8 @@ public:
 
   void SetOptions(uint32_t options) { m_options = options; }
 
-  static bool DescriptorIsValid(int descriptor) { return descriptor >= 0; };
-
 protected:
-  bool DescriptorIsValid() const { return DescriptorIsValid(m_descriptor); }
+  bool DescriptorIsValid() const { return m_descriptor >= 0; }
 
   bool StreamIsValid() const { return m_stream != kInvalidStream; }
 
@@ -418,6 +478,7 @@ protected:
   FILE *m_stream;
   uint32_t m_options;
   bool m_own_stream;
+  bool m_own_descriptor;
   LazyBool m_is_interactive;
   LazyBool m_is_real_terminal;
   LazyBool m_supports_colors;

@@ -59,7 +59,6 @@ private:
   friend class SBDeclaration;
   friend class SBFileSpecList;
   friend class SBHostOS;
-  friend class SBInitializerOptions;
   friend class SBLaunchInfo;
   friend class SBLineEntry;
   friend class SBModule;
@@ -68,8 +67,8 @@ private:
   friend class SBProcess;
   friend class SBProcessInfo;
   friend class SBSourceManager;
-  friend class SBTarget;
   friend class SBThread;
+  friend class SBTarget;
 
   SBFileSpec(const lldb_private::FileSpec &fspec);
 

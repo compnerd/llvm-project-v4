@@ -10,14 +10,18 @@
 #ifndef lldb_TypeSynthetic_h_
 #define lldb_TypeSynthetic_h_
 
+// C Includes
 #include <stdint.h>
 
+// C++ Includes
 #include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-public.h"
 

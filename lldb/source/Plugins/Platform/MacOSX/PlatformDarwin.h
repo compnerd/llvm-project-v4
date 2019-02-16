@@ -10,9 +10,12 @@
 #ifndef liblldb_PlatformDarwin_h_
 #define liblldb_PlatformDarwin_h_
 
+// C Includes
+// C++ Includes
 
+// Other libraries and framework includes
+// Project includes
 #include "Plugins/Platform/POSIX/PlatformPOSIX.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Utility/FileSpec.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FileSystem.h"
@@ -76,6 +79,9 @@ public:
 
   lldb_private::FileSpec LocateExecutable(const char *basename) override;
 
+  static bool IsUnitTestExecutable(lldb_private::Module &module);
+  static lldb::ModuleSP GetUnitTestModule(lldb_private::ModuleList &modules);
+
   lldb_private::Status
   LaunchProcess(lldb_private::ProcessLaunchInfo &launch_info) override;
 
@@ -108,9 +114,9 @@ protected:
     SDKType sdk_type;
   };
 
-  static lldb_private::FileSystem::EnumerateDirectoryResult
+  static lldb_private::FileSpec::EnumerateDirectoryResult
   DirectoryEnumerator(void *baton, llvm::sys::fs::file_type file_type,
-                      llvm::StringRef path);
+                      const lldb_private::FileSpec &spec);
 
   static lldb_private::FileSpec
   FindSDKInXcodeForModules(SDKType sdk_type,

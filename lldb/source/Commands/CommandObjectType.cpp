@@ -9,12 +9,16 @@
 
 #include "CommandObjectType.h"
 
+// C Includes
+// C++ Includes
 #include <algorithm>
 #include <cctype>
 #include <functional>
 
+// Project includes
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/IOHandler.h"
+#include "lldb/Core/State.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
@@ -35,9 +39,9 @@
 #include "lldb/Target/ThreadList.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/RegularExpression.h"
-#include "lldb/Utility/State.h"
 #include "lldb/Utility/StringList.h"
 
+// Other libraries and framework includes
 #include "llvm/ADT/STLExtras.h"
 
 using namespace lldb;
@@ -1009,14 +1013,6 @@ public:
             "type format clear", "Delete all existing format styles.") {}
 };
 
-
-static constexpr OptionDefinition g_type_formatter_list_options[] = {
-  // clang-format off
-  {LLDB_OPT_SET_1, false, "category-regex", 'w', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeName,     "Only show categories matching this filter."},
-  {LLDB_OPT_SET_2, false, "language",       'l', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeLanguage, "Only show the category for a specific language."}
-  // clang-format on
-};
-
 template <typename FormatterType>
 class CommandObjectTypeFormatterList : public CommandObjectParsed {
   typedef typename FormatterType::SharedPointer FormatterSharedPointer;
@@ -1059,7 +1055,13 @@ class CommandObjectTypeFormatterList : public CommandObjectParsed {
     }
 
     llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
-      return llvm::makeArrayRef(g_type_formatter_list_options);
+      static constexpr OptionDefinition g_option_table[] = {
+          // clang-format off
+            {LLDB_OPT_SET_1, false, "category-regex", 'w', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeName,     "Only show categories matching this filter."},
+            {LLDB_OPT_SET_2, false, "language",       'l', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeLanguage, "Only show the category for a specific language."}
+          // clang-format on
+      };
+      return llvm::ArrayRef<OptionDefinition>(g_option_table);
     }
 
     // Instance variables to hold the values for command options.
@@ -2846,7 +2848,8 @@ public:
     StreamString stream;
     // FIXME: hardcoding languages is not good
     lldb::LanguageType languages[] = {eLanguageTypeObjC,
-                                      eLanguageTypeC_plus_plus};
+                                      eLanguageTypeC_plus_plus,
+                                      eLanguageTypeSwift};
 
     for (const auto lang_type : languages) {
       if (auto language = Language::FindPlugin(lang_type)) {
@@ -2897,6 +2900,7 @@ public:
       // FIXME: hardcoding languages is not good
       languages.push_back(Language::FindPlugin(eLanguageTypeObjC));
       languages.push_back(Language::FindPlugin(eLanguageTypeC_plus_plus));
+      languages.push_back(Language::FindPlugin(eLanguageTypeSwift));
     } else {
       languages.push_back(Language::FindPlugin(m_command_options.m_language));
     }

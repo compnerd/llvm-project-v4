@@ -10,10 +10,14 @@
 #ifndef liblldb_ItaniumABILanguageRuntime_h_
 #define liblldb_ItaniumABILanguageRuntime_h_
 
+// C Includes
+// C++ Includes
 #include <map>
 #include <mutex>
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointResolver.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Symbol/Type.h"
@@ -65,9 +69,6 @@ public:
                                                      bool throw_bp) override;
 
   lldb::SearchFilterSP CreateExceptionSearchFilter() override;
-  
-  lldb::ValueObjectSP GetExceptionObjectForThread(
-      lldb::ThreadSP thread_sp) override;
 
   //------------------------------------------------------------------
   // PluginInterface protocol

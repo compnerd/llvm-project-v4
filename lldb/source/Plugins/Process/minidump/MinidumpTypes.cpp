@@ -7,8 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Project includes
 #include "MinidumpTypes.h"
 
+// Other libraries and framework includes
 // C includes
 // C++ includes
 
@@ -58,8 +60,8 @@ lldb_private::minidump::parseMinidumpString(llvm::ArrayRef<uint8_t> &data) {
   result.resize(UNI_MAX_UTF8_BYTES_PER_CODE_POINT * source_length / 2);
   auto result_start = reinterpret_cast<llvm::UTF8 *>(&result[0]);
   const auto result_end = result_start + result.size();
-  llvm::ConvertUTF16toUTF8(&source_start, source_end, &result_start, result_end,
-                           llvm::strictConversion);
+  ConvertUTF16toUTF8(&source_start, source_end, &result_start, result_end,
+                     llvm::strictConversion);
   const auto result_size =
       std::distance(reinterpret_cast<llvm::UTF8 *>(&result[0]), result_start);
   result.resize(result_size); // shrink to actual length
@@ -242,8 +244,6 @@ MinidumpMemoryInfo::ParseMemoryInfoList(llvm::ArrayRef<uint8_t> &data) {
     return {};
 
   std::vector<const MinidumpMemoryInfo *> result;
-  result.reserve(header->num_of_entries);
-
   for (uint64_t i = 0; i < header->num_of_entries; ++i) {
     result.push_back(reinterpret_cast<const MinidumpMemoryInfo *>(
         data.data() + i * header->size_of_entry));

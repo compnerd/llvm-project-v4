@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/Watchpoint.h"
 
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
@@ -131,7 +135,10 @@ void Watchpoint::IncrementFalseAlarmsAndReviseHitCount() {
 bool Watchpoint::ShouldStop(StoppointCallbackContext *context) {
   IncrementHitCount();
 
-  return IsEnabled();
+  if (!IsEnabled())
+    return false;
+
+  return true;
 }
 
 void Watchpoint::GetDescription(Stream *s, lldb::DescriptionLevel level) {
@@ -278,7 +285,9 @@ void Watchpoint::SetCondition(const char *condition) {
   } else {
     // Pass nullptr for expr_prefix (no translation-unit level definitions).
     Status error;
+    ExecutionContext exe_scope(m_target);
     m_condition_ap.reset(m_target.GetUserExpressionForLanguage(
+        exe_scope,
         condition, llvm::StringRef(), lldb::eLanguageTypeUnknown,
         UserExpression::eResultTypeAny, EvaluateExpressionOptions(), error));
     if (error.Fail()) {

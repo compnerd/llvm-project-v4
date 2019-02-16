@@ -7,7 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <mutex>
+// Other libraries and framework includes
+// Project includes
 #include "CommandObjectPlatform.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
@@ -487,7 +491,8 @@ public:
       else
         mode = lldb::eFilePermissionsUserRWX | lldb::eFilePermissionsGroupRWX |
                lldb::eFilePermissionsWorldRX;
-      Status error = platform_sp->MakeDirectory(FileSpec(cmd_line), mode);
+      Status error =
+          platform_sp->MakeDirectory(FileSpec{cmd_line, false}, mode);
       if (error.Success()) {
         result.SetStatus(eReturnStatusSuccessFinishResult);
       } else {
@@ -540,7 +545,7 @@ public:
         perms = lldb::eFilePermissionsUserRW | lldb::eFilePermissionsGroupRW |
                 lldb::eFilePermissionsWorldRead;
       lldb::user_id_t fd = platform_sp->OpenFile(
-          FileSpec(cmd_line),
+          FileSpec(cmd_line, false),
           File::eOpenOptionRead | File::eOpenOptionWrite |
               File::eOpenOptionAppend | File::eOpenOptionCanCreate,
           perms, error);
@@ -878,8 +883,8 @@ public:
     if (platform_sp) {
       const char *remote_file_path = args.GetArgumentAtIndex(0);
       const char *local_file_path = args.GetArgumentAtIndex(1);
-      Status error = platform_sp->GetFile(FileSpec(remote_file_path),
-                                          FileSpec(local_file_path));
+      Status error = platform_sp->GetFile(FileSpec(remote_file_path, false),
+                                          FileSpec(local_file_path, false));
       if (error.Success()) {
         result.AppendMessageWithFormat(
             "successfully get-file from %s (remote) to %s (host)\n",
@@ -944,7 +949,8 @@ public:
         m_interpreter.GetDebugger().GetPlatformList().GetSelectedPlatform());
     if (platform_sp) {
       std::string remote_file_path(args.GetArgumentAtIndex(0));
-      user_id_t size = platform_sp->GetFileSize(FileSpec(remote_file_path));
+      user_id_t size =
+          platform_sp->GetFileSize(FileSpec(remote_file_path, false));
       if (size != UINT64_MAX) {
         result.AppendMessageWithFormat("File size of %s (remote): %" PRIu64
                                        "\n",
@@ -981,9 +987,8 @@ public:
     const char *src = args.GetArgumentAtIndex(0);
     const char *dst = args.GetArgumentAtIndex(1);
 
-    FileSpec src_fs(src);
-    FileSystem::Instance().Resolve(src_fs);
-    FileSpec dst_fs(dst ? dst : src_fs.GetFilename().GetCString());
+    FileSpec src_fs(src, true);
+    FileSpec dst_fs(dst ? dst : src_fs.GetFilename().GetCString(), false);
 
     PlatformSP platform_sp(
         m_interpreter.GetDebugger().GetPlatformList().GetSelectedPlatform());
@@ -1038,7 +1043,7 @@ protected:
       Module *exe_module = target->GetExecutableModulePointer();
       if (exe_module) {
         m_options.launch_info.GetExecutableFile() = exe_module->GetFileSpec();
-        llvm::SmallString<128> exe_path;
+        llvm::SmallString<PATH_MAX> exe_path;
         m_options.launch_info.GetExecutableFile().GetPath(exe_path);
         if (!exe_path.empty())
           m_options.launch_info.GetArguments().AppendArgument(exe_path);
@@ -1239,7 +1244,7 @@ protected:
   public:
     CommandOptions()
         : Options(), match_info(), show_args(false), verbose(false) {
-      static llvm::once_flag g_once_flag;
+      static std::once_flag g_once_flag;
       llvm::call_once(g_once_flag, []() {
         PosixPlatformCommandOptionValidator *posix_validator =
             new PosixPlatformCommandOptionValidator();
@@ -1331,31 +1336,31 @@ protected:
 
       case 'n':
         match_info.GetProcessInfo().GetExecutableFile().SetFile(
-            option_arg, FileSpec::Style::native);
+            option_arg, false, FileSpec::Style::native);
         match_info.SetNameMatchType(NameMatch::Equals);
         break;
 
       case 'e':
         match_info.GetProcessInfo().GetExecutableFile().SetFile(
-            option_arg, FileSpec::Style::native);
+            option_arg, false, FileSpec::Style::native);
         match_info.SetNameMatchType(NameMatch::EndsWith);
         break;
 
       case 's':
         match_info.GetProcessInfo().GetExecutableFile().SetFile(
-            option_arg, FileSpec::Style::native);
+            option_arg, false, FileSpec::Style::native);
         match_info.SetNameMatchType(NameMatch::StartsWith);
         break;
 
       case 'c':
         match_info.GetProcessInfo().GetExecutableFile().SetFile(
-            option_arg, FileSpec::Style::native);
+            option_arg, false, FileSpec::Style::native);
         match_info.SetNameMatchType(NameMatch::Contains);
         break;
 
       case 'r':
         match_info.GetProcessInfo().GetExecutableFile().SetFile(
-            option_arg, FileSpec::Style::native);
+            option_arg, false, FileSpec::Style::native);
         match_info.SetNameMatchType(NameMatch::RegularExpression);
         break;
 
@@ -1524,7 +1529,7 @@ public:
         break;
 
       case 'n':
-        attach_info.GetExecutableFile().SetFile(option_arg,
+        attach_info.GetExecutableFile().SetFile(option_arg, false,
                                                 FileSpec::Style::native);
         break;
 
@@ -1571,7 +1576,7 @@ public:
           ProcessInstanceInfoMatch match_info;
           if (partial_name) {
             match_info.GetProcessInfo().GetExecutableFile().SetFile(
-                partial_name, FileSpec::Style::native);
+                partial_name, false, FileSpec::Style::native);
             match_info.SetNameMatchType(NameMatch::StartsWith);
           }
           platform_sp->FindProcesses(match_info, process_infos);
@@ -1811,10 +1816,9 @@ public:
       return false;
     }
     // TODO: move the bulk of this code over to the platform itself
-    FileSpec src(args.GetArgumentAtIndex(0));
-    FileSystem::Instance().Resolve(src);
-    FileSpec dst(args.GetArgumentAtIndex(1));
-    if (!FileSystem::Instance().Exists(src)) {
+    FileSpec src(args.GetArgumentAtIndex(0), true);
+    FileSpec dst(args.GetArgumentAtIndex(1), false);
+    if (!src.Exists()) {
       result.AppendError("source location does not exist or is not accessible");
       result.SetStatus(eReturnStatusFailed);
       return false;

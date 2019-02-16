@@ -55,18 +55,19 @@ TEST(PlatformDarwinTest, TestParseVersionBuildDir) {
   std::string base = "/Applications/Xcode.app/Contents/Developer/Platforms/";
   EXPECT_TRUE(PlatformDarwinTester::SDKSupportsModules(
       PlatformDarwin::SDKType::iPhoneSimulator,
-      FileSpec(
-          base +
-          "iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator12.0.sdk")));
+      FileSpec(base +
+          "iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator12.0.sdk",
+          false)));
   EXPECT_FALSE(PlatformDarwinTester::SDKSupportsModules(
       PlatformDarwin::SDKType::iPhoneSimulator,
-      FileSpec(
-          base +
-          "iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator7.2.sdk")));
+      FileSpec(base +
+          "iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator7.2.sdk",
+          false)));
   EXPECT_TRUE(PlatformDarwinTester::SDKSupportsModules(
       PlatformDarwin::SDKType::MacOSX,
-      FileSpec(base + "MacOSX.platform/Developer/SDKs/MacOSX10.10.sdk")));
+      FileSpec(base + "MacOSX.platform/Developer/SDKs/MacOSX10.10.sdk",
+               false)));
   EXPECT_FALSE(PlatformDarwinTester::SDKSupportsModules(
       PlatformDarwin::SDKType::MacOSX,
-      FileSpec(base + "MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk")));
+      FileSpec(base + "MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk", false)));
 }

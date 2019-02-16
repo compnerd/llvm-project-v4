@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "CommandObjectLog.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
@@ -97,8 +101,7 @@ public:
 
       switch (short_option) {
       case 'f':
-        log_file.SetFile(option_arg, FileSpec::Style::native);
-        FileSystem::Instance().Resolve(log_file);
+        log_file.SetFile(option_arg, true, FileSpec::Style::native);
         break;
       case 't':
         log_options |= LLDB_LOG_OPTION_THREADSAFE;

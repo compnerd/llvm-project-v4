@@ -9,13 +9,19 @@
 
 #include "ABIMacOSX_i386.h"
 
+// C Includes
+// C++ Includes
 #include <vector>
 
+// Other libraries and framework includes
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 
+// Project includes
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Target/Process.h"
@@ -23,8 +29,6 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
 
 using namespace lldb;

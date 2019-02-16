@@ -10,6 +10,7 @@
 #include "lldb/Expression/IRInterpreter.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/IRExecutionUnit.h"
@@ -18,7 +19,6 @@
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StreamString.h"
 

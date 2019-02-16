@@ -15,6 +15,7 @@
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Core/State.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Symbol/ClangASTContext.h"
@@ -31,7 +32,6 @@
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/State.h"
 
 //#define ENABLE_DEBUG_PRINTF // COMMENT THIS LINE OUT PRIOR TO CHECKIN
 #ifdef ENABLE_DEBUG_PRINTF
@@ -115,7 +115,7 @@ ModuleSP DynamicLoaderDarwin::FindTargetModuleForImageInfo(
     // No UUID, we must rely upon the cached module modification time and the
     // modification time of the file on disk
     if (module_sp->GetModificationTime() !=
-        FileSystem::Instance().GetModificationTime(module_sp->GetFileSpec()))
+        FileSystem::GetModificationTime(module_sp->GetFileSpec()))
       module_sp.reset();
   }
 
@@ -359,24 +359,22 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
     if (image_sp.get() == nullptr || image_sp->GetAsDictionary() == nullptr)
       return false;
     StructuredData::Dictionary *image = image_sp->GetAsDictionary();
-    // clang-format off
-    if (!image->HasKey("load_address") ||
-        !image->HasKey("pathname") ||
-        !image->HasKey("mod_date") ||
-        !image->HasKey("mach_header") ||
+    if (image->HasKey("load_address") == false ||
+        image->HasKey("pathname") == false ||
+        image->HasKey("mod_date") == false ||
+        image->HasKey("mach_header") == false ||
         image->GetValueForKey("mach_header")->GetAsDictionary() == nullptr ||
-        !image->HasKey("segments") ||
+        image->HasKey("segments") == false ||
         image->GetValueForKey("segments")->GetAsArray() == nullptr ||
-        !image->HasKey("uuid")) {
+        image->HasKey("uuid") == false) {
       return false;
     }
-    // clang-format on
     image_infos[i].address =
         image->GetValueForKey("load_address")->GetAsInteger()->GetValue();
     image_infos[i].mod_date =
         image->GetValueForKey("mod_date")->GetAsInteger()->GetValue();
     image_infos[i].file_spec.SetFile(
-        image->GetValueForKey("pathname")->GetAsString()->GetValue(),
+        image->GetValueForKey("pathname")->GetAsString()->GetValue(), false,
         FileSpec::Style::native);
 
     StructuredData::Dictionary *mh =
@@ -477,7 +475,7 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
       image_infos[i].segments.push_back(segment);
     }
 
-    image_infos[i].uuid.SetFromStringRef(
+    image_infos[i].uuid.SetFromOptionalStringRef(
         image->GetValueForKey("uuid")->GetAsString()->GetValue());
 
     // All sections listed in the dyld image info structure will all either be
@@ -714,7 +712,11 @@ bool DynamicLoaderDarwin::AlwaysRelyOnEHUnwindInfo(SymbolContext &sym_ctx) {
     return false;
 
   ObjCLanguageRuntime *objc_runtime = m_process->GetObjCLanguageRuntime();
-  return objc_runtime != NULL && objc_runtime->IsModuleObjCLibrary(module_sp);
+  if (objc_runtime != NULL && objc_runtime->IsModuleObjCLibrary(module_sp)) {
+    return true;
+  }
+
+  return false;
 }
 
 //----------------------------------------------------------------------

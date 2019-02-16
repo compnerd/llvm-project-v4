@@ -14,7 +14,7 @@
 
 #include <string>
 
-#include <stddef.h>
+#include <stddef.h> // for size_t
 
 namespace lldb_private {
 class Debugger;

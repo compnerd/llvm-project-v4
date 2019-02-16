@@ -6,6 +6,7 @@ from __future__ import print_function
 
 
 import lldb
+from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
@@ -23,6 +24,10 @@ class ExprCommandCallStopContinueTestCase(TestBase):
             '// Please test these expressions while stopped at this line:')
         self.func_line = line_number('main.cpp', '{5, "five"}')
 
+    @expectedFlakeyDarwin("llvm.org/pr20274")
+    @expectedFailureAll(
+        oslist=["windows"],
+        bugnumber="llvm.org/pr24489: Name lookup not working correctly on Windows")
     def test(self):
         """Test gathering result from interrupted function call."""
         self.build()

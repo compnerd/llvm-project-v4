@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Project includes
 #include "DisassemblerLLVMC.h"
 
+// Other libraries and framework includes
 #include "llvm-c/Disassembler.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -1336,7 +1340,10 @@ bool DisassemblerLLVMC::FlavorValidForArchSpec(
 
   if (triple.getArch() == llvm::Triple::x86 ||
       triple.getArch() == llvm::Triple::x86_64) {
-    return strcmp(flavor, "intel") == 0 || strcmp(flavor, "att") == 0;
+    if (strcmp(flavor, "intel") == 0 || strcmp(flavor, "att") == 0)
+      return true;
+    else
+      return false;
   } else
     return false;
 }
@@ -1375,7 +1382,7 @@ const char *DisassemblerLLVMC::SymbolLookup(uint64_t value, uint64_t *type_ptr,
       }
 
       SymbolContext sym_ctx;
-      const SymbolContextItem resolve_scope =
+      const uint32_t resolve_scope =
           eSymbolContextFunction | eSymbolContextSymbol;
       if (pc_so_addr.IsValid() && pc_so_addr.GetModule()) {
         pc_so_addr.GetModule()->ResolveSymbolContextForAddress(

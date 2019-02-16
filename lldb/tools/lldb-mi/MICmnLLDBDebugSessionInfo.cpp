@@ -9,11 +9,11 @@
 
 // Third party headers:
 #include "lldb/API/SBThread.h"
-#include <inttypes.h>
+#include <inttypes.h> // For PRIx64
 #ifdef _WIN32
-#include <io.h>
+#include <io.h> // For the ::_access()
 #else
-#include <unistd.h>
+#include <unistd.h> // For the ::access()
 #endif              // _WIN32
 #include "lldb/API/SBBreakpointLocation.h"
 
@@ -532,7 +532,7 @@ bool CMICmnLLDBDebugSessionInfo::GetVariableInfo(const lldb::SBValue &vrValue,
                                                  const bool vbInSimpleForm,
                                                  CMIUtilString &vwrStrValue) {
   const CMICmnLLDBUtilSBValue utilValue(vrValue, true, false);
-  const bool bExpandAggregates = !vbInSimpleForm;
+  const bool bExpandAggregates = vbInSimpleForm ? false : true;
   vwrStrValue = utilValue.GetValue(bExpandAggregates);
   return MIstatus::success;
 }

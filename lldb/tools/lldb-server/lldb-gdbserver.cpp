@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +19,8 @@
 #include <unistd.h>
 #endif
 
+// C++ Includes
+
 
 #include "Acceptor.h"
 #include "LLDBServerUtilities.h"
@@ -25,7 +28,6 @@
 #include "Plugins/Process/gdb-remote/ProcessGDBRemoteLog.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Host/ConnectionFileDescriptor.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostGetOpt.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Host/Pipe.h"
@@ -185,9 +187,7 @@ void handle_launch(GDBRemoteCommunicationServerLLGS &gdb_server, int argc,
     llvm::errs() << "Error getting current directory: " << ec.message() << "\n";
     exit(1);
   }
-  FileSpec cwd_spec(cwd);
-  FileSystem::Instance().Resolve(cwd_spec);
-  info.SetWorkingDirectory(cwd_spec);
+  info.SetWorkingDirectory(FileSpec(cwd, true));
   info.GetEnvironment() = Host::GetEnvironment();
 
   gdb_server.SetLaunchInfo(info);

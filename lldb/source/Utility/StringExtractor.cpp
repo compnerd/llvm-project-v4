@@ -11,9 +11,9 @@
 
 #include <tuple>
 
-#include <ctype.h>
+#include <ctype.h> // for isxdigit, isspace
 #include <stdlib.h>
-#include <string.h>
+#include <string.h> // for memset
 
 static inline int xdigit_to_sint(char ch) {
   if (ch >= 'a' && ch <= 'f')

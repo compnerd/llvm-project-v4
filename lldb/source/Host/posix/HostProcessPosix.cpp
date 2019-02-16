@@ -7,9 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/Host/Host.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/posix/HostProcessPosix.h"
+#include "lldb/Host/FileSystem.h"
+#include "lldb/Host/Host.h"
 
 #include "llvm/ADT/STLExtras.h"
 
@@ -62,7 +62,7 @@ Status HostProcessPosix::GetMainModule(FileSpec &file_spec) const {
     return error;
   }
 
-  error = FileSystem::Instance().Readlink(FileSpec(link_path), file_spec);
+  error = FileSystem::Readlink(FileSpec{link_path, false}, file_spec);
   if (!error.Success())
     return error;
 

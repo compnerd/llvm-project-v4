@@ -11,10 +11,10 @@
 #define liblldb_AddressRange_h_
 
 #include "lldb/Core/Address.h"
-#include "lldb/lldb-forward.h"
-#include "lldb/lldb-types.h"
+#include "lldb/lldb-forward.h" // for SectionSP
+#include "lldb/lldb-types.h"   // for addr_t
 
-#include <stddef.h>
+#include <stddef.h> // for size_t
 
 namespace lldb_private {
 class SectionList;

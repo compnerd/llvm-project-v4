@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Target/Thread.h"
 #include "Plugins/Process/Utility/UnwindLLDB.h"
 #include "Plugins/Process/Utility/UnwindMacOSXFrameBackchain.h"
@@ -14,6 +18,7 @@
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/FormatEntity.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Core/State.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Interpreter/OptionValueFileSpecList.h"
@@ -23,10 +28,8 @@
 #include "lldb/Target/ABI.h"
 #include "lldb/Target/DynamicLoader.h"
 #include "lldb/Target/ExecutionContext.h"
-#include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
-#include "lldb/Target/StackFrameRecognizer.h"
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/SystemRuntime.h"
 #include "lldb/Target/Target.h"
@@ -46,7 +49,6 @@
 #include "lldb/Target/Unwind.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegularExpression.h"
-#include "lldb/Utility/State.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/lldb-enumerations.h"
@@ -406,8 +408,12 @@ lldb::StopInfoSP Thread::GetStopInfo() {
   if (have_valid_stop_info && !plan_overrides_trace && !plan_failed) {
     return m_stop_info_sp;
   } else if (completed_plan_sp) {
+    bool is_swift_error_value;
+    lldb::ValueObjectSP return_value_sp =
+        GetReturnValueObject(&is_swift_error_value);
     return StopInfo::CreateStopReasonWithPlan(
-        completed_plan_sp, GetReturnValueObject(), GetExpressionVariable());
+        completed_plan_sp, return_value_sp, GetExpressionVariable(),
+        is_swift_error_value);
   } else {
     GetPrivateStopInfo();
     return m_stop_info_sp;
@@ -1038,11 +1044,9 @@ void Thread::PushPlan(ThreadPlanSP &thread_plan_sp) {
   if (thread_plan_sp) {
     // If the thread plan doesn't already have a tracer, give it its parent's
     // tracer:
-    if (!thread_plan_sp->GetThreadPlanTracer()) {
-      assert(!m_plan_stack.empty());
+    if (!thread_plan_sp->GetThreadPlanTracer())
       thread_plan_sp->SetThreadPlanTracer(
           m_plan_stack.back()->GetThreadPlanTracer());
-    }
     m_plan_stack.push_back(thread_plan_sp);
 
     thread_plan_sp->DidPush();
@@ -1108,13 +1112,20 @@ ThreadPlanSP Thread::GetCompletedPlan() {
   return empty_plan_sp;
 }
 
-ValueObjectSP Thread::GetReturnValueObject() {
+ValueObjectSP Thread::GetReturnValueObject(bool *is_swift_error_value) {
+  if (is_swift_error_value)
+    *is_swift_error_value = false;
+
   if (!m_completed_plan_stack.empty()) {
     for (int i = m_completed_plan_stack.size() - 1; i >= 0; i--) {
       ValueObjectSP return_valobj_sp;
       return_valobj_sp = m_completed_plan_stack[i]->GetReturnValueObject();
-      if (return_valobj_sp)
+      if (return_valobj_sp) {
+        if (is_swift_error_value)
+          *is_swift_error_value =
+              m_completed_plan_stack[i]->IsReturnValueSwiftErrorValue();
         return return_valobj_sp;
+      }
     }
   }
   return ValueObjectSP();
@@ -1419,6 +1430,28 @@ ThreadPlanSP Thread::QueueThreadPlanForStepInRange(
 
   if (step_in_target)
     plan->SetStepInTarget(step_in_target);
+
+  status = QueueThreadPlan(thread_plan_sp, abort_other_plans);
+  return thread_plan_sp;
+}
+
+ThreadPlanSP Thread::QueueThreadPlanForStepInRangeNoShouldStop(
+    bool abort_other_plans, const AddressRange &range,
+    const SymbolContext &addr_context, const char *step_in_target,
+    lldb::RunMode stop_other_threads, Status &status,
+    LazyBool step_in_avoids_code_without_debug_info,
+    LazyBool step_out_avoids_code_without_debug_info) {
+  ThreadPlanSP thread_plan_sp(
+      new ThreadPlanStepInRange(*this, range, addr_context, stop_other_threads,
+                                step_in_avoids_code_without_debug_info,
+                                step_out_avoids_code_without_debug_info));
+  ThreadPlanStepInRange *plan =
+      static_cast<ThreadPlanStepInRange *>(thread_plan_sp.get());
+
+  if (step_in_target)
+    plan->SetStepInTarget(step_in_target);
+
+  plan->ClearShouldStopHereCallbacks();
 
   status = QueueThreadPlan(thread_plan_sp, abort_other_plans);
   return thread_plan_sp;
@@ -2202,33 +2235,4 @@ Status Thread::StepOut() {
     error.SetErrorString("process not stopped");
   }
   return error;
-}
-
-ValueObjectSP Thread::GetCurrentException() {
-  if (auto frame_sp = GetStackFrameAtIndex(0))
-    if (auto recognized_frame = frame_sp->GetRecognizedFrame())
-      if (auto e = recognized_frame->GetExceptionObject())
-        return e;
-
-  // FIXME: For now, only ObjC exceptions are supported. This should really
-  // iterate over all language runtimes and ask them all to give us the current
-  // exception.
-  if (auto runtime = GetProcess()->GetObjCLanguageRuntime())
-    if (auto e = runtime->GetExceptionObjectForThread(shared_from_this()))
-      return e;
-
-  return ValueObjectSP();
-}
-
-ThreadSP Thread::GetCurrentExceptionBacktrace() {
-  ValueObjectSP exception = GetCurrentException();
-  if (!exception) return ThreadSP();
-
-  // FIXME: For now, only ObjC exceptions are supported. This should really
-  // iterate over all language runtimes and ask them all to give us the current
-  // exception.
-  auto runtime = GetProcess()->GetObjCLanguageRuntime();
-  if (!runtime) return ThreadSP();
-
-  return runtime->GetBacktraceThreadFromException(exception);
 }

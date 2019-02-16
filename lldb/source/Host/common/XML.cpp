@@ -201,7 +201,8 @@ void XMLNode::ForEachAttribute(AttributeCallback const &callback) const {
           llvm::StringRef attr_value;
           if (child->content)
             attr_value = llvm::StringRef((const char *)child->content);
-          if (!callback(llvm::StringRef((const char *)attr->name), attr_value))
+          if (callback(llvm::StringRef((const char *)attr->name), attr_value) ==
+              false)
             return;
         }
       }
@@ -216,7 +217,7 @@ void XMLNode::ForEachSiblingNode(NodeCallback const &callback) const {
   if (IsValid()) {
     // iterate through all siblings
     for (xmlNodePtr node = m_node; node; node = node->next) {
-      if (!callback(XMLNode(node)))
+      if (callback(XMLNode(node)) == false)
         return;
     }
   }
@@ -233,7 +234,7 @@ void XMLNode::ForEachSiblingElement(NodeCallback const &callback) const {
       if (node->type != XML_ELEMENT_NODE)
         continue;
 
-      if (!callback(XMLNode(node)))
+      if (callback(XMLNode(node)) == false)
         return;
     }
   }
@@ -262,7 +263,7 @@ void XMLNode::ForEachSiblingElementWithName(
                     // ignore this one
       }
 
-      if (!callback(XMLNode(node)))
+      if (callback(XMLNode(node)) == false)
         return;
     }
   }
@@ -438,7 +439,7 @@ XMLNode ApplePropertyList::GetValueNode(const char *key) const {
         "key", [key, &value_node](const XMLNode &key_node) -> bool {
           std::string key_name;
           if (key_node.GetElementText(key_name)) {
-            if (key_name == key) {
+            if (key_name.compare(key) == 0) {
               value_node = key_node.GetSibling();
               while (value_node && !value_node.IsElement())
                 value_node = value_node.GetSibling();

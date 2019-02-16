@@ -38,9 +38,8 @@ int main_gdbserver(int argc, char *argv[]);
 int main_platform(int argc, char *argv[]);
 
 static void initialize() {
-  if (auto e = g_debugger_lifetime->Initialize(
-          llvm::make_unique<SystemInitializerLLGS>(), {}, nullptr))
-    llvm::consumeError(std::move(e));
+  g_debugger_lifetime->Initialize(llvm::make_unique<SystemInitializerLLGS>(),
+                                  nullptr);
 }
 
 static void terminate() { g_debugger_lifetime->Terminate(); }

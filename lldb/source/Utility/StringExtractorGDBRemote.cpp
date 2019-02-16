@@ -9,7 +9,7 @@
 
 #include "lldb/Utility/StringExtractorGDBRemote.h"
 
-#include <ctype.h>
+#include <ctype.h> // for isxdigit
 #include <string.h>
 
 StringExtractorGDBRemote::ResponseType

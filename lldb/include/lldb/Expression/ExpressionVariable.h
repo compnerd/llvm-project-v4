@@ -10,11 +10,15 @@
 #ifndef liblldb_ExpressionVariable_h_
 #define liblldb_ExpressionVariable_h_
 
+// C Includes
+// C++ Includes
 #include <memory>
 #include <vector>
 
+// Other libraries and framework includes
 #include "llvm/ADT/DenseMap.h"
 
+// Project includes
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-public.h"
@@ -248,6 +252,8 @@ public:
   virtual lldb::addr_t LookupSymbol(const ConstString &name);
 
   void RegisterExecutionUnit(lldb::IRExecutionUnitSP &execution_unit_sp);
+
+  void RegisterSymbol(const ConstString &name, lldb::addr_t address);
 
 private:
   LLVMCastKind m_kind;

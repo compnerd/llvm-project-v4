@@ -69,7 +69,3 @@ void HostThreadWindows::Reset() {
 
   HostNativeThreadBase::Reset();
 }
-
-bool HostThreadWindows::EqualsThread(lldb::thread_t thread) const {
-  return GetThreadId() == ::GetThreadId(thread);
-}

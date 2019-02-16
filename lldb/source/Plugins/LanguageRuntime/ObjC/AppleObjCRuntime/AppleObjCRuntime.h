@@ -10,8 +10,12 @@
 #ifndef liblldb_AppleObjCRuntime_h_
 #define liblldb_AppleObjCRuntime_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "llvm/ADT/Optional.h"
 
+// Project includes
 #include "AppleObjCTrampolineHandler.h"
 #include "AppleThreadPlanStepThroughObjCTrampoline.h"
 #include "lldb/Target/LanguageRuntime.h"
@@ -49,11 +53,20 @@ public:
 
   bool CouldHaveDynamicValue(ValueObject &in_value) override;
 
+  virtual bool CouldHaveDynamicValue(ValueObject &in_value, bool allow_swift);
+
   bool GetDynamicTypeAndAddress(ValueObject &in_value,
                                 lldb::DynamicValueType use_dynamic,
                                 TypeAndOrName &class_type_or_name,
                                 Address &address,
                                 Value::ValueType &value_type) override;
+
+  virtual bool GetDynamicTypeAndAddress(ValueObject &in_value,
+                                        lldb::DynamicValueType use_dynamic,
+                                        TypeAndOrName &class_type_or_name,
+                                        Address &address,
+                                        Value::ValueType &value_type,
+                                        bool allow_swift);
 
   TypeAndOrName FixUpDynamicType(const TypeAndOrName &type_and_or_name,
                                  ValueObject &static_value) override;
@@ -86,14 +99,6 @@ public:
   bool ExceptionBreakpointsExplainStop(lldb::StopInfoSP stop_reason) override;
 
   lldb::SearchFilterSP CreateExceptionSearchFilter() override;
-  
-  static std::tuple<FileSpec, ConstString> GetExceptionThrowLocation();
-
-  lldb::ValueObjectSP GetExceptionObjectForThread(
-      lldb::ThreadSP thread_sp) override;
-
-  lldb::ThreadSP GetBacktraceThreadFromException(
-      lldb::ValueObjectSP thread_sp) override;
 
   uint32_t GetFoundationVersion();
 

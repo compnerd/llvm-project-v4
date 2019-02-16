@@ -10,12 +10,12 @@
 #ifndef liblldb_FileLineResolver_h_
 #define liblldb_FileLineResolver_h_
 
-#include "lldb/Core/SearchFilter.h"
+#include "lldb/Core/SearchFilter.h" // for Searcher, Searcher::CallbackR...
 #include "lldb/Symbol/SymbolContext.h"
-#include "lldb/Utility/FileSpec.h"
-#include "lldb/lldb-defines.h"
+#include "lldb/Utility/FileSpec.h" // for FileSpec
+#include "lldb/lldb-defines.h"     // for DISALLOW_COPY_AND_ASSIGN
 
-#include <stdint.h>
+#include <stdint.h> // for uint32_t, UINT32_MAX
 
 namespace lldb_private {
 class Address;

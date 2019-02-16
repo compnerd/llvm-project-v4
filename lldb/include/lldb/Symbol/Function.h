@@ -402,11 +402,52 @@ public:
   ///
   /// @param[in] range
   ///     The section offset based address for this function.
+  ///
+  /// @param[in] can_throw
+  ///     Pass in true if this is a function know to throw
   //------------------------------------------------------------------
   Function(CompileUnit *comp_unit, lldb::user_id_t func_uid,
            lldb::user_id_t func_type_uid, const Mangled &mangled,
-           Type *func_type, const AddressRange &range);
+           Type *func_type, const AddressRange &range,
+           bool can_throw = false);
 
+  //------------------------------------------------------------------
+  /// Construct with a compile unit, function UID, function type UID, optional
+  /// mangled name, function type, and a section offset based address range.
+  ///
+  /// @param[in] comp_unit
+  ///     The compile unit to which this function belongs.
+  ///
+  /// @param[in] func_uid
+  ///     The UID for this function. This value is provided by the
+  ///     SymbolFile plug-in and can be any value that allows
+  ///     the plug-in to quickly find and parse more detailed
+  ///     information when and if more information is needed.
+  ///
+  /// @param[in] func_type_uid
+  ///     The type UID for the function Type to allow for lazy type
+  ///     parsing from the debug information.
+  ///
+  /// @param[in] mangled
+  ///     The optional mangled name for this function. If empty, there
+  ///     is no mangled information.
+  ///
+  /// @param[in] func_type
+  ///     The optional function type. If NULL, the function type will
+  ///     be parsed on demand when accessed using the
+  ///     Function::GetType() function by asking the SymbolFile
+  ///     plug-in to get the type for \a func_type_uid.
+  ///
+  /// @param[in] range
+  ///     The section offset based address for this function.
+  ///
+  /// @param[in] can_throw
+  ///     Pass in true if this is a function know to throw
+  //------------------------------------------------------------------
+  Function(CompileUnit *comp_unit, lldb::user_id_t func_uid,
+           lldb::user_id_t func_type_uid, const char *mangled, Type *func_type,
+           const AddressRange &range, bool can_throw = false);
+           
   //------------------------------------------------------------------
   /// Destructor.
   //------------------------------------------------------------------
@@ -626,6 +667,8 @@ public:
   ///     'false' otherwise.
   //------------------------------------------------------------------
   bool IsTopLevelFunction();
+  
+  bool CanThrow() const { return m_flags.Test(flagsFunctionCanThrow); }
 
   lldb::DisassemblerSP GetInstructions(const ExecutionContext &exe_ctx,
                                        const char *flavor,
@@ -637,7 +680,9 @@ public:
 protected:
   enum {
     flagsCalculatedPrologueSize =
-        (1 << 0) ///< Have we already tried to calculate the prologue size?
+        (1 << 0), ///< Have we already tried to calculate the prologue size?
+    flagsFunctionCanThrow =
+        (1 << 1) ///< Do we know whether this function throws?
   };
 
   //------------------------------------------------------------------

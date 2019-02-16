@@ -7,6 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -15,6 +18,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/raw_ostream.h"
 
+// Project includes
 #include "lldb/Expression/IRDynamicChecks.h"
 
 #include "lldb/Expression/UtilityFunction.h"

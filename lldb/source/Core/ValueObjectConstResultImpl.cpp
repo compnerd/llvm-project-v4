@@ -9,19 +9,19 @@
 
 #include "lldb/Core/ValueObjectConstResultImpl.h"
 
-#include "lldb/Core/Value.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/Core/Scalar.h"      // for Scalar
+#include "lldb/Core/Value.h"       // for Value, Value::Val...
+#include "lldb/Core/ValueObject.h" // for ValueObject
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectConstResultCast.h"
 #include "lldb/Core/ValueObjectConstResultChild.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/ExecutionContext.h"
-#include "lldb/Utility/DataBufferHeap.h"
-#include "lldb/Utility/Endian.h"
-#include "lldb/Utility/Scalar.h"
-#include "lldb/Utility/SharingPtr.h"
+#include "lldb/Utility/DataBufferHeap.h" // for DataBufferHeap
+#include "lldb/Utility/Endian.h"         // for InlHostByteOrder
+#include "lldb/Utility/SharingPtr.h"     // for SharingPtr
 
-#include <string>
+#include <string> // for string
 
 namespace lldb_private {
 class DataExtractor;
@@ -66,7 +66,7 @@ ValueObject *ValueObjectConstResultImpl::CreateChildAtIndex(
   bool child_is_deref_of_parent = false;
   uint64_t language_flags;
 
-  const bool transparent_pointers = !synthetic_array_member;
+  const bool transparent_pointers = synthetic_array_member == false;
   CompilerType compiler_type = m_impl_backend->GetCompilerType();
   CompilerType child_compiler_type;
 

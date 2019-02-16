@@ -103,13 +103,12 @@ public:
   ParseDeclsForContext(lldb_private::CompilerDeclContext decl_ctx) override;
 
   uint32_t ResolveSymbolContext(const lldb_private::Address &so_addr,
-                                lldb::SymbolContextItem resolve_scope,
+                                uint32_t resolve_scope,
                                 lldb_private::SymbolContext &sc) override;
 
   uint32_t
   ResolveSymbolContext(const lldb_private::FileSpec &file_spec, uint32_t line,
-                       bool check_inlines,
-                       lldb::SymbolContextItem resolve_scope,
+                       bool check_inlines, uint32_t resolve_scope,
                        lldb_private::SymbolContextList &sc_list) override;
 
   uint32_t
@@ -125,8 +124,8 @@ public:
   uint32_t
   FindFunctions(const lldb_private::ConstString &name,
                 const lldb_private::CompilerDeclContext *parent_decl_ctx,
-                lldb::FunctionNameType name_type_mask, bool include_inlines,
-                bool append, lldb_private::SymbolContextList &sc_list) override;
+                uint32_t name_type_mask, bool include_inlines, bool append,
+                lldb_private::SymbolContextList &sc_list) override;
 
   uint32_t FindFunctions(const lldb_private::RegularExpression &regex,
                          bool include_inlines, bool append,
@@ -135,8 +134,6 @@ public:
   void GetMangledNamesForFunction(
       const std::string &scope_qualified_name,
       std::vector<lldb_private::ConstString> &mangled_names) override;
-
-  void AddSymbols(lldb_private::Symtab &symtab) override;
 
   uint32_t
   FindTypes(const lldb_private::SymbolContext &sc,
@@ -155,7 +152,7 @@ public:
   lldb_private::TypeList *GetTypeList() override;
 
   size_t GetTypes(lldb_private::SymbolContextScope *sc_scope,
-                  lldb::TypeClass type_mask,
+                  uint32_t type_mask,
                   lldb_private::TypeList &type_list) override;
 
   lldb_private::TypeSystem *
@@ -174,16 +171,7 @@ public:
 
   const llvm::pdb::IPDBSession &GetPDBSession() const;
 
-  void DumpClangAST(lldb_private::Stream &s) override;
-
 private:
-  struct SecContribInfo {
-    uint32_t Offset;
-    uint32_t Size;
-    uint32_t CompilandId;
-  };
-  using SecContribsMap = std::map<uint32_t, std::vector<SecContribInfo>>;
-
   lldb::CompUnitSP ParseCompileUnitForUID(uint32_t id,
                                           uint32_t index = UINT32_MAX);
 
@@ -194,9 +182,8 @@ private:
       const llvm::pdb::PDBSymbolCompiland &pdb_compiland,
       llvm::DenseMap<uint32_t, uint32_t> &index_map) const;
 
-  void FindTypesByName(llvm::StringRef name,
-                       const lldb_private::CompilerDeclContext *parent_decl_ctx,
-                       uint32_t max_matches, lldb_private::TypeMap &types);
+  void FindTypesByName(const std::string &name, uint32_t max_matches,
+                       lldb_private::TypeMap &types);
 
   std::string GetMangledForPDBData(const llvm::pdb::PDBSymbolData &pdb_data);
 
@@ -242,14 +229,9 @@ private:
   bool DeclContextMatchesThisSymbolFile(
       const lldb_private::CompilerDeclContext *decl_ctx);
 
-  uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
-
   llvm::DenseMap<uint32_t, lldb::CompUnitSP> m_comp_units;
   llvm::DenseMap<uint32_t, lldb::TypeSP> m_types;
   llvm::DenseMap<uint32_t, lldb::VariableSP> m_variables;
-  llvm::DenseMap<uint64_t, std::string> m_public_names;
-
-  SecContribsMap m_sec_contribs;
 
   std::vector<lldb::TypeSP> m_builtin_types;
   std::unique_ptr<llvm::pdb::IPDBSession> m_session_up;

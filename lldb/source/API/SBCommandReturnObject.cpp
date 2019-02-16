@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/API/SBCommandReturnObject.h"
 #include "lldb/API/SBError.h"
 #include "lldb/API/SBStream.h"
@@ -48,7 +52,9 @@ operator=(const SBCommandReturnObject &rhs) {
   return *this;
 }
 
-bool SBCommandReturnObject::IsValid() const { return m_opaque_ap != nullptr; }
+bool SBCommandReturnObject::IsValid() const {
+  return m_opaque_ap.get() != nullptr;
+}
 
 const char *SBCommandReturnObject::GetOutput() {
   Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_API));

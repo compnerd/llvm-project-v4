@@ -40,7 +40,7 @@ inline void regfree(llvm_regex_t *a) { llvm_regfree(a); }
 #include <string>
 #include <vector>
 
-#include <stddef.h>
+#include <stddef.h> // for size_t
 #include <stdint.h>
 
 namespace llvm {

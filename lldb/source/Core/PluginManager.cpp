@@ -10,31 +10,30 @@
 #include "lldb/Core/PluginManager.h"
 
 #include "lldb/Core/Debugger.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
-#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/ConstString.h" // for ConstString
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Status.h"
-#include "lldb/Utility/StringList.h"
+#include "lldb/Utility/StringList.h" // for StringList
 
 #if defined(_WIN32)
-#include "lldb/Host/windows/PosixApi.h"
+#include "lldb/Host/windows/PosixApi.h" // for PATH_MAX
 #endif
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DynamicLibrary.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FileSystem.h"  // for file_type, file_...
+#include "llvm/Support/raw_ostream.h" // for fs
 
-#include <map>
-#include <memory>
+#include <map>    // for map<>::const_ite...
+#include <memory> // for shared_ptr
 #include <mutex>
 #include <string>
-#include <utility>
+#include <utility> // for pair
 #include <vector>
 
-#include <assert.h>
+#include <assert.h> // for assert
 
 namespace lldb_private {
 class CommandInterpreter;
@@ -90,9 +89,9 @@ template <typename FPtrTy> static FPtrTy CastToFPtr(void *VPtr) {
   return reinterpret_cast<FPtrTy>(reinterpret_cast<intptr_t>(VPtr));
 }
 
-static FileSystem::EnumerateDirectoryResult
+static FileSpec::EnumerateDirectoryResult
 LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
-                   llvm::StringRef path) {
+                   const FileSpec &file_spec) {
   //    PluginManager *plugin_manager = (PluginManager *)baton;
   Status error;
 
@@ -103,11 +102,11 @@ LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
   // file type information.
   if (ft == fs::file_type::regular_file || ft == fs::file_type::symlink_file ||
       ft == fs::file_type::type_unknown) {
-    FileSpec plugin_file_spec(path);
-    FileSystem::Instance().Resolve(plugin_file_spec);
+    FileSpec plugin_file_spec(file_spec);
+    plugin_file_spec.ResolvePath();
 
     if (PluginIsLoaded(plugin_file_spec))
-      return FileSystem::eEnumerateDirectoryResultNext;
+      return FileSpec::eEnumerateDirectoryResultNext;
     else {
       PluginInfo plugin_info;
 
@@ -139,7 +138,7 @@ LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
         // plug-in info so we don't try to load it again and again.
         SetPluginInfo(plugin_file_spec, plugin_info);
 
-        return FileSystem::eEnumerateDirectoryResultNext;
+        return FileSpec::eEnumerateDirectoryResultNext;
       }
     }
   }
@@ -150,10 +149,10 @@ LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
     // also do this for unknown as sometimes the directory enumeration might be
     // enumerating a file system that doesn't have correct file type
     // information.
-    return FileSystem::eEnumerateDirectoryResultEnter;
+    return FileSpec::eEnumerateDirectoryResultEnter;
   }
 
-  return FileSystem::eEnumerateDirectoryResultNext;
+  return FileSpec::eEnumerateDirectoryResultNext;
 }
 
 void PluginManager::Initialize() {
@@ -163,20 +162,16 @@ void PluginManager::Initialize() {
   const bool find_other = true;
   char dir_path[PATH_MAX];
   if (FileSpec dir_spec = HostInfo::GetSystemPluginDir()) {
-    if (FileSystem::Instance().Exists(dir_spec) &&
-        dir_spec.GetPath(dir_path, sizeof(dir_path))) {
-      FileSystem::Instance().EnumerateDirectory(dir_path, find_directories,
-                                                find_files, find_other,
-                                                LoadPluginCallback, nullptr);
+    if (dir_spec.Exists() && dir_spec.GetPath(dir_path, sizeof(dir_path))) {
+      FileSpec::EnumerateDirectory(dir_path, find_directories, find_files,
+                                   find_other, LoadPluginCallback, nullptr);
     }
   }
 
   if (FileSpec dir_spec = HostInfo::GetUserPluginDir()) {
-    if (FileSystem::Instance().Exists(dir_spec) &&
-        dir_spec.GetPath(dir_path, sizeof(dir_path))) {
-      FileSystem::Instance().EnumerateDirectory(dir_path, find_directories,
-                                                find_files, find_other,
-                                                LoadPluginCallback, nullptr);
+    if (dir_spec.Exists() && dir_spec.GetPath(dir_path, sizeof(dir_path))) {
+      FileSpec::EnumerateDirectory(dir_path, find_directories, find_files,
+                                   find_other, LoadPluginCallback, nullptr);
     }
   }
 #endif
@@ -286,10 +281,7 @@ struct ArchitectureInstance {
 
 typedef std::vector<ArchitectureInstance> ArchitectureInstances;
 
-static std::mutex &GetArchitectureMutex() {
-    static std::mutex g_architecture_mutex;
-    return g_architecture_mutex;
-}
+static std::mutex g_architecture_mutex;
 
 static ArchitectureInstances &GetArchitectureInstances() {
   static ArchitectureInstances g_instances;
@@ -299,13 +291,13 @@ static ArchitectureInstances &GetArchitectureInstances() {
 void PluginManager::RegisterPlugin(const ConstString &name,
                                    llvm::StringRef description,
                                    ArchitectureCreateInstance create_callback) {
-  std::lock_guard<std::mutex> guard(GetArchitectureMutex());
+  std::lock_guard<std::mutex> guard(g_architecture_mutex);
   GetArchitectureInstances().push_back({name, description, create_callback});
 }
 
 void PluginManager::UnregisterPlugin(
     ArchitectureCreateInstance create_callback) {
-  std::lock_guard<std::mutex> guard(GetArchitectureMutex());
+  std::lock_guard<std::mutex> guard(g_architecture_mutex);
   auto &instances = GetArchitectureInstances();
 
   for (auto pos = instances.begin(), end = instances.end(); pos != end; ++pos) {
@@ -319,7 +311,7 @@ void PluginManager::UnregisterPlugin(
 
 std::unique_ptr<Architecture>
 PluginManager::CreateArchitectureInstance(const ArchSpec &arch) {
-  std::lock_guard<std::mutex> guard(GetArchitectureMutex());
+  std::lock_guard<std::mutex> guard(g_architecture_mutex);
   for (const auto &instances : GetArchitectureInstances()) {
     if (auto plugin_up = instances.create_callback(arch))
       return plugin_up;

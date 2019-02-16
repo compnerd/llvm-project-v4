@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Expression/REPL.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/PluginManager.h"
@@ -62,7 +66,7 @@ std::string REPL::GetSourcePath() {
     tmpdir_file_spec.GetFilename().SetCString(file_basename.AsCString());
     m_repl_source_path = tmpdir_file_spec.GetPath();
   } else {
-    tmpdir_file_spec = FileSpec("/tmp");
+    tmpdir_file_spec = FileSpec("/tmp", false);
     tmpdir_file_spec.AppendPathComponent(file_basename.AsCString());
   }
 
@@ -284,9 +288,20 @@ void REPL::IOHandlerInputComplete(IOHandler &io_handler, std::string &code) {
       expr_options.SetTryAllThreads(m_command_options.try_all_threads);
       expr_options.SetGenerateDebugInfo(true);
       expr_options.SetREPLEnabled(true);
+      expr_options.SetTrapExceptions(false);
       expr_options.SetColorizeErrors(colorize_err);
       expr_options.SetPoundLine(m_repl_source_path.c_str(),
                                 m_code.GetSize() + 1);
+
+      // There is no point in trying to run REPL expressions on just the
+      // current thread of the program, since the REPL tracks the states of
+      // individual threads as you would in a regular debugging session.
+      // Interrupting the process to switch from one thread to many has
+      // observable effects (for instance it causes anything waiting in the
+      // kernel to be interrupted). Since we aren't getting any benefit from
+      // doing this in the REPL, let's not.
+      expr_options.SetStopOthers(false);
+
       if (m_command_options.timeout > 0)
         expr_options.SetTimeout(std::chrono::microseconds(m_command_options.timeout));
       else
@@ -297,6 +312,13 @@ void REPL::IOHandlerInputComplete(IOHandler &io_handler, std::string &code) {
       PersistentExpressionState *persistent_state =
           m_target.GetPersistentExpressionStateForLanguage(GetLanguage());
 
+      if (!persistent_state)
+      {
+        error_sp->PutCString("error getting the expression "
+                             "context for the REPL.\n");
+        io_handler.SetIsDone(true);
+        return;
+      }
       const size_t var_count_before = persistent_state->GetSize();
 
       const char *expr_prefix = nullptr;
@@ -412,12 +434,11 @@ void REPL::IOHandlerInputComplete(IOHandler &io_handler, std::string &code) {
 
           // Update our code on disk
           if (!m_repl_source_path.empty()) {
-            lldb_private::File file;
-            FileSystem::Instance().Open(file, FileSpec(m_repl_source_path),
-                                        File::eOpenOptionWrite |
-                                            File::eOpenOptionTruncate |
-                                            File::eOpenOptionCanCreate,
-                                        lldb::eFilePermissionsFileDefault);
+            lldb_private::File file(m_repl_source_path.c_str(),
+                                    File::eOpenOptionWrite |
+                                        File::eOpenOptionTruncate |
+                                        File::eOpenOptionCanCreate,
+                                    lldb::eFilePermissionsFileDefault);
             std::string code(m_code.CopyList());
             code.append(1, '\n');
             size_t bytes_written = code.size();
@@ -426,7 +447,7 @@ void REPL::IOHandlerInputComplete(IOHandler &io_handler, std::string &code) {
 
             // Now set the default file and line to the REPL source file
             m_target.GetSourceManager().SetDefaultFileAndLine(
-                FileSpec(m_repl_source_path), new_default_line);
+                FileSpec(m_repl_source_path, false), new_default_line);
           }
           static_cast<IOHandlerEditline &>(io_handler)
               .SetBaseLineNumber(m_code.GetSize() + 1);
@@ -450,7 +471,7 @@ void REPL::IOHandlerInputComplete(IOHandler &io_handler, std::string &code) {
 int REPL::IOHandlerComplete(IOHandler &io_handler, const char *current_line,
                             const char *cursor, const char *last_char,
                             int skip_first_n_matches, int max_matches,
-                            StringList &matches, StringList &descriptions) {
+                            StringList &matches) {
   matches.Clear();
 
   llvm::StringRef line(current_line, cursor - current_line);
@@ -463,7 +484,7 @@ int REPL::IOHandlerComplete(IOHandler &io_handler, const char *current_line,
     const char *lldb_current_line = line.substr(1).data();
     return debugger.GetCommandInterpreter().HandleCompletion(
         lldb_current_line, cursor, last_char, skip_first_n_matches, max_matches,
-        matches, descriptions);
+        matches);
   }
 
   // Strip spaces from the line and see if we had only spaces

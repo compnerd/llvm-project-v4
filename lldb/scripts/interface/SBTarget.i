@@ -373,14 +373,6 @@ public:
     lldb::SBFileSpec
     GetExecutable ();
 
-    %feature("docstring", "
-    /// Append the path mapping (from -> to) to the target's paths mapping list.
-    ") AppendImageSearchPath;
-    void
-    AppendImageSearchPath (const char *from,
-                           const char *to,
-                           SBError &error);
-
     bool
     AddModule (lldb::SBModule &module);
 
@@ -725,6 +717,12 @@ public:
     BreakpointCreateForException  (lldb::LanguageType language,
                                    bool catch_bp,
                                    bool throw_bp);
+
+    lldb::SBBreakpoint
+    BreakpointCreateForException  (lldb::LanguageType language,
+                                   bool catch_bp,
+                                   bool throw_bp,
+                                   SBStringList &extra_args);
 
     lldb::SBBreakpoint
     BreakpointCreateByAddress (addr_t address);

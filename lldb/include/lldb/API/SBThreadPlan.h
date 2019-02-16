@@ -98,10 +98,6 @@ public:
   SBThreadPlan QueueThreadPlanForRunToAddress(SBAddress address,
                                               SBError &error);
 
-  SBThreadPlan QueueThreadPlanForStepScripted(const char *script_class_name);
-  SBThreadPlan QueueThreadPlanForStepScripted(const char *script_class_name,
-                                              SBError &error);
-
 #ifndef SWIG
   lldb_private::ThreadPlan *get();
 #endif

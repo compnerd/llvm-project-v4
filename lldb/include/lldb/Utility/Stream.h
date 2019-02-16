@@ -12,15 +12,15 @@
 
 #include "lldb/Utility/Flags.h"
 #include "lldb/lldb-defines.h"
-#include "lldb/lldb-enumerations.h"
-#include "llvm/ADT/StringRef.h"
+#include "lldb/lldb-enumerations.h" // for ByteOrder::eByteOrderInvalid
+#include "llvm/ADT/StringRef.h"     // for StringRef
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <type_traits>
+#include <stddef.h>    // for size_t
+#include <stdint.h>    // for uint32_t, uint64_t, uint8_t
+#include <type_traits> // for forward
 
 namespace lldb_private {
 
@@ -34,27 +34,16 @@ public:
   /// \a m_flags bit values.
   //------------------------------------------------------------------
   enum {
-    eBinary = (1 << 0) ///< Get and put data as binary instead of as the default
+    eBinary = (1 << 0), ///< Get and put data as binary instead of as the default
                        /// string mode.
-  };
-
-  /// Utility class for counting the bytes that were written to a stream in a
-  /// certain time span.
-  /// @example
-  ///   ByteDelta delta(*this);
-  ///   WriteDataToStream("foo");
-  ///   return *delta;
-  /// @endcode
-  class ByteDelta {
-    Stream *m_stream;
-    /// Bytes we have written so far when ByteDelta was created.
-    size_t m_start;
-
-  public:
-    ByteDelta(Stream &s) : m_stream(&s), m_start(s.GetWrittenBytes()) {}
-    /// Returns the number of bytes written to the given Stream since this
-    /// ByteDelta object was created.
-    size_t operator*() const { return m_stream->GetWrittenBytes() - m_start; }
+// START SWIFT PATCH
+    eVerbose = (1 << 1),   ///< If set, verbose logging is enabled
+    eDebug = (eVerbose << 1),     ///< If set, debug logging is enabled
+    eAddPrefix = (eVerbose << 2), ///< Add number prefixes for binary, octal and hex
+                           ///when eBinary is clear
+    eANSIColor = (eVerbose << 3), ///< If set, then it is ok to colorize the output
+                           ///with ANSI escape sequences
+// END SWIFT PATCH
   };
 
   //------------------------------------------------------------------
@@ -569,7 +558,7 @@ protected:
   int m_indent_level; ///< Indention level.
   std::size_t m_bytes_written = 0; ///< Number of bytes written so far.
 
-  void _PutHex8(uint8_t uvalue, bool add_prefix);
+  size_t _PutHex8(uint8_t uvalue, bool add_prefix);
 
   //------------------------------------------------------------------
   /// Output character bytes to the stream.

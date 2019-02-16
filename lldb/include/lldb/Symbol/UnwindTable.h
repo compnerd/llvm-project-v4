@@ -50,7 +50,7 @@ public:
   GetUncachedFuncUnwindersContainingAddress(const Address &addr,
                                             SymbolContext &sc);
 
-  ArchSpec GetArchitecture();
+  bool GetArchitecture(lldb_private::ArchSpec &arch);
 
 private:
   void Dump(Stream &s);

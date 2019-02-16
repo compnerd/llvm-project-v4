@@ -11,10 +11,14 @@
 #ifndef liblldb_SectionLoadList_h_
 #define liblldb_SectionLoadList_h_
 
+// C Includes
+// C++ Includes
 #include <map>
 #include <mutex>
 
+// Other libraries and framework includes
 #include "llvm/ADT/DenseMap.h"
+// Project includes
 #include "lldb/Core/Section.h"
 #include "lldb/lldb-public.h"
 

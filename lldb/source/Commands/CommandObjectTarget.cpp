@@ -9,11 +9,13 @@
 
 #include "CommandObjectTarget.h"
 
+// Project includes
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/IOHandler.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Core/State.h"
 #include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/DataFormatters/ValueObjectPrinter.h"
 #include "lldb/Host/OptionParser.h"
@@ -49,12 +51,13 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadSpec.h"
 #include "lldb/Utility/Args.h"
-#include "lldb/Utility/State.h"
 #include "lldb/Utility/Timer.h"
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatAdapters.h"
 
+// C Includes
+// C++ Includes
 #include <cerrno>
 
 using namespace lldb;
@@ -271,13 +274,13 @@ protected:
     FileSpec remote_file(m_remote_file.GetOptionValue().GetCurrentValue());
 
     if (core_file) {
-      if (!FileSystem::Instance().Exists(core_file)) {
+      if (!core_file.Exists()) {
         result.AppendErrorWithFormat("core file '%s' doesn't exist",
                                      core_file.GetPath().c_str());
         result.SetStatus(eReturnStatusFailed);
         return false;
       }
-      if (!FileSystem::Instance().Readable(core_file)) {
+      if (!core_file.Readable()) {
         result.AppendErrorWithFormat("core file '%s' is not readable",
                                      core_file.GetPath().c_str());
         result.SetStatus(eReturnStatusFailed);
@@ -288,8 +291,8 @@ protected:
     if (argc == 1 || core_file || remote_file) {
       FileSpec symfile(m_symbol_file.GetOptionValue().GetCurrentValue());
       if (symfile) {
-        if (FileSystem::Instance().Exists(symfile)) {
-          if (!FileSystem::Instance().Readable(symfile)) {
+        if (symfile.Exists()) {
+          if (!symfile.Readable()) {
             result.AppendErrorWithFormat("symbol file '%s' is not readable",
                                          symfile.GetPath().c_str());
             result.SetStatus(eReturnStatusFailed);
@@ -310,10 +313,8 @@ protected:
       Timer scoped_timer(func_cat, "(lldb) target create '%s'", file_path);
       FileSpec file_spec;
 
-      if (file_path) {
-        file_spec.SetFile(file_path, FileSpec::Style::native);
-        FileSystem::Instance().Resolve(file_spec);
-      }
+      if (file_path)
+        file_spec.SetFile(file_path, true, FileSpec::Style::native);
 
       bool must_set_platform_path = false;
 
@@ -335,7 +336,7 @@ protected:
         if (remote_file) {
           if (platform_sp) {
             // I have a remote file.. two possible cases
-            if (file_spec && FileSystem::Instance().Exists(file_spec)) {
+            if (file_spec && file_spec.Exists()) {
               // if the remote file does not exist, push it there
               if (!platform_sp->GetFileExists(remote_file)) {
                 Status err = platform_sp->PutFile(file_spec, remote_file);
@@ -403,8 +404,8 @@ protected:
         if (core_file) {
           char core_path[PATH_MAX];
           core_file.GetPath(core_path, sizeof(core_path));
-          if (FileSystem::Instance().Exists(core_file)) {
-            if (!FileSystem::Instance().Readable(core_file)) {
+          if (core_file.Exists()) {
+            if (!core_file.Readable()) {
               result.AppendMessageWithFormat(
                   "Core file '%s' is not readable.\n", core_path);
               result.SetStatus(eReturnStatusFailed);
@@ -1451,14 +1452,15 @@ static size_t DumpModuleObjfileHeaders(Stream &strm, ModuleList &module_list) {
 }
 
 static void DumpModuleSymtab(CommandInterpreter &interpreter, Stream &strm,
-                             Module *module, SortOrder sort_order) {
+                             Module *module, SortOrder sort_order,
+                             Mangled::NamePreference name_preference) {
   if (module) {
     SymbolVendor *sym_vendor = module->GetSymbolVendor();
     if (sym_vendor) {
       Symtab *symtab = sym_vendor->GetSymtab();
       if (symtab)
         symtab->Dump(&strm, interpreter.GetExecutionContext().GetTargetPtr(),
-                     sort_order);
+                     sort_order, name_preference);
     }
   }
 }
@@ -1792,7 +1794,7 @@ static uint32_t LookupFileAndLineInModule(CommandInterpreter &interpreter,
 static size_t FindModulesByName(Target *target, const char *module_name,
                                 ModuleList &module_list,
                                 bool check_global_list) {
-  FileSpec module_file_spec(module_name);
+  FileSpec module_file_spec(module_name, false);
   ModuleSpec module_spec(module_file_spec);
 
   const size_t initial_size = module_list.GetSize();
@@ -1991,6 +1993,7 @@ static constexpr OptionEnumValueElement g_sort_option_enumeration[] = {
 static constexpr OptionDefinition g_target_modules_dump_symtab_options[] = {
     // clang-format off
   { LLDB_OPT_SET_1, false, "sort", 's', OptionParser::eRequiredArgument, nullptr, OptionEnumValues(g_sort_option_enumeration), 0, eArgTypeSortOrder, "Supply a sort order when dumping the symbol table." }
+, { LLDB_OPT_SET_1, false, "show-mangled-names", 'm', OptionParser::eNoArgument,       nullptr, {}, 0, eArgTypeNone, "Do not demangle symbol names before showing them." },
     // clang-format on
 };
 
@@ -2009,7 +2012,9 @@ public:
 
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options(), m_sort_order(eSortOrderNone) {}
+    CommandOptions()
+        : Options(), m_sort_order(eSortOrderNone),
+          m_prefer_mangled(false, false) {}
 
     ~CommandOptions() override = default;
 
@@ -2019,6 +2024,11 @@ public:
       const int short_option = m_getopt_table[option_idx].val;
 
       switch (short_option) {
+      case 'm':
+        m_prefer_mangled.SetCurrentValue(true);
+        m_prefer_mangled.SetOptionWasSet();
+        break;
+
       case 's':
         m_sort_order = (SortOrder)OptionArgParser::ToOptionEnum(
             option_arg, GetDefinitions()[option_idx].enum_values,
@@ -2035,6 +2045,7 @@ public:
 
     void OptionParsingStarting(ExecutionContext *execution_context) override {
       m_sort_order = eSortOrderNone;
+      m_prefer_mangled.Clear();
     }
 
     llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
@@ -2042,6 +2053,7 @@ public:
     }
 
     SortOrder m_sort_order;
+    OptionValueBoolean m_prefer_mangled;
   };
 
 protected:
@@ -2054,6 +2066,10 @@ protected:
       return false;
     } else {
       uint32_t num_dumped = 0;
+
+      Mangled::NamePreference preference =
+          (m_options.m_prefer_mangled ? Mangled::ePreferMangled
+                                      : Mangled::ePreferDemangled);
 
       uint32_t addr_byte_size = target->GetArchitecture().GetAddressByteSize();
       result.GetOutputStream().SetAddressByteSize(addr_byte_size);
@@ -2079,7 +2095,7 @@ protected:
             DumpModuleSymtab(
                 m_interpreter, result.GetOutputStream(),
                 target->GetImages().GetModulePointerAtIndexUnlocked(image_idx),
-                m_options.m_sort_order);
+                m_options.m_sort_order, preference);
           }
         } else {
           result.AppendError("the target has no associated executable images");
@@ -2107,7 +2123,7 @@ protected:
                   break;
                 num_dumped++;
                 DumpModuleSymtab(m_interpreter, result.GetOutputStream(),
-                                 module, m_options.m_sort_order);
+                                 module, m_options.m_sort_order, preference);
               }
             }
           } else
@@ -2221,85 +2237,6 @@ protected:
       }
     }
     return result.Succeeded();
-  }
-};
-
-#pragma mark CommandObjectTargetModulesDumpSections
-
-//----------------------------------------------------------------------
-// Clang AST dumping command
-//----------------------------------------------------------------------
-
-class CommandObjectTargetModulesDumpClangAST
-    : public CommandObjectTargetModulesModuleAutoComplete {
-public:
-  CommandObjectTargetModulesDumpClangAST(CommandInterpreter &interpreter)
-      : CommandObjectTargetModulesModuleAutoComplete(
-            interpreter, "target modules dump ast",
-            "Dump the clang ast for a given module's symbol file.",
-            //"target modules dump ast [<file1> ...]")
-            nullptr) {}
-
-  ~CommandObjectTargetModulesDumpClangAST() override = default;
-
-protected:
-  bool DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = m_interpreter.GetDebugger().GetSelectedTarget().get();
-    if (target == nullptr) {
-      result.AppendError("invalid target, create a debug target using the "
-                         "'target create' command");
-      result.SetStatus(eReturnStatusFailed);
-      return false;
-    }
-
-    const size_t num_modules = target->GetImages().GetSize();
-    if (num_modules == 0) {
-      result.AppendError("the target has no associated executable images");
-      result.SetStatus(eReturnStatusFailed);
-      return false;
-    }
-
-    if (command.GetArgumentCount() == 0) {
-      // Dump all ASTs for all modules images
-      result.GetOutputStream().Printf("Dumping clang ast for %" PRIu64
-                                      " modules.\n",
-                                      (uint64_t)num_modules);
-      for (size_t image_idx = 0; image_idx < num_modules; ++image_idx) {
-        if (m_interpreter.WasInterrupted())
-          break;
-        Module *m = target->GetImages().GetModulePointerAtIndex(image_idx);
-        SymbolFile *sf = m->GetSymbolVendor()->GetSymbolFile();
-        sf->DumpClangAST(result.GetOutputStream());
-      }
-      result.SetStatus(eReturnStatusSuccessFinishResult);
-      return true;
-    }
-
-    // Dump specified ASTs (by basename or fullpath)
-    for (const Args::ArgEntry &arg : command.entries()) {
-      ModuleList module_list;
-      const size_t num_matches =
-          FindModulesByName(target, arg.c_str(), module_list, true);
-      if (num_matches == 0) {
-        // Check the global list
-        std::lock_guard<std::recursive_mutex> guard(
-            Module::GetAllocationModuleCollectionMutex());
-
-        result.AppendWarningWithFormat(
-            "Unable to find an image that matches '%s'.\n", arg.c_str());
-        continue;
-      }
-
-      for (size_t i = 0; i < num_matches; ++i) {
-        if (m_interpreter.WasInterrupted())
-          break;
-        Module *m = module_list.GetModulePointerAtIndex(i);
-        SymbolFile *sf = m->GetSymbolVendor()->GetSymbolFile();
-        sf->DumpClangAST(result.GetOutputStream());
-      }
-    }
-    result.SetStatus(eReturnStatusSuccessFinishResult);
-    return true;
   }
 };
 
@@ -2430,7 +2367,7 @@ protected:
       for (int arg_idx = 0;
            (arg_cstr = command.GetArgumentAtIndex(arg_idx)) != nullptr;
            ++arg_idx) {
-        FileSpec file_spec(arg_cstr);
+        FileSpec file_spec(arg_cstr, false);
 
         const ModuleList &target_modules = target->GetImages();
         std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
@@ -2478,13 +2415,12 @@ public:
   // Constructors and Destructors
   //------------------------------------------------------------------
   CommandObjectTargetModulesDump(CommandInterpreter &interpreter)
-      : CommandObjectMultiword(
-            interpreter, "target modules dump",
-            "Commands for dumping information about one or "
-            "more target modules.",
-            "target modules dump "
-            "[headers|symtab|sections|ast|symfile|line-table] "
-            "[<file1> <file2> ...]") {
+      : CommandObjectMultiword(interpreter, "target modules dump",
+                               "Commands for dumping information about one or "
+                               "more target modules.",
+                               "target modules dump "
+                               "[headers|symtab|sections|symfile|line-table] "
+                               "[<file1> <file2> ...]") {
     LoadSubCommand("objfile",
                    CommandObjectSP(
                        new CommandObjectTargetModulesDumpObjfile(interpreter)));
@@ -2497,9 +2433,6 @@ public:
     LoadSubCommand("symfile",
                    CommandObjectSP(
                        new CommandObjectTargetModulesDumpSymfile(interpreter)));
-    LoadSubCommand(
-        "ast", CommandObjectSP(
-                   new CommandObjectTargetModulesDumpClangAST(interpreter)));
     LoadSubCommand("line-table",
                    CommandObjectSP(new CommandObjectTargetModulesDumpLineTable(
                        interpreter)));
@@ -2614,8 +2547,8 @@ protected:
           if (entry.ref.empty())
             continue;
 
-          FileSpec file_spec(entry.ref);
-          if (FileSystem::Instance().Exists(file_spec)) {
+          FileSpec file_spec(entry.ref, true);
+          if (file_spec.Exists()) {
             ModuleSpec module_spec(file_spec);
             if (m_uuid_option_group.GetOptionValue().OptionWasSet())
               module_spec.GetUUID() =
@@ -2882,15 +2815,10 @@ protected:
                   }
                   if (set_pc) {
                     ThreadList &thread_list = process->GetThreadList();
+                    ThreadSP curr_thread(thread_list.GetSelectedThread());
                     RegisterContextSP reg_context(
-                        thread_list.GetSelectedThread()->GetRegisterContext());
-                    addr_t file_entry_addr = file_entry.GetLoadAddress(target);
-                    if (!reg_context->SetPC(file_entry_addr)) {
-                      result.AppendErrorWithFormat("failed to set PC value to "
-                                                   "0x%" PRIx64 "\n",
-                                                   file_entry_addr);
-                      result.SetStatus(eReturnStatusFailed);
-                    }
+                        curr_thread->GetRegisterContext());
+                    reg_context->SetPC(file_entry.GetLoadAddress(target));
                   }
                 }
               } else {
@@ -2969,8 +2897,8 @@ static constexpr OptionDefinition g_target_modules_list_options[] = {
   { LLDB_OPT_SET_1, false, "address",        'a', OptionParser::eRequiredArgument, nullptr, {}, 0, eArgTypeAddressOrExpression, "Display the image at this address." },
   { LLDB_OPT_SET_1, false, "arch",           'A', OptionParser::eOptionalArgument, nullptr, {}, 0, eArgTypeWidth,               "Display the architecture when listing images." },
   { LLDB_OPT_SET_1, false, "triple",         't', OptionParser::eOptionalArgument, nullptr, {}, 0, eArgTypeWidth,               "Display the triple when listing images." },
-  { LLDB_OPT_SET_1, false, "header",         'h', OptionParser::eNoArgument,       nullptr, {}, 0, eArgTypeNone,                "Display the image base address as a load address if debugging, a file address otherwise." },
-  { LLDB_OPT_SET_1, false, "offset",         'o', OptionParser::eNoArgument,       nullptr, {}, 0, eArgTypeNone,                "Display the image load address offset from the base file address (the slide amount)." },
+  { LLDB_OPT_SET_1, false, "header",         'h', OptionParser::eNoArgument,       nullptr, {}, 0, eArgTypeNone,                "Display the image header address as a load address if debugging, a file address otherwise." },
+  { LLDB_OPT_SET_1, false, "offset",         'o', OptionParser::eNoArgument,       nullptr, {}, 0, eArgTypeNone,                "Display the image header address offset from the header file address (the slide amount)." },
   { LLDB_OPT_SET_1, false, "uuid",           'u', OptionParser::eNoArgument,       nullptr, {}, 0, eArgTypeNone,                "Display the UUID when listing images." },
   { LLDB_OPT_SET_1, false, "fullpath",       'f', OptionParser::eOptionalArgument, nullptr, {}, 0, eArgTypeWidth,               "Display the fullpath to the image object file." },
   { LLDB_OPT_SET_1, false, "directory",      'd', OptionParser::eOptionalArgument, nullptr, {}, 0, eArgTypeWidth,               "Display the directory with optional width for the image object file." },
@@ -3229,13 +3157,13 @@ protected:
 
           ObjectFile *objfile = module->GetObjectFile();
           if (objfile) {
-            Address base_addr(objfile->GetBaseAddress());
-            if (base_addr.IsValid()) {
+            Address header_addr(objfile->GetHeaderAddress());
+            if (header_addr.IsValid()) {
               if (target && !target->GetSectionLoadList().IsEmpty()) {
-                lldb::addr_t load_addr =
-                    base_addr.GetLoadAddress(target);
-                if (load_addr == LLDB_INVALID_ADDRESS) {
-                  base_addr.Dump(&strm, target,
+                lldb::addr_t header_load_addr =
+                    header_addr.GetLoadAddress(target);
+                if (header_load_addr == LLDB_INVALID_ADDRESS) {
+                  header_addr.Dump(&strm, target,
                                    Address::DumpStyleModuleWithFileAddress,
                                    Address::DumpStyleFileAddress);
                 } else {
@@ -3243,18 +3171,18 @@ protected:
                     // Show the offset of slide for the image
                     strm.Printf(
                         "0x%*.*" PRIx64, addr_nibble_width, addr_nibble_width,
-                        load_addr - base_addr.GetFileAddress());
+                        header_load_addr - header_addr.GetFileAddress());
                   } else {
                     // Show the load address of the image
                     strm.Printf("0x%*.*" PRIx64, addr_nibble_width,
-                                addr_nibble_width, load_addr);
+                                addr_nibble_width, header_load_addr);
                   }
                 }
                 break;
               }
               // The address was valid, but the image isn't loaded, output the
               // address in an appropriate format
-              base_addr.Dump(&strm, target, Address::DumpStyleFileAddress);
+              header_addr.Dump(&strm, target, Address::DumpStyleFileAddress);
               break;
             }
           }
@@ -3698,7 +3626,7 @@ public:
         break;
 
       case 'f':
-        m_file.SetFile(option_arg, FileSpec::Style::native);
+        m_file.SetFile(option_arg, false, FileSpec::Style::native);
         m_type = eLookupTypeFileLine;
         break;
 
@@ -3841,7 +3769,7 @@ public:
       break;
     }
 
-    return true;
+    return false;
   }
 
   bool LookupInModule(CommandInterpreter &interpreter, Module *module,
@@ -4337,8 +4265,7 @@ protected:
                 ModuleSP frame_module_sp(
                     frame->GetSymbolContext(eSymbolContextModule).module_sp);
                 if (frame_module_sp) {
-                  if (FileSystem::Instance().Exists(
-                          frame_module_sp->GetPlatformFileSpec())) {
+                  if (frame_module_sp->GetPlatformFileSpec().Exists()) {
                     module_spec.GetArchitecture() =
                         frame_module_sp->GetArchitecture();
                     module_spec.GetFileSpec() =
@@ -4385,7 +4312,7 @@ protected:
               module_spec.GetArchitecture() = target->GetArchitecture();
             }
             success |= module_spec.GetUUID().IsValid() ||
-                       FileSystem::Instance().Exists(module_spec.GetFileSpec());
+                       module_spec.GetFileSpec().Exists();
           }
         }
 
@@ -4430,9 +4357,8 @@ protected:
 
         for (auto &entry : args.entries()) {
           if (!entry.ref.empty()) {
-            auto &symbol_file_spec = module_spec.GetSymbolFileSpec();
-            symbol_file_spec.SetFile(entry.ref, FileSpec::Style::native);
-            FileSystem::Instance().Resolve(symbol_file_spec);
+            module_spec.GetSymbolFileSpec().SetFile(entry.ref, true,
+                                                    FileSpec::Style::native);
             if (file_option_set) {
               module_spec.GetFileSpec() =
                   m_file_option.GetOptionValue().GetCurrentValue();
@@ -4446,8 +4372,7 @@ protected:
             }
 
             ArchSpec arch;
-            bool symfile_exists =
-                FileSystem::Instance().Exists(module_spec.GetSymbolFileSpec());
+            bool symfile_exists = module_spec.GetSymbolFileSpec().Exists();
 
             if (symfile_exists) {
               if (!AddModuleSymbols(target, module_spec, flush, result))

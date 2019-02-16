@@ -7,8 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
 #include <string>
 
+// Other libraries and framework includes
+// Project includes
 #include "CommandObjectFrame.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
@@ -1129,8 +1133,10 @@ CommandObjectMultiwordFrame::CommandObjectMultiwordFrame(
                                                    "examing the current "
                                                    "thread's stack frames.",
                              "frame <subcommand> [<subcommand-options>]") {
-  LoadSubCommand("diagnose",
-                 CommandObjectSP(new CommandObjectFrameDiagnose(interpreter)));
+  if (false) {
+    LoadSubCommand("diagnose",
+        CommandObjectSP(new CommandObjectFrameDiagnose(interpreter)));
+  }
   LoadSubCommand("info",
                  CommandObjectSP(new CommandObjectFrameInfo(interpreter)));
   LoadSubCommand("select",

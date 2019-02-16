@@ -148,9 +148,7 @@ class TestResult(unittest.TestResult):
 
     def wasSuccessful(self):
         "Tells whether or not this result was a success"
-        return (len(self.failures) +
-                len(self.errors) +
-                len(self.unexpectedSuccesses) == 0)
+        return (len(self.failures) + len(self.errors) == 0)
 
     def stop(self):
         "Indicates that the tests should be aborted"

@@ -13,6 +13,7 @@
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Core/State.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
@@ -26,7 +27,6 @@
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/State.h"
 
 #include "DynamicLoaderDarwin.h"
 #include "DynamicLoaderMacOSXDYLD.h"
@@ -85,7 +85,7 @@ DynamicLoader *DynamicLoaderMacOSXDYLD::CreateInstance(Process *process,
     }
   }
 
-  if (UseDYLDSPI(process)) {
+  if (UseDYLDSPI(process) == true) {
     create = false;
   }
 
@@ -122,12 +122,12 @@ bool DynamicLoaderMacOSXDYLD::ProcessDidExec() {
       // value differs from the Process' image info address. When a process
       // execs itself it might cause a change if ASLR is enabled.
       const addr_t shlib_addr = m_process->GetImageInfoAddress();
-      if (m_process_image_addr_is_all_images_infos &&
+      if (m_process_image_addr_is_all_images_infos == true &&
           shlib_addr != m_dyld_all_image_infos_addr) {
         // The image info address from the process is the
         // 'dyld_all_image_infos' address and it has changed.
         did_exec = true;
-      } else if (!m_process_image_addr_is_all_images_infos &&
+      } else if (m_process_image_addr_is_all_images_infos == false &&
                  shlib_addr == m_dyld.address) {
         // The image info address from the process is the mach_header address
         // for dyld and it has changed.
@@ -693,7 +693,9 @@ bool DynamicLoaderMacOSXDYLD::ReadImageInfos(
                                        error);
       // don't resolve the path
       if (error.Success()) {
-        image_infos[i].file_spec.SetFile(raw_path, FileSpec::Style::native);
+        const bool resolve_path = false;
+        image_infos[i].file_spec.SetFile(raw_path, resolve_path,
+                                         FileSpec::Style::native);
       }
     }
     return true;
@@ -892,8 +894,7 @@ uint32_t DynamicLoaderMacOSXDYLD::ParseLoadCommands(const DataExtractor &data,
           const lldb::offset_t name_offset =
               load_cmd_offset + data.GetU32(&offset);
           const char *path = data.PeekCStr(name_offset);
-          lc_id_dylinker->SetFile(path, FileSpec::Style::native);
-          FileSystem::Instance().Resolve(*lc_id_dylinker);
+          lc_id_dylinker->SetFile(path, true, FileSpec::Style::native);
         }
         break;
 

@@ -40,13 +40,12 @@ void RegisterContextWindows::InvalidateAllRegisters() {
 
 bool RegisterContextWindows::ReadAllRegisterValues(
     lldb::DataBufferSP &data_sp) {
-
   if (!CacheAllRegisterValues())
     return false;
-
-  data_sp.reset(new DataBufferHeap(sizeof(CONTEXT), 0));
+  if (data_sp->GetByteSize() < sizeof(m_context)) {
+    data_sp.reset(new DataBufferHeap(sizeof(CONTEXT), 0));
+  }
   memcpy(data_sp->GetBytes(), &m_context, sizeof(m_context));
-
   return true;
 }
 

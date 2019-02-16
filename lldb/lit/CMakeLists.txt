@@ -7,10 +7,6 @@ else ()
   set(LLVM_BUILD_MODE "%(build_mode)s")
 endif ()
 
-if (CMAKE_SIZEOF_VOID_P EQUAL 8)
-  set(LLDB_IS_64_BITS 1)
-endif()
-
 if (NOT LLDB_TEST_USE_CUSTOM_C_COMPILER)
   string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} LLDB_TEST_C_COMPILER ${LLDB_TEST_C_COMPILER})
 endif ()
@@ -26,10 +22,8 @@ string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} LLDB_TOOLS_DIR ${LLVM_RUNT
 string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} LLDB_DOTEST_ARGS "${LLDB_DOTEST_ARGS}")
 
 list(APPEND LLDB_TEST_DEPS
-  count
   LLDBUnitTests
   dsymutil
-  llc
   lldb
   lldb-test
   llvm-config
@@ -53,19 +47,18 @@ endif(BUILD_SHARED_LIBS)
 # the value is not canonicalized within LLVM
 llvm_canonicalize_cmake_booleans(
   LLDB_DISABLE_PYTHON
-  LLVM_ENABLE_ZLIB
-  LLDB_IS_64_BITS)
+  LLVM_ENABLE_ZLIB)
+
+# This should be inherited from the `check-lldb` target. We currently don't run
+# it for swift, but we might consider removing this code once we're done.
+set(LIT_ARGS "-sv")
 
 configure_lit_site_cfg(
-  ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
-  ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py
-  MAIN_CONFIG
-  ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py)
+  ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.in
+  ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg)
 configure_lit_site_cfg(
-  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.site.cfg.py.in
-  ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg.py
-  MAIN_CONFIG
-  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.cfg.py)
+  ${CMAKE_CURRENT_SOURCE_DIR}/Unit/lit.site.cfg.in
+  ${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg)
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/Suite/lit.site.cfg.in
   ${CMAKE_CURRENT_BINARY_DIR}/Suite/lit.site.cfg)
@@ -77,8 +70,15 @@ if(NOT LLDB_BUILT_STANDALONE)
     )
 endif()
 
+set(LLDB_TEST_PARAMS
+  lldb_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
+  )
+
 add_lit_testsuite(check-lldb-lit "Running lldb lit test suite"
   ${CMAKE_CURRENT_BINARY_DIR}
+  ${LIT_ARGS}
+  PARAMS lldb_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
+         lldb_unit_site_config=${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg
   DEPENDS ${LLDB_TEST_DEPS}
   )
 
@@ -91,6 +91,9 @@ if (TARGET clang)
 endif()
 
 add_lit_testsuites(LLDB
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${LIT_ARGS}
+  PARAMS lldb_site_config=${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg
+         lldb_unit_site_config=${CMAKE_CURRENT_BINARY_DIR}/Unit/lit.site.cfg
   DEPENDS ${LLDB_TEST_DEPS}
   )

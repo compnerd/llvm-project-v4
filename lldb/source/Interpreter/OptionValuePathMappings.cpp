@@ -9,7 +9,10 @@
 
 #include "lldb/Interpreter/OptionValuePathMappings.h"
 
-#include "lldb/Host/FileSystem.h"
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Host/StringConvert.h"
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/FileSpec.h"
@@ -20,7 +23,7 @@ using namespace lldb_private;
 namespace {
 static bool VerifyPathExists(const char *path) {
   if (path && path[0])
-    return FileSystem::Instance().Exists(path);
+    return FileSpec(path, false).Exists();
   else
     return false;
 }

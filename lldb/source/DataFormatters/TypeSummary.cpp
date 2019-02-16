@@ -9,9 +9,13 @@
 
 #include "lldb/DataFormatters/TypeSummary.h"
 
+// C Includes
 
+// C++ Includes
 
+// Other libraries and framework includes
 
+// Project includes
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-public.h"
 
@@ -135,7 +139,7 @@ bool CXXFunctionSummaryFormat::FormatObject(ValueObject *valobj,
                                             const TypeSummaryOptions &options) {
   dest.clear();
   StreamString stream;
-  if (!m_impl || !m_impl(*valobj, stream, options))
+  if (!m_impl || m_impl(*valobj, stream, options) == false)
     return false;
   dest = stream.GetString();
   return true;

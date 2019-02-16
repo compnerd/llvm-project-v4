@@ -11,10 +11,10 @@
 #define liblldb_DataBufferHeap_h_
 
 #include "lldb/Utility/DataBuffer.h"
-#include "lldb/lldb-types.h"
-#include "llvm/ADT/StringRef.h"
+#include "lldb/lldb-types.h"    // for offset_t
+#include "llvm/ADT/StringRef.h" // for StringRef
 
-#include <cstdint>
+#include <cstdint> // for uint8_t, uint64_t
 #include <vector>
 
 namespace lldb_private {
@@ -90,8 +90,7 @@ public:
   /// Set the number of bytes in the data buffer.
   ///
   /// Sets the number of bytes that this object should be able to contain.
-  /// This can be used prior to copying data into the buffer. Note that this
-  /// zero-initializes up to \p byte_size bytes.
+  /// This can be used prior to copying data into the buffer.
   ///
   /// @param[in] byte_size
   ///     The new size in bytes that this data buffer should attempt

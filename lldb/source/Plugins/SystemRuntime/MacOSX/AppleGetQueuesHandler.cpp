@@ -9,6 +9,10 @@
 
 #include "AppleGetQueuesHandler.h"
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Expression/DiagnosticManager.h"
@@ -143,7 +147,7 @@ lldb::addr_t
 AppleGetQueuesHandler::SetupGetQueuesFunction(Thread &thread,
                                               ValueList &get_queues_arglist) {
   ThreadSP thread_sp(thread.shared_from_this());
-  ExecutionContext exe_ctx(thread_sp);
+  ExecutionContext exe_ctx(thread.shared_from_this());
 
   Address impl_code_address;
   DiagnosticManager diagnostics;
@@ -243,7 +247,7 @@ AppleGetQueuesHandler::GetCurrentQueues(Thread &thread, addr_t page_to_free,
 
   error.Clear();
 
-  if (!thread.SafeToCallFunctions()) {
+  if (thread.SafeToCallFunctions() == false) {
     if (log)
       log->Printf("Not safe to call functions on thread 0x%" PRIx64,
                   thread.GetID());

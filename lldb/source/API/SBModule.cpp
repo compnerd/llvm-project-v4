@@ -24,6 +24,7 @@
 #include "lldb/Symbol/Symtab.h"
 #include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Symbol/VariableList.h"
+#include "lldb/Target/Language.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/StreamString.h"
@@ -217,9 +218,9 @@ SBModule::ResolveSymbolContextForAddress(const SBAddress &addr,
                                          uint32_t resolve_scope) {
   SBSymbolContext sb_sc;
   ModuleSP module_sp(GetSP());
-  SymbolContextItem scope = static_cast<SymbolContextItem>(resolve_scope);
   if (module_sp && addr.IsValid())
-    module_sp->ResolveSymbolContextForAddress(addr.ref(), scope, *sb_sc);
+    module_sp->ResolveSymbolContextForAddress(addr.ref(), resolve_scope,
+                                              *sb_sc);
   return sb_sc;
 }
 
@@ -365,9 +366,8 @@ lldb::SBSymbolContextList SBModule::FindFunctions(const char *name,
     const bool append = true;
     const bool symbols_ok = true;
     const bool inlines_ok = true;
-    FunctionNameType type = static_cast<FunctionNameType>(name_type_mask);
-    module_sp->FindFunctions(ConstString(name), NULL, type, symbols_ok,
-                             inlines_ok, append, *sb_sc_list);
+    module_sp->FindFunctions(ConstString(name), NULL, name_type_mask,
+                             symbols_ok, inlines_ok, append, *sb_sc_list);
   }
   return sb_sc_list;
 }
@@ -485,16 +485,14 @@ lldb::SBTypeList SBModule::GetTypes(uint32_t type_mask) {
   SBTypeList sb_type_list;
 
   ModuleSP module_sp(GetSP());
-  if (!module_sp)
-    return sb_type_list;
-  SymbolVendor *vendor = module_sp->GetSymbolVendor();
-  if (!vendor)
-    return sb_type_list;
-
-  TypeClass type_class = static_cast<TypeClass>(type_mask);
-  TypeList type_list;
-  vendor->GetTypes(NULL, type_class, type_list);
-  sb_type_list.m_opaque_ap->Append(type_list);
+  if (module_sp) {
+    SymbolVendor *vendor = module_sp->GetSymbolVendor();
+    if (vendor) {
+      TypeList type_list;
+      vendor->GetTypes(NULL, type_mask, type_list);
+      sb_type_list.m_opaque_ap->Append(type_list);
+    }
+  }
   return sb_type_list;
 }
 
@@ -587,18 +585,25 @@ lldb::SBAddress SBModule::GetObjectFileHeaderAddress() const {
   if (module_sp) {
     ObjectFile *objfile_ptr = module_sp->GetObjectFile();
     if (objfile_ptr)
-      sb_addr.ref() = objfile_ptr->GetBaseAddress();
+      sb_addr.ref() = objfile_ptr->GetHeaderAddress();
   }
   return sb_addr;
 }
 
-lldb::SBAddress SBModule::GetObjectFileEntryPointAddress() const {
-  lldb::SBAddress sb_addr;
+lldb::SBError SBModule::IsTypeSystemCompatible(lldb::LanguageType language) {
+  SBError sb_error;
   ModuleSP module_sp(GetSP());
   if (module_sp) {
-    ObjectFile *objfile_ptr = module_sp->GetObjectFile();
-    if (objfile_ptr)
-      sb_addr.ref() = objfile_ptr->GetEntryPointAddress();
+    TypeSystem *type_system = module_sp->GetTypeSystemForLanguage(language);
+    if (type_system) {
+      sb_error.SetError(type_system->IsCompatible());
+    } else {
+      sb_error.SetErrorStringWithFormat(
+          "no type system for language %s",
+          Language::GetNameForLanguageType(language));
+    }
+  } else {
+    sb_error.SetErrorString("invalid module");
   }
-  return sb_addr;
+  return sb_error;
 }

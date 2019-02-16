@@ -9,13 +9,19 @@
 
 #include "ABISysV_arm.h"
 
+// C Includes
+// C++ Includes
 #include <vector>
 
+// Other libraries and framework includes
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 
+// Project includes
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Symbol/UnwindPlan.h"
@@ -24,8 +30,6 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/ConstString.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
 
 #include "Plugins/Process/Utility/ARMDefines.h"
@@ -1440,7 +1444,10 @@ bool ABISysV_arm::PrepareTrivialCall(Thread &thread, addr_t sp,
       ~1ull; // clear bit zero since the CPSR will take care of the mode for us
 
   // Set "pc" to the address requested
-  return reg_ctx->WriteRegisterFromUnsigned(pc_reg_num, function_addr);
+  if (!reg_ctx->WriteRegisterFromUnsigned(pc_reg_num, function_addr))
+    return false;
+
+  return true;
 }
 
 bool ABISysV_arm::GetArgumentValues(Thread &thread, ValueList &values) const {

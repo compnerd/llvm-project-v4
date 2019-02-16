@@ -7,6 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "Cocoa.h"
 
 #include "lldb/Core/ValueObject.h"
@@ -126,7 +130,11 @@ public:
     return false;
   }
 
-  bool MightHaveChildren() override { return m_impl.m_mode != Mode::Invalid; }
+  bool MightHaveChildren() override {
+    if (m_impl.m_mode == Mode::Invalid)
+      return false;
+    return true;
+  }
 
   size_t GetIndexOfChildWithName(const ConstString &name) override {
     const char *item_name = name.GetCString();

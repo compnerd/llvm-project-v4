@@ -10,8 +10,12 @@
 #ifndef liblldb_Debug_h_
 #define liblldb_Debug_h_
 
+// C Includes
+// C++ Includes
 #include <vector>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/lldb-private.h"
 
 namespace lldb_private {

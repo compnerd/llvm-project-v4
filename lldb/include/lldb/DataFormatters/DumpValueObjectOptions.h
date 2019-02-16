@@ -10,8 +10,12 @@
 #ifndef lldb_DumpValueObjectOptions_h_
 #define lldb_DumpValueObjectOptions_h_
 
+// C Includes
+// C++ Includes
 #include <string>
 
+// Other libraries and framework includes
+// Project includes
 #include "lldb/lldb-private.h"
 #include "lldb/lldb-public.h"
 
@@ -23,7 +27,7 @@ namespace lldb_private {
 class DumpValueObjectOptions {
 public:
   struct PointerDepth {
-    enum class Mode { Always, Default, Never } m_mode;
+    enum class Mode { Always, Formatters, Default, Never } m_mode;
     uint32_t m_count;
 
     PointerDepth operator--() const {
@@ -33,6 +37,9 @@ public:
     }
 
     bool CanAllowExpansion() const;
+
+    bool CanAllowExpansion(bool is_root, TypeSummaryImpl *entry,
+                          ValueObject *valobj, const std::string &summary);
   };
 
   struct PointerAsArraySettings {

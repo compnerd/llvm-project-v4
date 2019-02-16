@@ -10,9 +10,11 @@
 #ifndef liblldb_FreeBSDThread_H_
 #define liblldb_FreeBSDThread_H_
 
+// C++ Includes
 #include <memory>
 #include <string>
 
+// Other libraries and framework includes
 #include "RegisterContextPOSIX.h"
 #include "lldb/Target/Thread.h"
 

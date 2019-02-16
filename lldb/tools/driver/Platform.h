@@ -12,6 +12,7 @@
 
 #if defined(_WIN32)
 
+#include "lldb/Host/HostGetOpt.h"
 #include <io.h>
 #if defined(_MSC_VER)
 #include <signal.h>
@@ -60,6 +61,7 @@ struct timeval {
   long tv_usec;
 };
 typedef long pid_t;
+#define snprintf _snprintf
 #define PATH_MAX MAX_PATH
 #endif
 
@@ -72,6 +74,7 @@ extern int tcsetattr(int fd, int optional_actions,
 extern int tcgetattr(int fildes, struct termios *termios_p);
 
 #else
+#include "lldb/Host/HostGetOpt.h"
 #include <inttypes.h>
 
 #include <libgen.h>

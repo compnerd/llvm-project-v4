@@ -7,11 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Plugins/ScriptInterpreter/Python/lldb-python.h"
 #include "gtest/gtest.h"
 
 #include "Plugins/ScriptInterpreter/Python/ScriptInterpreterPython.h"
-#include "Plugins/ScriptInterpreter/Python/lldb-python.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
 
 #include "PythonTestSuite.h"
@@ -19,7 +18,6 @@
 using namespace lldb_private;
 
 void PythonTestSuite::SetUp() {
-  FileSystem::Initialize();
   HostInfoBase::Initialize();
   // ScriptInterpreterPython::Initialize() depends on HostInfo being
   // initializedso it can compute the python directory etc.
@@ -38,6 +36,4 @@ void PythonTestSuite::TearDown() {
   PyGILState_Release(m_gil_state);
 
   ScriptInterpreterPython::Terminate();
-  HostInfoBase::Terminate();
-  FileSystem::Terminate();
 }

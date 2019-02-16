@@ -8,7 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Host/android/HostInfoAndroid.h"
-#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/linux/HostInfoLinux.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -29,7 +28,7 @@ void HostInfoAndroid::ComputeHostArchitectureSupport(ArchSpec &arch_32,
 }
 
 FileSpec HostInfoAndroid::GetDefaultShell() {
-  return FileSpec("/system/bin/sh");
+  return FileSpec("/system/bin/sh", false);
 }
 
 FileSpec HostInfoAndroid::ResolveLibraryPath(const std::string &module_path,
@@ -40,11 +39,8 @@ FileSpec HostInfoAndroid::ResolveLibraryPath(const std::string &module_path,
   static const char *const default_lib64_path[] = {"/vendor/lib64",
                                                    "/system/lib64", nullptr};
 
-  if (module_path.empty() || module_path[0] == '/') {
-    FileSpec file_spec(module_path.c_str());
-    FileSystem::Instance().Resolve(file_spec);
-    return file_spec;
-  }
+  if (module_path.empty() || module_path[0] == '/')
+    return FileSpec(module_path.c_str(), true);
 
   SmallVector<StringRef, 4> ld_paths;
 
@@ -69,11 +65,10 @@ FileSpec HostInfoAndroid::ResolveLibraryPath(const std::string &module_path,
     ld_paths.push_back(StringRef(*it));
 
   for (const StringRef &path : ld_paths) {
-    FileSpec file_candidate(path.str().c_str());
-    FileSystem::Instance().Resolve(file_candidate);
+    FileSpec file_candidate(path.str().c_str(), true);
     file_candidate.AppendPathComponent(module_path.c_str());
 
-    if (FileSystem::Instance().Exists(file_candidate))
+    if (file_candidate.Exists())
       return file_candidate;
   }
 
@@ -88,8 +83,8 @@ bool HostInfoAndroid::ComputeTempFileBaseDirectory(FileSpec &file_spec) {
   // algorithm will deduce /tmp, which is plain wrong. In that case we have an
   // invalid directory, we substitute the path with /data/local/tmp, which is
   // correct at least in some cases (i.e., when running as shell user).
-  if (!success || !FileSystem::Instance().Exists(file_spec))
-    file_spec = FileSpec("/data/local/tmp");
+  if (!success || !file_spec.Exists())
+    file_spec = FileSpec("/data/local/tmp", false);
 
-  return FileSystem::Instance().Exists(file_spec);
+  return file_spec.Exists();
 }

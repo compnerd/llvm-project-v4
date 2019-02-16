@@ -10,12 +10,12 @@
 // Third party headers
 #include "llvm/Support/Compiler.h"
 #include <cstdlib>
-#include <inttypes.h>
-#include <limits.h>
-#include <memory>
-#include <sstream>
-#include <stdarg.h>
-#include <string.h>
+#include <inttypes.h> // for PRIx8
+#include <limits.h>   // for ULONG_MAX
+#include <memory>     // std::unique_ptr
+#include <sstream>    // std::stringstream
+#include <stdarg.h>   // va_list, va_start, var_end
+#include <string.h>   // for strncmp
 
 // In-house headers:
 #include "MIUtilString.h"
@@ -378,7 +378,10 @@ bool CMIUtilString::IsNumber() const {
     return false;
 
   const size_t nPos = find_first_not_of("-.0123456789");
-  return nPos == std::string::npos;
+  if (nPos != std::string::npos)
+    return false;
+
+  return true;
 }
 
 //++
@@ -396,7 +399,10 @@ bool CMIUtilString::IsHexadecimalNumber() const {
 
   // Skip '0x..' prefix
   const size_t nPos = find_first_not_of("01234567890ABCDEFabcedf", 2);
-  return nPos == std::string::npos;
+  if (nPos != std::string::npos)
+    return false;
+
+  return true;
 }
 
 //++
@@ -413,7 +419,10 @@ bool CMIUtilString::ExtractNumber(MIint64 &vwrNumber) const {
   vwrNumber = 0;
 
   if (!IsNumber()) {
-    return ExtractNumberFromHexadecimal(vwrNumber);
+    if (ExtractNumberFromHexadecimal(vwrNumber))
+      return true;
+
+    return false;
   }
 
   std::stringstream ss(const_cast<CMIUtilString &>(*this));
@@ -630,7 +639,10 @@ bool CMIUtilString::IsQuoted() const {
     return false;
 
   const size_t nLen = length();
-  return !((nLen > 0) && (at(nLen - 1) != cQuote));
+  if ((nLen > 0) && (at(nLen - 1) != cQuote))
+    return false;
+
+  return true;
 }
 
 //++

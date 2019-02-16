@@ -25,7 +25,7 @@ SBTypeSummaryOptions::SBTypeSummaryOptions() {
 SBTypeSummaryOptions::SBTypeSummaryOptions(
     const lldb::SBTypeSummaryOptions &rhs) {
   if (rhs.m_opaque_ap)
-    m_opaque_ap.reset(new TypeSummaryOptions(*rhs.m_opaque_ap));
+    m_opaque_ap.reset(new TypeSummaryOptions(*rhs.m_opaque_ap.get()));
   else
     m_opaque_ap.reset(new TypeSummaryOptions());
 }
@@ -70,11 +70,11 @@ lldb_private::TypeSummaryOptions *SBTypeSummaryOptions::get() {
 }
 
 lldb_private::TypeSummaryOptions &SBTypeSummaryOptions::ref() {
-  return *m_opaque_ap;
+  return *m_opaque_ap.get();
 }
 
 const lldb_private::TypeSummaryOptions &SBTypeSummaryOptions::ref() const {
-  return *m_opaque_ap;
+  return *m_opaque_ap.get();
 }
 
 SBTypeSummaryOptions::SBTypeSummaryOptions(
@@ -261,7 +261,7 @@ lldb::SBTypeSummary &SBTypeSummary::operator=(const lldb::SBTypeSummary &rhs) {
 }
 
 bool SBTypeSummary::operator==(lldb::SBTypeSummary &rhs) {
-  if (!IsValid())
+  if (IsValid() == false)
     return !rhs.IsValid();
   return m_opaque_sp == rhs.m_opaque_sp;
 }
@@ -305,7 +305,7 @@ bool SBTypeSummary::IsEqualTo(lldb::SBTypeSummary &rhs) {
 }
 
 bool SBTypeSummary::operator!=(lldb::SBTypeSummary &rhs) {
-  if (!IsValid())
+  if (IsValid() == false)
     return !rhs.IsValid();
   return m_opaque_sp != rhs.m_opaque_sp;
 }

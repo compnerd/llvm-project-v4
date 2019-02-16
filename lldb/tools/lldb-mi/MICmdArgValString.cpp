@@ -33,7 +33,7 @@ CMICmdArgValString::CMICmdArgValString()
 // Throws:  None.
 //--
 CMICmdArgValString::CMICmdArgValString(const bool vbAnything)
-    : m_bHandleQuotedString(vbAnything), m_bAcceptNumbers(false),
+    : m_bHandleQuotedString(vbAnything ? true : false), m_bAcceptNumbers(false),
       m_bHandleDirPaths(false), m_bHandleAnything(vbAnything) {}
 
 //++
@@ -391,5 +391,8 @@ bool CMICmdArgValString::IsStringArgQuotedQuotedTextEmbedded(
     return false;
 
   const size_t nLen = vrTxt.length();
-  return !((nLen > 5) && ((nPos + 2) == (nPos2 - 2)));
+  if ((nLen > 5) && ((nPos + 2) == (nPos2 - 2)))
+    return false;
+
+  return true;
 }

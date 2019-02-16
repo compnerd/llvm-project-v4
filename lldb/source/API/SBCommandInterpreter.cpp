@@ -7,13 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/lldb-types.h"
 
+#include "lldb/Core/Listener.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/CommandObjectMultiword.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/Listener.h"
 
 #include "lldb/API/SBBroadcaster.h"
 #include "lldb/API/SBCommandInterpreter.h"
@@ -98,7 +102,7 @@ SBCommandInterpreterRunOptions::get() const {
 
 lldb_private::CommandInterpreterRunOptions &
 SBCommandInterpreterRunOptions::ref() const {
-  return *m_opaque_up;
+  return *m_opaque_up.get();
 }
 
 class CommandPluginInterfaceImplementation : public CommandObjectParsed {
@@ -273,16 +277,6 @@ void SBCommandInterpreter::HandleCommandsFromFile(
 int SBCommandInterpreter::HandleCompletion(
     const char *current_line, const char *cursor, const char *last_char,
     int match_start_point, int max_return_elements, SBStringList &matches) {
-  SBStringList dummy_descriptions;
-  return HandleCompletionWithDescriptions(
-      current_line, cursor, last_char, match_start_point, max_return_elements,
-      matches, dummy_descriptions);
-}
-
-int SBCommandInterpreter::HandleCompletionWithDescriptions(
-    const char *current_line, const char *cursor, const char *last_char,
-    int match_start_point, int max_return_elements, SBStringList &matches,
-    SBStringList &descriptions) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_API));
   int num_completions = 0;
 
@@ -310,15 +304,13 @@ int SBCommandInterpreter::HandleCompletionWithDescriptions(
                 match_start_point, max_return_elements);
 
   if (IsValid()) {
-    lldb_private::StringList lldb_matches, lldb_descriptions;
+    lldb_private::StringList lldb_matches;
     num_completions = m_opaque_ptr->HandleCompletion(
         current_line, cursor, last_char, match_start_point, max_return_elements,
-        lldb_matches, lldb_descriptions);
+        lldb_matches);
 
-    SBStringList temp_matches_list(&lldb_matches);
-    matches.AppendList(temp_matches_list);
-    SBStringList temp_descriptions_list(&lldb_descriptions);
-    descriptions.AppendList(temp_descriptions_list);
+    SBStringList temp_list(&lldb_matches);
+    matches.AppendList(temp_list);
   }
   if (log)
     log->Printf(
@@ -326,17 +318,6 @@ int SBCommandInterpreter::HandleCompletionWithDescriptions(
         static_cast<void *>(m_opaque_ptr), num_completions);
 
   return num_completions;
-}
-
-int SBCommandInterpreter::HandleCompletionWithDescriptions(
-    const char *current_line, uint32_t cursor_pos, int match_start_point,
-    int max_return_elements, SBStringList &matches,
-    SBStringList &descriptions) {
-  const char *cursor = current_line + cursor_pos;
-  const char *last_char = current_line + strlen(current_line);
-  return HandleCompletionWithDescriptions(
-      current_line, cursor, last_char, match_start_point, max_return_elements,
-      matches, descriptions);
 }
 
 int SBCommandInterpreter::HandleCompletion(const char *current_line,

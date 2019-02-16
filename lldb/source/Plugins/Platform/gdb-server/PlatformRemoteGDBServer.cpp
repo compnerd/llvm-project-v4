@@ -10,6 +10,9 @@
 #include "PlatformRemoteGDBServer.h"
 #include "lldb/Host/Config.h"
 
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
@@ -40,7 +43,7 @@ static bool g_initialized = false;
 void PlatformRemoteGDBServer::Initialize() {
   Platform::Initialize();
 
-  if (!g_initialized) {
+  if (g_initialized == false) {
     g_initialized = true;
     PluginManager::RegisterPlugin(
         PlatformRemoteGDBServer::GetPluginNameStatic(),
@@ -104,7 +107,7 @@ Status PlatformRemoteGDBServer::ResolveExecutable(
   // Resolve any executable within an apk on Android?
   // Host::ResolveExecutableInBundle (resolved_module_spec.GetFileSpec());
 
-  if (FileSystem::Instance().Exists(resolved_module_spec.GetFileSpec()) ||
+  if (resolved_module_spec.GetFileSpec().Exists() ||
       module_spec.GetUUID().IsValid()) {
     if (resolved_module_spec.GetArchitecture().IsValid() ||
         resolved_module_spec.GetUUID().IsValid()) {
@@ -139,7 +142,7 @@ Status PlatformRemoteGDBServer::ResolveExecutable(
     }
 
     if (error.Fail() || !exe_module_sp) {
-      if (FileSystem::Instance().Readable(resolved_module_spec.GetFileSpec())) {
+      if (resolved_module_spec.GetFileSpec().Readable()) {
         error.SetErrorStringWithFormat(
             "'%s' doesn't contain any '%s' platform architectures: %s",
             resolved_module_spec.GetFileSpec().GetPath().c_str(),

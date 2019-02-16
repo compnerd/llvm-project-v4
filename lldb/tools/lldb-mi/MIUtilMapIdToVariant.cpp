@@ -52,7 +52,10 @@ void CMIUtilMapIdToVariant::Clear() { m_mapKeyToVariantValue.clear(); }
 bool CMIUtilMapIdToVariant::HaveAlready(const CMIUtilString &vId) const {
   const MapKeyToVariantValue_t::const_iterator it =
       m_mapKeyToVariantValue.find(vId);
-  return it != m_mapKeyToVariantValue.end();
+  if (it != m_mapKeyToVariantValue.end())
+    return true;
+
+  return false;
 }
 
 //++

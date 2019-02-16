@@ -10,12 +10,14 @@
 #include "RegisterContextDarwin_arm.h"
 #include "RegisterContextDarwinConstants.h"
 
+// C++ Includes
+// Other libraries and framework includes
+#include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/Scalar.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegisterValue.h"
-#include "lldb/Utility/Scalar.h"
 #include "llvm/Support/Compiler.h"
 
 #include "Plugins/Process/Utility/InstructionUtils.h"
@@ -26,6 +28,7 @@
 #define LLVM_EXTENSION
 #endif
 
+// Project includes
 #include "Utility/ARM_DWARF_Registers.h"
 #include "Utility/ARM_ehframe_Registers.h"
 
@@ -1670,7 +1673,7 @@ uint32_t RegisterContextDarwin_arm::SetHardwareWatchpoint(lldb::addr_t addr,
     return LLDB_INVALID_INDEX32;
 
   // We must watch for either read or write
-  if (!read && !write)
+  if (read == false && write == false)
     return LLDB_INVALID_INDEX32;
 
   // Can't watch more than 4 bytes per WVR/WCR pair
