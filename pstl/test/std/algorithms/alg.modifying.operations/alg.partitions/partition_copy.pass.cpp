@@ -7,21 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: c++98, c++03, c++11, c++14
+
 // Tests for stable_partition and partition_copy
 #include "support/pstl_test_config.h"
 
-#ifdef PSTL_STANDALONE_TESTS
-#include "pstl/execution"
-#include "pstl/algorithm"
-#else
 #include <execution>
 #include <algorithm>
-#endif // PSTL_STANDALONE_TESTS
-
-#include "support/utils.h"
-
 #include <cstdlib>
 #include <iterator>
+
+#include "support/utils.h"
 
 using namespace TestUtils;
 
@@ -31,7 +27,7 @@ struct test_partition_copy
               typename UnaryOp>
     void
     operator()(Policy&& exec, InputIterator first, InputIterator last, OutputIterator true_first,
-               OutputIterator true_last, OutputIterator2 false_first, OutputIterator2 false_last, UnaryOp unary_op)
+               OutputIterator, OutputIterator2 false_first, OutputIterator2, UnaryOp unary_op)
     {
 
         auto actual_ret = std::partition_copy(exec, first, last, true_first, false_first, unary_op);
@@ -44,7 +40,7 @@ struct test_partition_copy
     }
 
     //dummy specialization by iterator type and policy type, in case of broken configuration
-#if __PSTL_ICC_1800_TEST_MONOTONIC_RELEASE_64_BROKEN
+#if _PSTL_ICC_1800_TEST_MONOTONIC_RELEASE_64_BROKEN
     template <typename InputIterator, typename OutputIterator, typename OutputIterator2, typename UnaryOp>
     void
     operator()(pstl::execution::unsequenced_policy, std::reverse_iterator<InputIterator> first,
@@ -106,8 +102,8 @@ main()
 {
     test<int32_t>([](const int32_t value) { return value % 2; });
 
-#if !__PSTL_ICC_16_17_TEST_REDUCTION_RELEASE_BROKEN
-    test<int32_t>([](const int32_t value) { return true; });
+#if !_PSTL_ICC_16_17_TEST_REDUCTION_RELEASE_BROKEN
+    test<int32_t>([](const int32_t) { return true; });
 #endif
 
     test<float64_t>([](const float64_t value) { return value > 2 << 6; });

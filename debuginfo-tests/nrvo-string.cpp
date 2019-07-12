@@ -7,6 +7,7 @@
 // RUN: %test_debuginfo %s %t.out
 //
 // PR34513
+void __attribute__((noinline)) stop() {}
 
 struct string {
   string() {}
@@ -17,11 +18,34 @@ struct string {
 string get_string() {
   string unused;
   string result = 3;
-// DEBUGGER: break 21
+  // DEBUGGER: break 22
+  stop();
   return result;
 }
-int main() { get_string(); }
+void some_function(int) {}
+struct string2 {
+  string2() = default;
+  string2(string2 &&other) { i = other.i; }
+  int i;
+};
+string2 get_string2() {
+  string2 result;
+  result.i = 5;
+  some_function(result.i);
+  // Test that the debugger can get the value of result after another
+  // function is called.
+  // DEBUGGER: break 38
+  stop();
+  return result;
+}
+int main() {
+  get_string();
+  get_string2();
+}
 
 // DEBUGGER: r
 // DEBUGGER: print result.i
 // CHECK:  = 3
+// DEBUGGER: c
+// DEBUGGER: print result.i
+// CHECK:  = 5

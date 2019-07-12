@@ -7,18 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: c++98, c++03, c++11, c++14
+
 #include "support/pstl_test_config.h"
 
-#ifdef PSTL_STANDALONE_TESTS
-
 #include <cmath>
-
-#include "pstl/execution"
-#include "pstl/algorithm"
-#else
 #include <execution>
 #include <algorithm>
-#endif // PSTL_STANDALONE_TESTS
 
 #include "support/utils.h"
 
@@ -62,8 +57,8 @@ struct test_one_policy
 
     template <typename Policy, typename InputIterator1, typename InputIterator2, typename Compare>
     typename std::enable_if<TestUtils::isReverse<InputIterator1>::value, void>::type
-    operator()(Policy&& exec, InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, InputIterator2 last2,
-               Compare comp)
+    operator()(Policy&&, InputIterator1, InputIterator1, InputIterator2, InputIterator2,
+               Compare)
     {
     }
 };

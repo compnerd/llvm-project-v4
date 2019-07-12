@@ -7,18 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: c++98, c++03, c++11, c++14
+
 #include "support/pstl_test_config.h"
 
-#ifdef PSTL_STANDALONE_TESTS
-#include <algorithm>
 #include <iostream>
-#include "pstl/execution"
-#include "pstl/algorithm"
-
-#else
 #include <execution>
 #include <algorithm>
-#endif // PSTL_STANDALONE_TESTS
 
 #include "support/utils.h"
 
@@ -73,8 +68,8 @@ is_equal(const T& x, const T& y)
 
 struct test_one_policy
 {
-#if __PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN ||                                                            \
-    __PSTL_ICC_16_VC14_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN // dummy specialization by policy type, in case of broken configuration
+#if _PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN ||                                                            \
+    _PSTL_ICC_16_VC14_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN // dummy specialization by policy type, in case of broken configuration
     template <typename Iterator1, typename Size, typename Generator1, typename Generator2, typename Compare>
     typename std::enable_if<is_same_iterator_category<Iterator1, std::random_access_iterator_tag>::value, void>::type
     operator()(pstl::execution::unsequenced_policy, Iterator1 first1, Iterator1 last1, Iterator1 first2,
@@ -118,8 +113,8 @@ struct test_one_policy
     template <typename Policy, typename Iterator1, typename Size, typename Generator1, typename Generator2,
               typename Compare>
     typename std::enable_if<!is_same_iterator_category<Iterator1, std::random_access_iterator_tag>::value, void>::type
-    operator()(Policy&& exec, Iterator1 first1, Iterator1 last1, Iterator1 first2, Iterator1 last2, Size n, Size m,
-               Generator1 generator1, Generator2 generator2, Compare comp)
+    operator()(Policy&&, Iterator1, Iterator1, Iterator1, Iterator1, Size, Size,
+               Generator1, Generator2, Compare)
     {
     }
 };
