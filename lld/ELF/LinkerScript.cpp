@@ -86,7 +86,7 @@ OutputSection *LinkerScript::createOutputSection(StringRef Name,
     // There was a forward reference.
     Sec = SecRef;
   } else {
-    Sec = make<OutputSection>(Name, SHT_PROGBITS, 0);
+    Sec = make<OutputSection>(Name, SHT_NOBITS, 0);
     if (!SecRef)
       SecRef = Sec;
   }
@@ -135,6 +135,8 @@ void LinkerScript::setDot(Expr E, const Twine &Loc, bool InSec) {
   // Update to location counter means update to section size.
   if (InSec)
     expandOutputSection(Val - Dot);
+  else
+    expandMemoryRegions(Val - Dot);
 
   Dot = Val;
 }
@@ -164,9 +166,13 @@ void LinkerScript::addSymbol(SymbolAssignment *Cmd) {
     return;
 
   // Define a symbol.
+  Symbol *Sym;
+  uint8_t Visibility = Cmd->Hidden ? STV_HIDDEN : STV_DEFAULT;
+  std::tie(Sym, std::ignore) = Symtab->insert(Cmd->Name, Visibility,
+                                              /*CanOmitFromDynSym*/ false,
+                                              /*File*/ nullptr);
   ExprValue Value = Cmd->Expression();
   SectionBase *Sec = Value.isAbsolute() ? nullptr : Value.Sec;
-  uint8_t Visibility = Cmd->Hidden ? STV_HIDDEN : STV_DEFAULT;
 
   // When this function is called, section addresses have not been
   // fixed yet. So, we may or may not know the value of the RHS
@@ -181,12 +187,8 @@ void LinkerScript::addSymbol(SymbolAssignment *Cmd) {
   // write expressions like this: `alignment = 16; . = ALIGN(., alignment)`.
   uint64_t SymValue = Value.Sec ? 0 : Value.getValue();
 
-  Defined New(nullptr, Cmd->Name, STB_GLOBAL, Visibility, STT_NOTYPE, SymValue,
-              0, Sec);
-
-  Symbol *Sym = Symtab->insert(Cmd->Name);
-  Sym->mergeProperties(New);
-  Sym->replace(New);
+  replaceSymbol<Defined>(Sym, nullptr, Cmd->Name, STB_GLOBAL, Visibility,
+                         STT_NOTYPE, SymValue, 0, Sec);
   Cmd->Sym = cast<Defined>(Sym);
 }
 
@@ -196,15 +198,14 @@ static void declareSymbol(SymbolAssignment *Cmd) {
   if (!shouldDefineSym(Cmd))
     return;
 
-  uint8_t Visibility = Cmd->Hidden ? STV_HIDDEN : STV_DEFAULT;
-  Defined New(nullptr, Cmd->Name, STB_GLOBAL, Visibility, STT_NOTYPE, 0, 0,
-              nullptr);
-
   // We can't calculate final value right now.
-  Symbol *Sym = Symtab->insert(Cmd->Name);
-  Sym->mergeProperties(New);
-  Sym->replace(New);
-
+  Symbol *Sym;
+  uint8_t Visibility = Cmd->Hidden ? STV_HIDDEN : STV_DEFAULT;
+  std::tie(Sym, std::ignore) = Symtab->insert(Cmd->Name, Visibility,
+                                              /*CanOmitFromDynSym*/ false,
+                                              /*File*/ nullptr);
+  replaceSymbol<Defined>(Sym, nullptr, Cmd->Name, STB_GLOBAL, Visibility,
+                         STT_NOTYPE, 0, 0, nullptr);
   Cmd->Sym = cast<Defined>(Sym);
   Cmd->Provide = false;
   Sym->ScriptDefined = true;
@@ -344,7 +345,7 @@ static bool matchConstraints(ArrayRef<InputSection *> Sections,
 static void sortSections(MutableArrayRef<InputSection *> Vec,
                          SortSectionPolicy K) {
   if (K != SortSectionPolicy::Default && K != SortSectionPolicy::None)
-    llvm::stable_sort(Vec, getComparator(K));
+    std::stable_sort(Vec.begin(), Vec.end(), getComparator(K));
 }
 
 // Sort sections as instructed by SORT-family commands and --sort-section
@@ -380,7 +381,7 @@ LinkerScript::computeInputSections(const InputSectionDescription *Cmd) {
     size_t SizeBefore = Ret.size();
 
     for (InputSectionBase *Sec : InputSections) {
-      if (!Sec->isLive() || Sec->Assigned)
+      if (!Sec->Live || Sec->Assigned)
         continue;
 
       // For -emit-relocs we have to ignore entries like
@@ -413,19 +414,19 @@ LinkerScript::computeInputSections(const InputSectionDescription *Cmd) {
 
 void LinkerScript::discard(ArrayRef<InputSection *> V) {
   for (InputSection *S : V) {
-    if (S == In.ShStrTab || S == Main->RelaDyn || S == Main->RelrDyn)
+    if (S == In.ShStrTab || S == In.RelaDyn || S == In.RelrDyn)
       error("discarding " + S->Name + " section is not allowed");
 
     // You can discard .hash and .gnu.hash sections by linker scripts. Since
     // they are synthesized sections, we need to handle them differently than
     // other regular sections.
-    if (S == Main->GnuHashTab)
-      Main->GnuHashTab = nullptr;
-    if (S == Main->HashTab)
-      Main->HashTab = nullptr;
+    if (S == In.GnuHashTab)
+      In.GnuHashTab = nullptr;
+    if (S == In.HashTab)
+      In.HashTab = nullptr;
 
     S->Assigned = false;
-    S->markDead();
+    S->Live = false;
     discard(S->DependentSections);
   }
 }
@@ -543,9 +544,8 @@ static OutputSection *createSection(InputSectionBase *IS,
   return Sec;
 }
 
-static OutputSection *
-addInputSec(StringMap<TinyPtrVector<OutputSection *>> &Map,
-            InputSectionBase *IS, StringRef OutsecName) {
+static OutputSection *addInputSec(StringMap<OutputSection *> &Map,
+                                  InputSectionBase *IS, StringRef OutsecName) {
   // Sections with SHT_GROUP or SHF_GROUP attributes reach here only when the -r
   // option is given. A section with SHT_GROUP defines a "section group", and
   // its members have SHF_GROUP attribute. Usually these flags have already been
@@ -624,26 +624,23 @@ addInputSec(StringMap<TinyPtrVector<OutputSection *>> &Map,
   //
   // Given the above issues, we instead merge sections by name and error on
   // incompatible types and flags.
-  TinyPtrVector<OutputSection *> &V = Map[OutsecName];
-  for (OutputSection *Sec : V) {
-    if (Sec->Partition != IS->Partition)
-      continue;
+  OutputSection *&Sec = Map[OutsecName];
+  if (Sec) {
     Sec->addSection(cast<InputSection>(IS));
     return nullptr;
   }
 
-  OutputSection *Sec = createSection(IS, OutsecName);
-  V.push_back(Sec);
+  Sec = createSection(IS, OutsecName);
   return Sec;
 }
 
 // Add sections that didn't match any sections command.
 void LinkerScript::addOrphanSections() {
-  StringMap<TinyPtrVector<OutputSection *>> Map;
+  StringMap<OutputSection *> Map;
   std::vector<OutputSection *> V;
 
   auto Add = [&](InputSectionBase *S) {
-    if (!S->isLive() || S->Parent)
+    if (!S->Live || S->Parent)
       return;
 
     StringRef Name = getOutputSectionName(S);
@@ -763,14 +760,13 @@ static OutputSection *findFirstSection(PhdrEntry *Load) {
 void LinkerScript::assignOffsets(OutputSection *Sec) {
   if (!(Sec->Flags & SHF_ALLOC))
     Dot = 0;
+  else if (Sec->AddrExpr)
+    setDot(Sec->AddrExpr, Sec->Location, false);
 
   Ctx->MemRegion = Sec->MemRegion;
   Ctx->LMARegion = Sec->LMARegion;
   if (Ctx->MemRegion)
     Dot = Ctx->MemRegion->CurPos;
-
-  if ((Sec->Flags & SHF_ALLOC) && Sec->AddrExpr)
-    setDot(Sec->AddrExpr, Sec->Location, false);
 
   switchTo(Sec);
 
@@ -823,24 +819,15 @@ void LinkerScript::assignOffsets(OutputSection *Sec) {
 }
 
 static bool isDiscardable(OutputSection &Sec) {
-  if (Sec.Name == "/DISCARD/")
-    return true;
-
   // We do not remove empty sections that are explicitly
   // assigned to any segment.
   if (!Sec.Phdrs.empty())
     return false;
 
-  // We do not want to remove OutputSections with expressions that reference
-  // symbols even if the OutputSection is empty. We want to ensure that the
-  // expressions can be evaluated and report an error if they cannot.
+  // We do not want to remove sections that reference symbols in address and
+  // other expressions. We add script symbols as undefined, and want to ensure
+  // all of them are defined in the output, hence have to keep them.
   if (Sec.ExpressionsUseSymbols)
-    return false;
-
-  // OutputSections may be referenced by name in ADDR and LOADADDR expressions,
-  // as an empty Section can has a valid VMA and LMA we keep the OutputSection
-  // to maintain the integrity of the other Expression.
-  if (Sec.UsedInExpression)
     return false;
 
   for (BaseCommand *Base : Sec.SectionCommands) {
@@ -889,23 +876,21 @@ void LinkerScript::adjustSectionsBeforeSorting() {
       Sec->Alignment =
           std::max<uint32_t>(Sec->Alignment, Sec->AlignExpr().getValue());
 
-    // The input section might have been removed (if it was an empty synthetic
-    // section), but we at least know the flags.
-    if (Sec->HasInputSections)
+    // A live output section means that some input section was added to it. It
+    // might have been removed (if it was empty synthetic section), but we at
+    // least know the flags.
+    if (Sec->Live)
       Flags = Sec->Flags;
 
     // We do not want to keep any special flags for output section
     // in case it is empty.
     bool IsEmpty = getInputSections(Sec).empty();
     if (IsEmpty)
-      Sec->Flags = Flags & ((Sec->NonAlloc ? 0 : (uint64_t)SHF_ALLOC) |
-                            SHF_WRITE | SHF_EXECINSTR);
+      Sec->Flags = Flags & (SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR);
 
     if (IsEmpty && isDiscardable(*Sec)) {
-      Sec->markDead();
+      Sec->Live = false;
       Cmd = nullptr;
-    } else if (!Sec->isLive()) {
-      Sec->markLive();
     }
   }
 
@@ -999,10 +984,8 @@ void LinkerScript::allocateHeaders(std::vector<PhdrEntry *> &Phdrs) {
       llvm::any_of(PhdrsCommands, [](const PhdrsCommand &Cmd) {
         return Cmd.HasPhdrs || Cmd.HasFilehdr;
       });
-  bool Paged = !Config->Omagic && !Config->Nmagic;
   uint64_t HeaderSize = getHeaderSize();
-  if ((Paged || HasExplicitHeaders) &&
-      HeaderSize <= Min - computeBase(Min, HasExplicitHeaders)) {
+  if (HeaderSize <= Min - computeBase(Min, HasExplicitHeaders)) {
     Min = alignDown(Min - HeaderSize, Config->MaxPageSize);
     Out::ElfHeader->Addr = Min;
     Out::ProgramHeaders->Addr = Min + Out::ElfHeader->Size;

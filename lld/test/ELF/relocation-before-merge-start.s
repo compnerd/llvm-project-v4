@@ -4,6 +4,6 @@
 // CHECK: relocation-before-merge-start.s.tmp.o:(.foo): offset is outside the section
 
 .data
-.quad .foo - 1
+.long .foo - 1
 .section	.foo,"aM",@progbits,4
 .quad 0

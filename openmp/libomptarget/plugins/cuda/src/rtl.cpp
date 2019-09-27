@@ -111,9 +111,6 @@ public:
   int EnvNumTeams;
   int EnvTeamLimit;
 
-  // OpenMP Requires Flags
-  int64_t RequiresFlags;
-
   //static int EnvNumThreads;
   static const int HardTeamLimit = 1<<16; // 64k
   static const int HardThreadLimit = 1024;
@@ -230,9 +227,6 @@ public:
     } else {
       EnvNumTeams = -1;
     }
-
-    // Default state.
-    RequiresFlags = OMP_REQ_UNDEFINED;
   }
 
   ~RTLDeviceInfoTy() {
@@ -269,12 +263,6 @@ int32_t __tgt_rtl_is_valid_binary(__tgt_device_image *image) {
 }
 
 int32_t __tgt_rtl_number_of_devices() { return DeviceInfo.NumberOfDevices; }
-
-int64_t __tgt_rtl_init_requires(int64_t RequiresFlags) {
-  DP("Init requires flags to %ld\n", RequiresFlags);
-  DeviceInfo.RequiresFlags = RequiresFlags;
-  return RequiresFlags;
-}
 
 int32_t __tgt_rtl_init_device(int32_t device_id) {
 
@@ -447,26 +435,6 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
       DP("Entry point " DPxMOD " maps to global %s (" DPxMOD ")\n",
           DPxPTR(e - HostBegin), e->name, DPxPTR(cuptr));
       entry.addr = (void *)cuptr;
-
-      // Note: In the current implementation declare target variables
-      // can either be link or to. This means that once unified
-      // memory is activated via the requires directive, the variable
-      // can be used directly from the host in both cases.
-      // TODO: when variables types other than to or link are added,
-      // the below condition should be changed to explicitely
-      // check for to and link variables types:
-      //  (DeviceInfo.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY &&
-      //   (e->flags & OMP_DECLARE_TARGET_LINK ||
-      //    e->flags == OMP_DECLARE_TARGET_TO))
-      if (DeviceInfo.RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY) {
-        // If unified memory is present any target link or to variables
-        // can access host addresses directly. There is no longer a
-        // need for device copies.
-        cuMemcpyHtoD(cuptr, e->addr, sizeof(void *));
-        DP("Copy linked variable host address (" DPxMOD ")"
-           "to device address (" DPxMOD ")\n",
-          DPxPTR(*((void**)e->addr)), DPxPTR(cuptr));
-      }
 
       DeviceInfo.addOffloadEntry(device_id, entry);
 

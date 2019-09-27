@@ -4,6 +4,6 @@
 // CHECK: relocation-past-merge-end.s.tmp.o:(.foo): offset is outside the section
 
 .data
-.quad .foo + 10
+.long .foo + 10
 .section	.foo,"aM",@progbits,4
 .quad 0

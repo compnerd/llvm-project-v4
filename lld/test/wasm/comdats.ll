@@ -6,11 +6,11 @@
 
 target triple = "wasm32-unknown-unknown"
 
-declare i32 @comdatFn()
+declare i32 @inlineFn()
 
-define void @_start() {
+define void @_start() local_unnamed_addr {
 entry:
-  %call = call i32 @comdatFn()
+  %call = call i32 @inlineFn()
   ret void
 }
 
@@ -27,25 +27,43 @@ entry:
 ; CHECK-NEXT:        Mutable:         false
 ; CHECK-NEXT:        InitExpr:
 ; CHECK-NEXT:          Opcode:          I32_CONST
+; CHECK-NEXT:          Value:           66576
+; CHECK-NEXT:      - Index:           2
+; CHECK-NEXT:        Type:            I32
+; CHECK-NEXT:        Mutable:         false
+; CHECK-NEXT:        InitExpr:
+; CHECK-NEXT:          Opcode:          I32_CONST
+; CHECK-NEXT:          Value:           1027
+; CHECK-NEXT:      - Index:           3
+; CHECK-NEXT:        Type:            I32
+; CHECK-NEXT:        Mutable:         false
+; CHECK-NEXT:        InitExpr:
+; CHECK-NEXT:          Opcode:          I32_CONST
 ; CHECK-NEXT:          Value:           1024
 ; CHECK-NEXT:  - Type:            EXPORT
 ; CHECK-NEXT:    Exports:
 ; CHECK-NEXT:      - Name:            memory
 ; CHECK-NEXT:        Kind:            MEMORY
 ; CHECK-NEXT:        Index:           0
+; CHECK-NEXT:      - Name:            __heap_base
+; CHECK-NEXT:        Kind:            GLOBAL
+; CHECK-NEXT:        Index:           1
+; CHECK-NEXT:      - Name:            __data_end
+; CHECK-NEXT:        Kind:            GLOBAL
+; CHECK-NEXT:        Index:           2
 ; CHECK-NEXT:      - Name:            _start
 ; CHECK-NEXT:        Kind:            FUNCTION
 ; CHECK-NEXT:        Index:           0
-; CHECK-NEXT:      - Name:            comdatFn
+; CHECK-NEXT:      - Name:            inlineFn
 ; CHECK-NEXT:        Kind:            FUNCTION
 ; CHECK-NEXT:        Index:           1
 ; CHECK-NEXT:      - Name:            constantData
 ; CHECK-NEXT:        Kind:            GLOBAL
-; CHECK-NEXT:        Index:           1
-; CHECK-NEXT:      - Name:            callComdatFn1
+; CHECK-NEXT:        Index:           3
+; CHECK-NEXT:      - Name:            callInline1
 ; CHECK-NEXT:        Kind:            FUNCTION
 ; CHECK-NEXT:        Index:           2
-; CHECK-NEXT:      - Name:            callComdatFn2
+; CHECK-NEXT:      - Name:            callInline2
 ; CHECK-NEXT:        Kind:            FUNCTION
 ; CHECK-NEXT:        Index:           3
 ; CHECK-NEXT:  - Type:            ELEM

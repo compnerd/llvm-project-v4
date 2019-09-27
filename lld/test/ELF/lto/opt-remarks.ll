@@ -11,9 +11,6 @@
 ; RUN: ld.lld --opt-remarks-filename %t1.yaml --opt-remarks-passes inline %t.o \
 ; RUN: -o /dev/null -shared
 ; RUN: cat %t1.yaml | FileCheck %s -check-prefix=YAML-PASSES
-; RUN: ld.lld --opt-remarks-filename %t1.yaml --opt-remarks-format yaml %t.o \
-; RUN: -o /dev/null -shared
-; RUN: cat %t.yaml | FileCheck %s -check-prefix=YAML
 
 ; Check that @tinkywinky is inlined after optimizations.
 ; CHECK-LABEL: define i32 @main

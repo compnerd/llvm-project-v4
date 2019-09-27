@@ -82,7 +82,6 @@ public:
 
       ModuleAnalysisManager MAM;
       PB.registerModuleAnalyses(MAM);
-      MAM.registerPass([&] { return FunctionAnalysisManagerModuleProxy(FAM); });
       ModulePassManager MPM;
       MPM.addPass(AlwaysInlinerPass());
       Module *M = F->getParent();

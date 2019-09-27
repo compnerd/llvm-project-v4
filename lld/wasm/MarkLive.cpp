@@ -52,11 +52,8 @@ void lld::wasm::markLive() {
     if (Sym == WasmSym::CallCtors) {
       for (const ObjFile *Obj : Symtab->ObjectFiles) {
         const WasmLinkingData &L = Obj->getWasmObj()->linkingData();
-        for (const WasmInitFunc &F : L.InitFunctions) {
-          auto* InitSym = Obj->getFunctionSymbol(F.Symbol);
-          if (!InitSym->isDiscarded())
-            Enqueue(InitSym);
-        }
+        for (const WasmInitFunc &F : L.InitFunctions)
+          Enqueue(Obj->getFunctionSymbol(F.Symbol));
       }
     }
   };

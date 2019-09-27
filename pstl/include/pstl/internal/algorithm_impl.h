@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef _PSTL_ALGORITHM_IMPL_H
-#define _PSTL_ALGORITHM_IMPL_H
+#ifndef __PSTL_algorithm_impl_H
+#define __PSTL_algorithm_impl_H
 
 #include <iterator>
 #include <type_traits>
@@ -19,10 +19,12 @@
 #include "execution_impl.h"
 #include "memory_impl.h"
 #include "parallel_backend_utils.h"
-#include "parallel_backend.h"
-#include "parallel_impl.h"
 #include "unseq_backend_simd.h"
 
+#if __PSTL_USE_PAR_POLICIES
+#    include "parallel_backend.h"
+#    include "parallel_impl.h"
+#endif
 
 namespace __pstl
 {
@@ -57,6 +59,7 @@ __pattern_any_of(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator 
     return __internal::__brick_any_of(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Pred, class _IsVector>
 bool
 __pattern_any_of(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Pred __pred,
@@ -69,6 +72,7 @@ __pattern_any_of(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIt
                                          });
     });
 }
+#endif
 
 // [alg.foreach]
 // for_each_n with no policy
@@ -111,6 +115,7 @@ __pattern_walk1(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator _
     __internal::__brick_walk1(__first, __last, __f, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Function, class _IsVector>
 void
 __pattern_walk1(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Function __f,
@@ -124,6 +129,7 @@ __pattern_walk1(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIte
                                       });
     });
 }
+#endif
 
 template <class _ExecutionPolicy, class _ForwardIterator, class _Brick>
 void
@@ -133,6 +139,7 @@ __pattern_walk_brick(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardItera
     __brick(__first, __last);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Brick>
 void
 __pattern_walk_brick(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Brick __brick,
@@ -143,6 +150,7 @@ __pattern_walk_brick(_ExecutionPolicy&& __exec, _ForwardIterator __first, _Forwa
                                       [__brick](_ForwardIterator __i, _ForwardIterator __j) { __brick(__i, __j); });
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // walk1_n
@@ -171,6 +179,7 @@ __pattern_walk1_n(_ExecutionPolicy&&, _ForwardIterator __first, _Size __n, _Func
     return __internal::__brick_walk1_n(__first, __n, __f, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Size, class _Function, class _IsVector>
 _RandomAccessIterator
 __pattern_walk1_n(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _Size __n, _Function __f,
@@ -181,6 +190,7 @@ __pattern_walk1_n(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _Siz
                                 std::true_type());
     return __first + __n;
 }
+#endif
 
 template <class _ExecutionPolicy, class _ForwardIterator, class _Size, class _Brick>
 _ForwardIterator
@@ -190,6 +200,7 @@ __pattern_walk_brick_n(_ExecutionPolicy&&, _ForwardIterator __first, _Size __n, 
     return __brick(__first, __n);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Size, class _Brick>
 _RandomAccessIterator
 __pattern_walk_brick_n(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _Size __n, _Brick __brick,
@@ -202,6 +213,7 @@ __pattern_walk_brick_n(_ExecutionPolicy&& __exec, _RandomAccessIterator __first,
         return __first + __n;
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // walk2 (pseudo)
@@ -252,6 +264,7 @@ __pattern_walk2(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIterator
     return __internal::__brick_walk2(__first1, __last1, __first2, __f, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _Function, class _IsVector>
 _ForwardIterator2
 __pattern_walk2(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _ForwardIterator1 __last1,
@@ -266,6 +279,7 @@ __pattern_walk2(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _ForwardI
         return __first2 + (__last1 - __first1);
     });
 }
+#endif
 
 template <class _ExecutionPolicy, class _ForwardIterator1, class _Size, class _ForwardIterator2, class _Function,
           class _IsVector>
@@ -294,6 +308,7 @@ __pattern_walk2_brick(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIt
     return __brick(__first1, __last1, __first2);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _RandomAccessIterator2, class _Brick>
 _RandomAccessIterator2
 __pattern_walk2_brick(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1, _RandomAccessIterator1 __last1,
@@ -308,7 +323,9 @@ __pattern_walk2_brick(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1
         return __first2 + (__last1 - __first1);
     });
 }
+#endif
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _Size, class _RandomAccessIterator2, class _Brick>
 _RandomAccessIterator2
 __pattern_walk2_brick_n(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1, _Size __n,
@@ -323,6 +340,7 @@ __pattern_walk2_brick_n(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __firs
         return __first2 + __n;
     });
 }
+#endif
 
 template <class _ExecutionPolicy, class _ForwardIterator1, class _Size, class _ForwardIterator2, class _Brick>
 _ForwardIterator2
@@ -364,6 +382,7 @@ __pattern_walk3(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIterator
     return __internal::__brick_walk3(__first1, __last1, __first2, __first3, __f, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _RandomAccessIterator2,
           class _RandomAccessIterator3, class _Function, class _IsVector>
 _RandomAccessIterator3
@@ -381,6 +400,7 @@ __pattern_walk3(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1, _Ran
         return __first3 + (__last1 - __first1);
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // equal
@@ -417,6 +437,7 @@ __pattern_equal(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIterator
     return __internal::__brick_equal(__first1, __last1, __first2, __last2, __p, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _RandomAccessIterator2, class _BinaryPredicate,
           class _IsVector>
 bool
@@ -436,6 +457,7 @@ __pattern_equal(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1, _Ran
             });
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // equal version for sequences with equal length
@@ -467,6 +489,7 @@ __pattern_equal(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIterator
     return __internal::__brick_equal(__first1, __last1, __first2, __p, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _RandomAccessIterator2, class _BinaryPredicate,
           class _IsVector>
 bool
@@ -482,6 +505,7 @@ __pattern_equal(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1, _Ran
             });
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // find_if
@@ -514,6 +538,7 @@ __pattern_find_if(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator
     return __internal::__brick_find_if(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Predicate, class _IsVector>
 _ForwardIterator
 __pattern_find_if(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Predicate __pred,
@@ -530,6 +555,7 @@ __pattern_find_if(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardI
             /*is_first=*/true);
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // find_end
@@ -599,18 +625,19 @@ _RandomAccessIterator
 __find_subrange(_RandomAccessIterator __first, _RandomAccessIterator __last, _RandomAccessIterator __global_last,
                 _Size __count, const _Tp& __value, _BinaryPredicate __pred, _IsVector __is_vector) noexcept
 {
-    if (static_cast<_Size>(__global_last - __first) < __count || __count < 1)
+    if (__global_last - __first < __count || __count < 1)
     {
         return __last; // According to the standard last shall be returned when count < 1
     }
 
+    auto __n = __global_last - __first;
     auto __unary_pred = __equal_value_by_pred<_Tp, _BinaryPredicate>(__value, __pred);
-    while (__first != __last && (static_cast<_Size>(__global_last - __first) >= __count))
+    while (__first != __last && (__global_last - __first >= __count))
     {
         __first = __internal::__brick_find_if(__first, __last, __unary_pred, __is_vector);
 
         // check that all of elements in [first+1, first+count) equal to value
-        if (__first != __last && (static_cast<_Size>(__global_last - __first) >= __count) &&
+        if (__first != __last && (__global_last - __first >= __count) &&
             !__internal::__brick_any_of(__first + 1, __first + __count,
                                         __not_pred<decltype(__unary_pred)>(__unary_pred), __is_vector))
         {
@@ -654,6 +681,7 @@ __pattern_find_end(_ExecutionPolicy&&, _ForwardIterator1 __first, _ForwardIterat
     return __internal::__brick_find_end(__first, __last, __s_first, __s_last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate,
           class _IsVector>
 _ForwardIterator1
@@ -680,6 +708,7 @@ __pattern_find_end(_ExecutionPolicy&& __exec, _ForwardIterator1 __first, _Forwar
         });
     }
 }
+#endif
 
 //------------------------------------------------------------------------
 // find_first_of
@@ -710,6 +739,7 @@ __pattern_find_first_of(_ExecutionPolicy&&, _ForwardIterator1 __first, _ForwardI
     return __internal::__brick_find_first_of(__first, __last, __s_first, __s_last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate,
           class _IsVector>
 _ForwardIterator1
@@ -726,6 +756,7 @@ __pattern_find_first_of(_ExecutionPolicy&& __exec, _ForwardIterator1 __first, _F
             std::less<typename std::iterator_traits<_ForwardIterator1>::difference_type>(), /*is_first=*/true);
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // search
@@ -756,6 +787,7 @@ __pattern_search(_ExecutionPolicy&&, _ForwardIterator1 __first, _ForwardIterator
     return __internal::__brick_search(__first, __last, __s_first, __s_last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate,
           class _IsVector>
 _ForwardIterator1
@@ -783,6 +815,7 @@ __pattern_search(_ExecutionPolicy&& __exec, _ForwardIterator1 __first, _ForwardI
         });
     }
 }
+#endif
 
 //------------------------------------------------------------------------
 // search_n
@@ -813,6 +846,7 @@ __pattern_search_n(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterato
     return __internal::__brick_search_n(__first, __last, __count, __value, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Size, class _Tp, class _BinaryPredicate,
           class _IsVector>
 _RandomAccessIterator
@@ -820,7 +854,7 @@ __pattern_search_n(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _Ra
                    _Size __count, const _Tp& __value, _BinaryPredicate __pred, _IsVector __is_vector,
                    /*is_parallel=*/std::true_type) noexcept
 {
-    if (static_cast<_Size>(__last - __first) == __count)
+    if (__last - __first == __count)
     {
         const bool __result = !__internal::__pattern_any_of(
             std::forward<_ExecutionPolicy>(__exec), __first, __last,
@@ -840,6 +874,7 @@ __pattern_search_n(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _Ra
         });
     }
 }
+#endif
 
 //------------------------------------------------------------------------
 // copy_n
@@ -939,7 +974,7 @@ _OutputIterator
 __brick_copy_if(_ForwardIterator __first, _ForwardIterator __last, _OutputIterator __result, _UnaryPredicate __pred,
                 /*vector=*/std::true_type) noexcept
 {
-#if (_PSTL_MONOTONIC_PRESENT)
+#if (__PSTL_MONOTONIC_PRESENT)
     return __unseq_backend::__simd_copy_if(__first, __last - __first, __result, __pred);
 #else
     return std::copy_if(__first, __last, __result, __pred);
@@ -998,7 +1033,7 @@ void
 __brick_copy_by_mask(_ForwardIterator __first, _ForwardIterator __last, _OutputIterator __result,
                      bool* __restrict __mask, _Assigner __assigner, /*vector=*/std::true_type) noexcept
 {
-#if (_PSTL_MONOTONIC_PRESENT)
+#if (__PSTL_MONOTONIC_PRESENT)
     __unseq_backend::__simd_copy_by_mask(__first, __last - __first, __result, __mask, __assigner);
 #else
     __internal::__brick_copy_by_mask(__first, __last, __result, __mask, __assigner, std::false_type());
@@ -1030,7 +1065,7 @@ void
 __brick_partition_by_mask(_RandomAccessIterator __first, _RandomAccessIterator __last, _OutputIterator1 __out_true,
                           _OutputIterator2 __out_false, bool* __mask, /*vector=*/std::true_type) noexcept
 {
-#if (_PSTL_MONOTONIC_PRESENT)
+#if (__PSTL_MONOTONIC_PRESENT)
     __unseq_backend::__simd_partition_by_mask(__first, __last - __first, __out_true, __out_false, __mask);
 #else
     __internal::__brick_partition_by_mask(__first, __last, __out_true, __out_false, __mask, std::false_type());
@@ -1045,6 +1080,7 @@ __pattern_copy_if(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator
     return __internal::__brick_copy_if(__first, __last, __result, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _OutputIterator, class _UnaryPredicate,
           class _IsVector>
 _OutputIterator
@@ -1079,6 +1115,7 @@ __pattern_copy_if(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _Ran
     // trivial sequence - use serial algorithm
     return __internal::__brick_copy_if(__first, __last, __result, __pred, __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // count
@@ -1107,6 +1144,7 @@ __pattern_count(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator _
     return __internal::__brick_count(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Predicate, class _IsVector>
 typename std::iterator_traits<_ForwardIterator>::difference_type
 __pattern_count(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Predicate __pred,
@@ -1122,6 +1160,7 @@ __pattern_count(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIte
             std::plus<_SizeType>());
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // unique
@@ -1140,7 +1179,7 @@ _ForwardIterator
 __brick_unique(_ForwardIterator __first, _ForwardIterator __last, _BinaryPredicate __pred,
                /*is_vector=*/std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::unique(__first, __last, __pred);
 }
 
@@ -1152,6 +1191,7 @@ __pattern_unique(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator 
     return __internal::__brick_unique(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 // That function is shared between two algorithms - remove_if (__pattern_remove_if) and unique (pattern unique). But a mask calculation is different.
 // So, a caller passes _CalcMask brick into remove_elements.
 template <class _ExecutionPolicy, class _ForwardIterator, class _CalcMask, class _IsVector>
@@ -1230,7 +1270,9 @@ __remove_elements(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardI
         return __first + __m;
     });
 }
+#endif
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _BinaryPredicate, class _IsVector>
 _ForwardIterator
 __pattern_unique(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _BinaryPredicate __pred,
@@ -1256,6 +1298,7 @@ __pattern_unique(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIt
         },
         __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // unique_copy
@@ -1274,7 +1317,7 @@ OutputIterator
 __brick_unique_copy(_RandomAccessIterator __first, _RandomAccessIterator __last, OutputIterator __result,
                     _BinaryPredicate __pred, /*vector=*/std::true_type) noexcept
 {
-#if (_PSTL_MONOTONIC_PRESENT)
+#if (__PSTL_MONOTONIC_PRESENT)
     return __unseq_backend::__simd_unique_copy(__first, __last - __first, __result, __pred);
 #else
     return std::unique_copy(__first, __last, __result, __pred);
@@ -1312,6 +1355,7 @@ __brick_calc_mask_2(_RandomAccessIterator __first, _RandomAccessIterator __last,
     return __unseq_backend::__simd_calc_mask_2(__first, __last - __first, __mask, __pred);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _OutputIterator, class _BinaryPredicate,
           class _IsVector>
 _OutputIterator
@@ -1361,6 +1405,7 @@ __pattern_unique_copy(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, 
     // trivial sequence - use serial algorithm
     return __internal::__brick_unique_copy(__first, __last, __result, __pred, __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // reverse
@@ -1423,6 +1468,7 @@ __pattern_reverse(_ExecutionPolicy&&, _BidirectionalIterator __first, _Bidirecti
     __internal::__brick_reverse(__first, __last, _is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _BidirectionalIterator, class _IsVector>
 void
 __pattern_reverse(_ExecutionPolicy&& __exec, _BidirectionalIterator __first, _BidirectionalIterator __last,
@@ -1434,6 +1480,7 @@ __pattern_reverse(_ExecutionPolicy&& __exec, _BidirectionalIterator __first, _Bi
             __internal::__brick_reverse(__inner_first, __inner_last, __last - (__inner_first - __first), __is_vector);
         });
 }
+#endif
 
 //------------------------------------------------------------------------
 // reverse_copy
@@ -1467,6 +1514,7 @@ __pattern_reverse_copy(_ExecutionPolicy&&, _BidirectionalIterator __first, _Bidi
     return __internal::__brick_reverse_copy(__first, __last, __d_first, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _BidirectionalIterator, class _OutputIterator, class _IsVector>
 _OutputIterator
 __pattern_reverse_copy(_ExecutionPolicy&& __exec, _BidirectionalIterator __first, _BidirectionalIterator __last,
@@ -1482,6 +1530,7 @@ __pattern_reverse_copy(_ExecutionPolicy&& __exec, _BidirectionalIterator __first
                                   });
     return __d_first + __len;
 }
+#endif
 
 //------------------------------------------------------------------------
 // rotate
@@ -1491,7 +1540,7 @@ _ForwardIterator
 __brick_rotate(_ForwardIterator __first, _ForwardIterator __middle, _ForwardIterator __last,
                /*is_vector=*/std::false_type) noexcept
 {
-#if _PSTL_CPP11_STD_ROTATE_BROKEN
+#if __PSTL_CPP11_STD_ROTATE_BROKEN
     std::rotate(__first, __middle, __last);
     return std::next(__first, std::distance(__middle, __last));
 #else
@@ -1548,6 +1597,7 @@ __pattern_rotate(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator 
     return __internal::__brick_rotate(__first, __middle, __last, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _IsVector>
 _ForwardIterator
 __pattern_rotate(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __middle,
@@ -1609,6 +1659,7 @@ __pattern_rotate(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIt
         });
     }
 }
+#endif
 
 //------------------------------------------------------------------------
 // rotate_copy
@@ -1639,6 +1690,7 @@ __pattern_rotate_copy(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIter
     return __internal::__brick_rotate_copy(__first, __middle, __last, __result, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _OutputIterator, class _IsVector>
 _OutputIterator
 __pattern_rotate_copy(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __middle,
@@ -1668,6 +1720,7 @@ __pattern_rotate_copy(_ExecutionPolicy&& __exec, _ForwardIterator __first, _Forw
         });
     return __result + (__last - __first);
 }
+#endif
 
 //------------------------------------------------------------------------
 // is_partitioned
@@ -1716,6 +1769,7 @@ __pattern_is_partitioned(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardI
     return __internal::__brick_is_partitioned(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _UnaryPredicate, class _IsVector>
 bool
 __pattern_is_partitioned(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last,
@@ -1812,6 +1866,7 @@ __pattern_is_partitioned(_ExecutionPolicy&& __exec, _ForwardIterator __first, _F
         });
     }
 }
+#endif
 
 //------------------------------------------------------------------------
 // partition
@@ -1830,7 +1885,7 @@ _ForwardIterator
 __brick_partition(_ForwardIterator __first, _ForwardIterator __last, _UnaryPredicate __pred,
                   /*is_vector=*/std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::partition(__first, __last, __pred);
 }
 
@@ -1842,6 +1897,7 @@ __pattern_partition(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterat
     return __internal::__brick_partition(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _UnaryPredicate, class _IsVector>
 _ForwardIterator
 __pattern_partition(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last,
@@ -1909,6 +1965,7 @@ __pattern_partition(_ExecutionPolicy&& __exec, _ForwardIterator __first, _Forwar
         return __result.__pivot;
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // stable_partition
@@ -1927,7 +1984,7 @@ _BidirectionalIterator
 __brick_stable_partition(_BidirectionalIterator __first, _BidirectionalIterator __last, _UnaryPredicate __pred,
                          /*__is_vector=*/std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::stable_partition(__first, __last, __pred);
 }
 
@@ -1940,6 +1997,7 @@ __pattern_stable_partition(_ExecutionPolicy&&, _BidirectionalIterator __first, _
     return __internal::__brick_stable_partition(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _BidirectionalIterator, class _UnaryPredicate, class _IsVector>
 _BidirectionalIterator
 __pattern_stable_partition(_ExecutionPolicy&& __exec, _BidirectionalIterator __first, _BidirectionalIterator __last,
@@ -1991,6 +2049,7 @@ __pattern_stable_partition(_ExecutionPolicy&& __exec, _BidirectionalIterator __f
         return __result.__pivot;
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // partition_copy
@@ -2009,7 +2068,7 @@ std::pair<_OutputIterator1, _OutputIterator2>
 __brick_partition_copy(_ForwardIterator __first, _ForwardIterator __last, _OutputIterator1 __out_true,
                        _OutputIterator2 __out_false, _UnaryPredicate __pred, /*is_vector=*/std::true_type) noexcept
 {
-#if (_PSTL_MONOTONIC_PRESENT)
+#if (__PSTL_MONOTONIC_PRESENT)
     return __unseq_backend::__simd_partition_copy(__first, __last - __first, __out_true, __out_false, __pred);
 #else
     return std::partition_copy(__first, __last, __out_true, __out_false, __pred);
@@ -2026,6 +2085,7 @@ __pattern_partition_copy(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardI
     return __internal::__brick_partition_copy(__first, __last, __out_true, __out_false, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _OutputIterator1, class _OutputIterator2,
           class _UnaryPredicate, class _IsVector>
 std::pair<_OutputIterator1, _OutputIterator2>
@@ -2064,6 +2124,7 @@ __pattern_partition_copy(_ExecutionPolicy&& __exec, _RandomAccessIterator __firs
     // trivial sequence - use serial algorithm
     return __internal::__brick_partition_copy(__first, __last, __out_true, __out_false, __pred, __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // sort
@@ -2078,6 +2139,7 @@ __pattern_sort(_ExecutionPolicy&&, _RandomAccessIterator __first, _RandomAccessI
     std::sort(__first, __last, __comp);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Compare, class _IsVector>
 void
 __pattern_sort(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp,
@@ -2086,9 +2148,11 @@ __pattern_sort(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _Random
     __internal::__except_handler([&]() {
         __par_backend::__parallel_stable_sort(std::forward<_ExecutionPolicy>(__exec), __first, __last, __comp,
                                               [](_RandomAccessIterator __first, _RandomAccessIterator __last,
-                                                 _Compare __comp) { std::sort(__first, __last, __comp); });
+                                                 _Compare __comp) { std::sort(__first, __last, __comp); },
+                                              __last - __first);
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // stable_sort
@@ -2102,6 +2166,7 @@ __pattern_stable_sort(_ExecutionPolicy&&, _RandomAccessIterator __first, _Random
     std::stable_sort(__first, __last, __comp);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Compare, class _IsVector>
 void
 __pattern_stable_sort(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _RandomAccessIterator __last,
@@ -2113,6 +2178,7 @@ __pattern_stable_sort(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, 
                                                  _Compare __comp) { std::stable_sort(__first, __last, __comp); });
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // partial_sort
@@ -2127,15 +2193,13 @@ __pattern_partial_sort(_ExecutionPolicy&&, _RandomAccessIterator __first, _Rando
     std::partial_sort(__first, __middle, __last, __comp);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Compare, class _IsVector>
 void
 __pattern_partial_sort(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _RandomAccessIterator __middle,
                        _RandomAccessIterator __last, _Compare __comp, _IsVector, /*is_parallel=*/std::true_type)
 {
     const auto __n = __middle - __first;
-    if(__n == 0)
-        return;
-
     __internal::__except_handler([&]() {
         __par_backend::__parallel_stable_sort(
             std::forward<_ExecutionPolicy>(__exec), __first, __last, __comp,
@@ -2148,6 +2212,7 @@ __pattern_partial_sort(_ExecutionPolicy&& __exec, _RandomAccessIterator __first,
             __n);
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // partial_sort_copy
@@ -2162,6 +2227,7 @@ __pattern_partial_sort_copy(_ExecutionPolicy&&, _ForwardIterator __first, _Forwa
     return std::partial_sort_copy(__first, __last, __d_first, __d_last, __comp);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _RandomAccessIterator, class _Compare, class _IsVector>
 _RandomAccessIterator
 __pattern_partial_sort_copy(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last,
@@ -2185,7 +2251,7 @@ __pattern_partial_sort_copy(_ExecutionPolicy&& __exec, _ForwardIterator __first,
                     _ForwardIterator __j1 = __first + (__j - __d_first);
 
                 // 1. Copy elements from input to output
-#    if !_PSTL_ICC_18_OMP_SIMD_BROKEN
+#    if !__PSTL_ICC_18_OMP_SIMD_BROKEN
                     __internal::__brick_copy(__i1, __j1, __i, __is_vector);
 #    else
                     std::copy(__i1, __j1, __i);
@@ -2230,6 +2296,7 @@ __pattern_partial_sort_copy(_ExecutionPolicy&& __exec, _ForwardIterator __first,
         }
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // adjacent_find
@@ -2245,7 +2312,7 @@ __brick_adjacent_find(_ForwardIterator __first, _ForwardIterator __last, _Binary
 template <class _ForwardIterator, class _BinaryPredicate>
 _ForwardIterator
 __brick_adjacent_find(_ForwardIterator __first, _ForwardIterator __last, _BinaryPredicate __pred,
-                      /* IsVector = */ std::false_type, bool) noexcept
+                      /* IsVector = */ std::false_type, bool __or_semantic) noexcept
 {
     return std::adjacent_find(__first, __last, __pred);
 }
@@ -2258,6 +2325,7 @@ __pattern_adjacent_find(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIt
     return __internal::__brick_adjacent_find(__first, __last, __pred, __is_vector, __or_semantic);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _BinaryPredicate, class _IsVector>
 _RandomAccessIterator
 __pattern_adjacent_find(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _RandomAccessIterator __last,
@@ -2303,6 +2371,7 @@ __pattern_adjacent_find(_ExecutionPolicy&& __exec, _RandomAccessIterator __first
         );
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // nth_element
@@ -2317,6 +2386,7 @@ __pattern_nth_element(_ExecutionPolicy&&, _RandomAccessIterator __first, _Random
     std::nth_element(__first, __nth, __last, __comp);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Compare, class _IsVector>
 void
 __pattern_nth_element(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _RandomAccessIterator __nth,
@@ -2363,6 +2433,7 @@ __pattern_nth_element(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, 
         }
     } while (__x != __nth);
 }
+#endif
 
 //------------------------------------------------------------------------
 // fill, fill_n
@@ -2391,6 +2462,7 @@ __pattern_fill(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterator __
     __internal::__brick_fill(__first, __last, __value, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Tp, class _IsVector>
 _ForwardIterator
 __pattern_fill(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, const _Tp& __value,
@@ -2404,6 +2476,7 @@ __pattern_fill(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIter
         return __last;
     });
 }
+#endif
 
 template <class _OutputIterator, class _Size, class _Tp>
 _OutputIterator
@@ -2463,6 +2536,7 @@ __pattern_generate(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterato
     __internal::__brick_generate(__first, __last, __g, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _Generator, class _IsVector>
 _ForwardIterator
 __pattern_generate(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Generator __g,
@@ -2476,6 +2550,7 @@ __pattern_generate(_ExecutionPolicy&& __exec, _ForwardIterator __first, _Forward
         return __last;
     });
 }
+#endif
 
 template <class OutputIterator, class Size, class _Generator>
 OutputIterator
@@ -2499,6 +2574,7 @@ __pattern_generate_n(_ExecutionPolicy&&, _OutputIterator __first, _Size __count,
     return __internal::__brick_generate_n(__first, __count, __g, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _OutputIterator, class _Size, class _Generator, class _IsVector>
 _OutputIterator
 __pattern_generate_n(_ExecutionPolicy&& __exec, _OutputIterator __first, _Size __count, _Generator __g,
@@ -2509,6 +2585,7 @@ __pattern_generate_n(_ExecutionPolicy&& __exec, _OutputIterator __first, _Size _
     return __internal::__pattern_generate(std::forward<_ExecutionPolicy>(__exec), __first, __first + __count, __g,
                                           std::true_type(), __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // remove
@@ -2527,7 +2604,7 @@ _RandomAccessIterator
 __brick_remove_if(_RandomAccessIterator __first, _RandomAccessIterator __last, _UnaryPredicate __pred,
                   /* __is_vector = */ std::true_type) noexcept
 {
-#if _PSTL_MONOTONIC_PRESENT
+#if __PSTL_MONOTONIC_PRESENT
     return __unseq_backend::__simd_remove_if(__first, __last - __first, __pred);
 #else
     return std::remove_if(__first, __last, __pred);
@@ -2542,6 +2619,7 @@ __pattern_remove_if(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIterat
     return __internal::__brick_remove_if(__first, __last, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator, class _UnaryPredicate, class _IsVector>
 _ForwardIterator
 __pattern_remove_if(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last,
@@ -2563,6 +2641,7 @@ __pattern_remove_if(_ExecutionPolicy&& __exec, _ForwardIterator __first, _Forwar
         },
         __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // merge
@@ -2583,7 +2662,7 @@ __brick_merge(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIte
               _ForwardIterator2 __last2, _OutputIterator __d_first, _Compare __comp,
               /* __is_vector = */ std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::merge(__first1, __last1, __first2, __last2, __d_first, __comp);
 }
 
@@ -2597,6 +2676,7 @@ __pattern_merge(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIterator
     return __internal::__brick_merge(__first1, __last1, __first2, __last2, __d_first, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _RandomAccessIterator2, class _OutputIterator,
           class _Compare, class _IsVector>
 _OutputIterator
@@ -2612,6 +2692,7 @@ __pattern_merge(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1, _Ran
         });
     return __d_first + (__last1 - __first1) + (__last2 - __first2);
 }
+#endif
 
 //------------------------------------------------------------------------
 // inplace_merge
@@ -2629,7 +2710,7 @@ void
 __brick_inplace_merge(_BidirectionalIterator __first, _BidirectionalIterator __middle, _BidirectionalIterator __last,
                       _Compare __comp, /* __is_vector = */ std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial")
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial")
     std::inplace_merge(__first, __middle, __last, __comp);
 }
 
@@ -2642,6 +2723,7 @@ __pattern_inplace_merge(_ExecutionPolicy&&, _BidirectionalIterator __first, _Bid
     __internal::__brick_inplace_merge(__first, __middle, __last, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _BidirectionalIterator, class _Compare, class _IsVector>
 void
 __pattern_inplace_merge(_ExecutionPolicy&& __exec, _BidirectionalIterator __first, _BidirectionalIterator __middle,
@@ -2666,19 +2748,24 @@ __pattern_inplace_merge(_ExecutionPolicy&& __exec, _BidirectionalIterator __firs
             return __internal::__brick_uninitialized_move(__first1, __last1, __first2, _IsVector());
         };
 
-        __par_backend::__parallel_merge(std::forward<_ExecutionPolicy>(__exec), __first, __middle, __middle, __last, __r,
-            __comp, [__n, __move_values, __move_sequences](_BidirectionalIterator __f1, _BidirectionalIterator __l1,
-            _BidirectionalIterator __f2, _BidirectionalIterator __l2, _Tp* __f3,_Compare __comp) {
-                (__par_backend::__serial_move_merge(__n))(__f1, __l1, __f2, __l2, __f3, __comp, __move_values, __move_values, __move_sequences,
-                __move_sequences);
+        __par_backend::__parallel_merge(
+            std::forward<_ExecutionPolicy>(__exec), __first, __middle, __middle, __last, __r, __comp,
+            [__n, __move_values, __move_sequences](_BidirectionalIterator __f1, _BidirectionalIterator __l1,
+                                                   _BidirectionalIterator __f2, _BidirectionalIterator __l2, _Tp* __f3,
+                                                   _Compare __comp) {
+                auto __func = __par_backend::__serial_move_merge<decltype(__move_values), decltype(__move_sequences)>(
+                    __n, __move_values, __move_sequences);
+                __func(__f1, __l1, __f2, __l2, __f3, __comp);
                 return __f3 + (__l1 - __f1) + (__l2 - __f2);
             });
-            __par_backend::__parallel_for(std::forward<_ExecutionPolicy>(__exec), __r, __r + __n,
-                [__r, __first, __is_vector](_Tp* __i, _Tp* __j) {
-                    __internal::__brick_move(__i, __j, __first + (__i - __r), __is_vector);
-            });
+
+        __par_backend::__parallel_for(std::forward<_ExecutionPolicy>(__exec), __r, __r + __n,
+                                      [__r, __first, __is_vector](_Tp* __i, _Tp* __j) {
+                                          __internal::__brick_move(__i, __j, __first + (__i - __r), __is_vector);
+                                      });
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // includes
@@ -2686,17 +2773,18 @@ __pattern_inplace_merge(_ExecutionPolicy&& __exec, _BidirectionalIterator __firs
 
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _Compare, class _IsVector>
 bool
-__pattern_includes(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIterator1 __last1,
+__pattern_includes(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _ForwardIterator1 __last1,
                    _ForwardIterator2 __first2, _ForwardIterator2 __last2, _Compare __comp, _IsVector,
                    /*is_parallel=*/std::false_type) noexcept
 {
     return std::includes(__first1, __last1, __first2, __last2, __comp);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _Compare, class _IsVector>
 bool
 __pattern_includes(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _ForwardIterator1 __last1,
-                   _ForwardIterator2 __first2, _ForwardIterator2 __last2, _Compare __comp, _IsVector,
+                   _ForwardIterator2 __first2, _ForwardIterator2 __last2, _Compare __comp, _IsVector __is_vector,
                    /*is_parallel=*/std::true_type)
 {
     if (__first2 >= __last2)
@@ -2747,9 +2835,11 @@ __pattern_includes(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _Forwa
             });
     });
 }
+#endif
 
 constexpr auto __set_algo_cut_off = 1000;
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _OutputIterator,
           class _Compare, class _IsVector, class _SizeFunction, class _SetOP>
 _OutputIterator
@@ -2758,7 +2848,7 @@ __parallel_set_op(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _Forwar
                   _SizeFunction __size_func, _SetOP __set_op, _IsVector __is_vector)
 {
     typedef typename std::iterator_traits<_ForwardIterator1>::difference_type _DifferenceType;
-    typedef typename std::iterator_traits<_OutputIterator>::value_type _Tp;
+    typedef typename std::iterator_traits<_OutputIterator>::value_type _T;
 
     struct _SetRange
     {
@@ -2773,7 +2863,7 @@ __parallel_set_op(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _Forwar
     const _DifferenceType __n1 = __last1 - __first1;
     const _DifferenceType __n2 = __last2 - __first2;
 
-    __par_backend::__buffer<_Tp> __buf(__size_func(__n1, __n2));
+    __par_backend::__buffer<_T> __buf(__size_func(__n1, __n2));
 
     return __internal::__except_handler([&__exec, __n1, __first1, __last1, __first2, __last2, __result, __is_vector,
                                          __comp, __size_func, __set_op, &__buf]() {
@@ -2838,7 +2928,9 @@ __parallel_set_op(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _Forwar
         return __result + __m;
     });
 }
+#endif
 
+#if __PSTL_USE_PAR_POLICIES
 //a shared parallel pattern for '__pattern_set_union' and '__pattern_set_symmetric_difference'
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _OutputIterator,
           class _Compare, class _SetUnionOp, class _IsVector>
@@ -2954,6 +3046,7 @@ __parallel_set_union_op(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _
         std::forward<_ExecutionPolicy>(__exec), __first1, __last1, __first2, __last2, __result, __comp,
         [](_DifferenceType __n, _DifferenceType __m) { return __n + __m; }, __set_union_op, __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // set_union
@@ -2974,7 +3067,7 @@ __brick_set_union(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _Forwar
                   _ForwardIterator2 __last2, _OutputIterator __result, _Compare __comp,
                   /*__is_vector=*/std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::set_union(__first1, __last1, __first2, __last2, __result, __comp);
 }
 
@@ -2989,6 +3082,7 @@ __pattern_set_union(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardIter
     return __internal::__brick_set_union(__first1, __last1, __first2, __last2, __result, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _OutputIterator,
           class _Compare, class _IsVector>
 _OutputIterator
@@ -3004,14 +3098,15 @@ __pattern_set_union(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _Forw
     if (__n1 + __n2 <= __set_algo_cut_off)
         return std::set_union(__first1, __last1, __first2, __last2, __result, __comp);
 
-    typedef typename std::iterator_traits<_OutputIterator>::value_type _Tp;
+    typedef typename std::iterator_traits<_OutputIterator>::value_type _T;
     return __internal::__parallel_set_union_op(
         std::forward<_ExecutionPolicy>(__exec), __first1, __last1, __first2, __last2, __result, __comp,
         [](_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2, _ForwardIterator2 __last2,
-           _Tp* __result,
+           _T* __result,
            _Compare __comp) { return std::set_union(__first1, __last1, __first2, __last2, __result, __comp); },
         __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // set_intersection
@@ -3032,7 +3127,7 @@ __brick_set_intersection(_ForwardIterator1 __first1, _ForwardIterator1 __last1, 
                          _ForwardIterator2 __last2, _OutputIterator __result, _Compare __comp,
                          /*__is_vector=*/std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::set_intersection(__first1, __last1, __first2, __last2, __result, __comp);
 }
 
@@ -3046,6 +3141,7 @@ __pattern_set_intersection(_ExecutionPolicy&&, _ForwardIterator1 __first1, _Forw
     return __internal::__brick_set_intersection(__first1, __last1, __first2, __last2, __result, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _OutputIterator,
           class _Compare, class _IsVector>
 _OutputIterator
@@ -3053,7 +3149,7 @@ __pattern_set_intersection(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1
                            _ForwardIterator2 __first2, _ForwardIterator2 __last2, _OutputIterator __result,
                            _Compare __comp, _IsVector __is_vector, /*is_parallel=*/std::true_type)
 {
-    typedef typename std::iterator_traits<_OutputIterator>::value_type _Tp;
+    typedef typename std::iterator_traits<_OutputIterator>::value_type _T;
     typedef typename std::iterator_traits<_ForwardIterator1>::difference_type _DifferenceType;
 
     const auto __n1 = __last1 - __first1;
@@ -3083,7 +3179,7 @@ __pattern_set_intersection(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1
             std::forward<_ExecutionPolicy>(__exec), __left_bound_seq_1, __last1, __first2, __last2, __result, __comp,
             [](_DifferenceType __n, _DifferenceType __m) { return std::min(__n, __m); },
             [](_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2,
-               _ForwardIterator2 __last2, _Tp* __result, _Compare __comp) {
+               _ForwardIterator2 __last2, _T* __result, _Compare __comp) {
                 return std::set_intersection(__first1, __last1, __first2, __last2, __result, __comp);
             },
             __is_vector);
@@ -3097,7 +3193,7 @@ __pattern_set_intersection(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1
             std::forward<_ExecutionPolicy>(__exec), __first1, __last1, __left_bound_seq_2, __last2, __result, __comp,
             [](_DifferenceType __n, _DifferenceType __m) { return std::min(__n, __m); },
             [](_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2,
-               _ForwardIterator2 __last2, _Tp* __result, _Compare __comp) {
+               _ForwardIterator2 __last2, _T* __result, _Compare __comp) {
                 return std::set_intersection(__first2, __last2, __first1, __last1, __result, __comp);
             },
             __is_vector);
@@ -3107,6 +3203,7 @@ __pattern_set_intersection(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1
     // [left_bound_seq_1; last1) and [left_bound_seq_2; last2) - use serial algorithm
     return std::set_intersection(__left_bound_seq_1, __last1, __left_bound_seq_2, __last2, __result, __comp);
 }
+#endif
 
 //------------------------------------------------------------------------
 // set_difference
@@ -3127,7 +3224,7 @@ __brick_set_difference(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _F
                        _ForwardIterator2 __last2, _OutputIterator __result, _Compare __comp,
                        /*__is_vector=*/std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::set_difference(__first1, __last1, __first2, __last2, __result, __comp);
 }
 
@@ -3141,6 +3238,7 @@ __pattern_set_difference(_ExecutionPolicy&&, _ForwardIterator1 __first1, _Forwar
     return __internal::__brick_set_difference(__first1, __last1, __first2, __last2, __result, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _OutputIterator,
           class _Compare, class _IsVector>
 _OutputIterator
@@ -3148,7 +3246,7 @@ __pattern_set_difference(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, 
                          _ForwardIterator2 __first2, _ForwardIterator2 __last2, _OutputIterator __result,
                          _Compare __comp, _IsVector __is_vector, /*is_parallel=*/std::true_type)
 {
-    typedef typename std::iterator_traits<_OutputIterator>::value_type _Tp;
+    typedef typename std::iterator_traits<_OutputIterator>::value_type _T;
     typedef typename std::iterator_traits<_ForwardIterator1>::difference_type _DifferenceType;
 
     const auto __n1 = __last1 - __first1;
@@ -3192,15 +3290,16 @@ __pattern_set_difference(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, 
     if (__n1 + __n2 > __set_algo_cut_off)
         return __internal::__parallel_set_op(
             std::forward<_ExecutionPolicy>(__exec), __first1, __last1, __first2, __last2, __result, __comp,
-            [](_DifferenceType __n, _DifferenceType) { return __n; },
+            [](_DifferenceType __n, _DifferenceType __m) { return __n; },
             [](_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2,
-               _ForwardIterator2 __last2, _Tp* __result,
+               _ForwardIterator2 __last2, _T* __result,
                _Compare __comp) { return std::set_difference(__first1, __last1, __first2, __last2, __result, __comp); },
             __is_vector);
 
     // use serial algorithm
     return std::set_difference(__first1, __last1, __first2, __last2, __result, __comp);
 }
+#endif
 
 //------------------------------------------------------------------------
 // set_symmetric_difference
@@ -3221,7 +3320,7 @@ __brick_set_symmetric_difference(_ForwardIterator1 __first1, _ForwardIterator1 _
                                  _ForwardIterator2 __last2, _OutputIterator __result, _Compare __comp,
                                  /*__is_vector=*/std::true_type) noexcept
 {
-    _PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
+    __PSTL_PRAGMA_MESSAGE("Vectorized algorithm unimplemented, redirected to serial");
     return std::set_symmetric_difference(__first1, __last1, __first2, __last2, __result, __comp);
 }
 
@@ -3236,6 +3335,7 @@ __pattern_set_symmetric_difference(_ExecutionPolicy&&, _ForwardIterator1 __first
                                                         __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _OutputIterator,
           class _Compare, class _IsVector>
 _OutputIterator
@@ -3251,15 +3351,16 @@ __pattern_set_symmetric_difference(_ExecutionPolicy&& __exec, _ForwardIterator1 
     if (__n1 + __n2 <= __set_algo_cut_off)
         return std::set_symmetric_difference(__first1, __last1, __first2, __last2, __result, __comp);
 
-    typedef typename std::iterator_traits<_OutputIterator>::value_type _Tp;
+    typedef typename std::iterator_traits<_OutputIterator>::value_type _T;
     return __internal::__parallel_set_union_op(
         std::forward<_ExecutionPolicy>(__exec), __first1, __last1, __first2, __last2, __result, __comp,
         [](_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2, _ForwardIterator2 __last2,
-           _Tp* __result, _Compare __comp) {
+           _T* __result, _Compare __comp) {
             return std::set_symmetric_difference(__first1, __last1, __first2, __last2, __result, __comp);
         },
         __is_vector);
 }
+#endif
 
 //------------------------------------------------------------------------
 // is_heap_until
@@ -3320,6 +3421,7 @@ __is_heap_until_local(_RandomAccessIterator __first, _DifferenceType __begin, _D
         [&__comp](_RandomAccessIterator __it, _DifferenceType __i) { return __comp(__it[(__i - 1) / 2], __it[__i]); });
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator, class _Compare, class _IsVector>
 _RandomAccessIterator
 __pattern_is_heap_until(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _RandomAccessIterator __last,
@@ -3337,6 +3439,7 @@ __pattern_is_heap_until(_ExecutionPolicy&& __exec, _RandomAccessIterator __first
             std::less<typename std::iterator_traits<_RandomAccessIterator>::difference_type>(), /*is_first=*/true);
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // min_element
@@ -3355,7 +3458,7 @@ _ForwardIterator
 __brick_min_element(_ForwardIterator __first, _ForwardIterator __last, _Compare __comp,
                     /* __is_vector = */ std::true_type) noexcept
 {
-#if _PSTL_UDR_PRESENT
+#if __PSTL_UDR_PRESENT
     return __unseq_backend::__simd_min_element(__first, __last - __first, __comp);
 #else
     return std::min_element(__first, __last, __comp);
@@ -3370,6 +3473,7 @@ __pattern_min_element(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardIter
     return __internal::__brick_min_element(__first, __last, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <typename _ExecutionPolicy, typename _RandomAccessIterator, typename _Compare, typename _IsVector>
 _RandomAccessIterator
 __pattern_min_element(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, _RandomAccessIterator __last,
@@ -3392,6 +3496,7 @@ __pattern_min_element(_ExecutionPolicy&& __exec, _RandomAccessIterator __first, 
             });
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // minmax_element
@@ -3410,7 +3515,7 @@ std::pair<_ForwardIterator, _ForwardIterator>
 __brick_minmax_element(_ForwardIterator __first, _ForwardIterator __last, _Compare __comp,
                        /* __is_vector = */ std::true_type) noexcept
 {
-#if _PSTL_UDR_PRESENT
+#if __PSTL_UDR_PRESENT
     return __unseq_backend::__simd_minmax_element(__first, __last - __first, __comp);
 #else
     return std::minmax_element(__first, __last, __comp);
@@ -3425,6 +3530,7 @@ __pattern_minmax_element(_ExecutionPolicy&&, _ForwardIterator __first, _ForwardI
     return __internal::__brick_minmax_element(__first, __last, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <typename _ExecutionPolicy, typename _ForwardIterator, typename _Compare, typename _IsVector>
 std::pair<_ForwardIterator, _ForwardIterator>
 __pattern_minmax_element(_ExecutionPolicy&& __exec, _ForwardIterator __first, _ForwardIterator __last, _Compare __comp,
@@ -3451,6 +3557,7 @@ __pattern_minmax_element(_ExecutionPolicy&& __exec, _ForwardIterator __first, _F
             });
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // mismatch
@@ -3460,7 +3567,7 @@ std::pair<_ForwardIterator1, _ForwardIterator2>
 __mismatch_serial(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2,
                   _ForwardIterator2 __last2, _BinaryPredicate __pred)
 {
-#if _PSTL_CPP14_2RANGE_MISMATCH_EQUAL_PRESENT
+#if __PSTL_CPP14_2RANGE_MISMATCH_EQUAL_PRESENT
     return std::mismatch(__first1, __last1, __first2, __last2, __pred);
 #else
     for (; __first1 != __last1 && __first2 != __last2 && __pred(*__first1, *__first2); ++__first1, ++__first2)
@@ -3496,6 +3603,7 @@ __pattern_mismatch(_ExecutionPolicy&&, _ForwardIterator1 __first1, _ForwardItera
     return __internal::__brick_mismatch(__first1, __last1, __first2, __last2, __pred, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _RandomAccessIterator1, class _RandomAccessIterator2, class _Predicate,
           class _IsVector>
 std::pair<_RandomAccessIterator1, _RandomAccessIterator2>
@@ -3516,6 +3624,7 @@ __pattern_mismatch(_ExecutionPolicy&& __exec, _RandomAccessIterator1 __first1, _
         return std::make_pair(__result, __first2 + (__result - __first1));
     });
 }
+#endif
 
 //------------------------------------------------------------------------
 // lexicographical_compare
@@ -3575,6 +3684,7 @@ __pattern_lexicographical_compare(_ExecutionPolicy&&, _ForwardIterator1 __first1
     return __internal::__brick_lexicographical_compare(__first1, __last1, __first2, __last2, __comp, __is_vector);
 }
 
+#if __PSTL_USE_PAR_POLICIES
 template <class _ExecutionPolicy, class _ForwardIterator1, class _ForwardIterator2, class _Compare, class _IsVector>
 bool
 __pattern_lexicographical_compare(_ExecutionPolicy&& __exec, _ForwardIterator1 __first1, _ForwardIterator1 __last1,
@@ -3618,8 +3728,9 @@ __pattern_lexicographical_compare(_ExecutionPolicy&& __exec, _ForwardIterator1 _
         }
     }
 }
+#endif
 
 } // namespace __internal
 } // namespace __pstl
 
-#endif /* _PSTL_ALGORITHM_IMPL_H */
+#endif /* __PSTL_algorithm_impl_H */

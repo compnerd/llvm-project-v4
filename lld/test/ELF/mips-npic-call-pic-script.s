@@ -14,7 +14,6 @@
 # RUN: llvm-objdump -d %t.exe | FileCheck %s
 
 # CHECK: Disassembly of section .out:
-# CHECK-EMPTY:
 # CHECK-NEXT: __LA25Thunk_foo1a:
 # CHECK-NEXT:    20000:       3c 19 00 02     lui     $25, 2
 # CHECK-NEXT:    20004:       08 00 80 08     j       131104 <foo1a>
@@ -85,7 +84,6 @@ __start:
 # RUN: llvm-objdump -d %t2.exe | FileCheck -check-prefix=ORPH1 %s
 
 # ORPH1: Disassembly of section .text:
-# ORPH1-EMPTY:
 # ORPH1-NEXT: __start:
 # ORPH1-NEXT:    20000:       0c 00 80 15     jal     131156 <__LA25Thunk_foo1a>
 # ORPH1-NEXT:    20004:       00 00 00 00     nop
@@ -146,7 +144,6 @@ __start:
 # RUN: llvm-objdump -d %t3.exe | FileCheck -check-prefix=ORPH2 %s
 
 # ORPH2: Disassembly of section .out:
-# ORPH2-EMPTY:
 # ORPH2-NEXT: __start:
 # ORPH2-NEXT:    20000:       0c 00 80 18     jal     131168 <__LA25Thunk_foo1a>
 # ORPH2-NEXT:    20004:       00 00 00 00     nop
@@ -172,9 +169,7 @@ __start:
 
 # ORPH2: fnpic:
 # ORPH2-NEXT:    20050:       00 00 00 00     nop
-# ORPH2-EMPTY:
 # ORPH2-NEXT: Disassembly of section .text:
-# ORPH2-EMPTY:
 
 # ORPH2-NEXT: __LA25Thunk_foo1a:
 # ORPH2-NEXT:    20060:       3c 19 00 02     lui     $25, 2

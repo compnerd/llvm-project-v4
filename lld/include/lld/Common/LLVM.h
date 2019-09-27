@@ -29,7 +29,6 @@ class Twine;
 class MemoryBuffer;
 class MemoryBufferRef;
 template <typename T> class ArrayRef;
-template <typename T> class MutableArrayRef;
 template <unsigned InternalLen> class SmallString;
 template <typename T, unsigned N> class SmallVector;
 template <typename T> class ErrorOr;
@@ -63,7 +62,6 @@ using llvm::isa;
 
 // ADT's.
 using llvm::ArrayRef;
-using llvm::MutableArrayRef;
 using llvm::Error;
 using llvm::ErrorOr;
 using llvm::Expected;

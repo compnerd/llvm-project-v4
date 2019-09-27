@@ -62,20 +62,6 @@ uint32_t RISCV::calcEFlags() const {
 RelExpr RISCV::getRelExpr(const RelType Type, const Symbol &S,
                           const uint8_t *Loc) const {
   switch (Type) {
-  case R_RISCV_ADD8:
-  case R_RISCV_ADD16:
-  case R_RISCV_ADD32:
-  case R_RISCV_ADD64:
-  case R_RISCV_SET6:
-  case R_RISCV_SET8:
-  case R_RISCV_SET16:
-  case R_RISCV_SET32:
-  case R_RISCV_SUB6:
-  case R_RISCV_SUB8:
-  case R_RISCV_SUB16:
-  case R_RISCV_SUB32:
-  case R_RISCV_SUB64:
-    return R_RISCV_ADD;
   case R_RISCV_JAL:
   case R_RISCV_BRANCH:
   case R_RISCV_CALL:
@@ -102,8 +88,6 @@ static uint32_t extractBits(uint64_t V, uint32_t Begin, uint32_t End) {
 
 void RISCV::relocateOne(uint8_t *Loc, const RelType Type,
                         const uint64_t Val) const {
-  const unsigned Bits = Config->Wordsize * 8;
-
   switch (Type) {
   case R_RISCV_32:
     write32le(Loc, Val);
@@ -146,8 +130,8 @@ void RISCV::relocateOne(uint8_t *Loc, const RelType Type,
   }
 
   case R_RISCV_RVC_LUI: {
-    int64_t Imm = SignExtend64(Val + 0x800, Bits) >> 12;
-    checkInt(Loc, Imm, 6, Type);
+    int32_t Imm = ((Val + 0x800) >> 12);
+    checkUInt(Loc, Imm, 6, Type);
     if (Imm == 0) { // `c.lui rd, 0` is illegal, convert to `c.li rd, 0`
       write16le(Loc, (read16le(Loc) & 0x0F83) | 0x4000);
     } else {
@@ -190,9 +174,8 @@ void RISCV::relocateOne(uint8_t *Loc, const RelType Type,
 
   // auipc + jalr pair
   case R_RISCV_CALL: {
-    int64_t Hi = SignExtend64(Val + 0x800, Bits) >> 12;
-    checkInt(Loc, Hi, 20, Type);
-    if (isInt<20>(Hi)) {
+    checkInt(Loc, Val, 32, Type);
+    if (isInt<32>(Val)) {
       relocateOne(Loc, R_RISCV_PCREL_HI20, Val);
       relocateOne(Loc + 4, R_RISCV_PCREL_LO12_I, Val);
     }
@@ -201,24 +184,26 @@ void RISCV::relocateOne(uint8_t *Loc, const RelType Type,
 
   case R_RISCV_PCREL_HI20:
   case R_RISCV_HI20: {
-    uint64_t Hi = Val + 0x800;
-    checkInt(Loc, SignExtend64(Hi, Bits) >> 12, 20, Type);
+    checkInt(Loc, Val, 32, Type);
+    uint32_t Hi = Val + 0x800;
     write32le(Loc, (read32le(Loc) & 0xFFF) | (Hi & 0xFFFFF000));
     return;
   }
 
   case R_RISCV_PCREL_LO12_I:
   case R_RISCV_LO12_I: {
-    uint64_t Hi = (Val + 0x800) >> 12;
-    uint64_t Lo = Val - (Hi << 12);
+    checkInt(Loc, Val, 32, Type);
+    uint32_t Hi = Val + 0x800;
+    uint32_t Lo = Val - (Hi & 0xFFFFF000);
     write32le(Loc, (read32le(Loc) & 0xFFFFF) | ((Lo & 0xFFF) << 20));
     return;
   }
 
   case R_RISCV_PCREL_LO12_S:
   case R_RISCV_LO12_S: {
-    uint64_t Hi = (Val + 0x800) >> 12;
-    uint64_t Lo = Val - (Hi << 12);
+    checkInt(Loc, Val, 32, Type);
+    uint32_t Hi = Val + 0x800;
+    uint32_t Lo = Val - (Hi & 0xFFFFF000);
     uint32_t Imm11_5 = extractBits(Lo, 11, 5) << 25;
     uint32_t Imm4_0 = extractBits(Lo, 4, 0) << 7;
     write32le(Loc, (read32le(Loc) & 0x1FFF07F) | Imm11_5 | Imm4_0);

@@ -31,6 +31,7 @@ namespace elf {
 class Defined;
 class InputSection;
 class InputSectionBase;
+class InputSectionBase;
 class OutputSection;
 class SectionBase;
 class Symbol;

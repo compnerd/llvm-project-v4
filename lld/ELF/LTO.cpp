@@ -99,7 +99,6 @@ static lto::Config createConfig() {
   C.RemarksFilename = Config->OptRemarksFilename;
   C.RemarksPasses = Config->OptRemarksPasses;
   C.RemarksWithHotness = Config->OptRemarksWithHotness;
-  C.RemarksFormat = Config->OptRemarksFormat;
 
   C.SampleProfile = Config->LTOSampleProfile;
   C.UseNewPM = Config->LTONewPassManager;
@@ -143,15 +142,20 @@ BitcodeCompiler::BitcodeCompiler() {
                                        Config->LTOPartitions);
 
   // Initialize UsedStartStop.
-  Symtab->forEachSymbol([&](Symbol *Sym) {
+  for (Symbol *Sym : Symtab->getSymbols()) {
     StringRef S = Sym->getName();
     for (StringRef Prefix : {"__start_", "__stop_"})
       if (S.startswith(Prefix))
         UsedStartStop.insert(S.substr(Prefix.size()));
-  });
+  }
 }
 
 BitcodeCompiler::~BitcodeCompiler() = default;
+
+static void undefine(Symbol *S) {
+  replaceSymbol<Undefined>(S, nullptr, S->getName(), STB_GLOBAL, STV_DEFAULT,
+                           S->Type);
+}
 
 void BitcodeCompiler::add(BitcodeFile &F) {
   lto::InputFile &Obj = *F.Obj;
@@ -197,8 +201,7 @@ void BitcodeCompiler::add(BitcodeFile &F) {
         !(DR->Section == nullptr && (!Sym->File || Sym->File->isElf()));
 
     if (R.Prevailing)
-      Sym->replace(Undefined{nullptr, Sym->getName(), STB_GLOBAL, STV_DEFAULT,
-                             Sym->Type});
+      undefine(Sym);
 
     // We tell LTO to not apply interprocedural optimization for wrapped
     // (with --wrap) symbols because otherwise LTO would inline them while
@@ -208,24 +211,18 @@ void BitcodeCompiler::add(BitcodeFile &F) {
   checkError(LTOObj->add(std::move(F.Obj), Resols));
 }
 
-// If LazyObjFile has not been added to link, emit empty index files.
-// This is needed because this is what GNU gold plugin does and we have a
-// distributed build system that depends on that behavior.
-static void thinLTOCreateEmptyIndexFiles() {
-  for (LazyObjFile *F : LazyObjFiles) {
-    if (!isBitcode(F->MB))
-      continue;
-    std::string Path = replaceThinLTOSuffix(getThinLTOOutputFile(F->getName()));
-    std::unique_ptr<raw_fd_ostream> OS = openFile(Path + ".thinlto.bc");
-    if (!OS)
-      continue;
+static void createEmptyIndex(StringRef ModulePath) {
+  std::string Path = replaceThinLTOSuffix(getThinLTOOutputFile(ModulePath));
+  std::unique_ptr<raw_fd_ostream> OS = openFile(Path + ".thinlto.bc");
+  if (!OS)
+    return;
 
-    ModuleSummaryIndex M(/*HaveGVs*/ false);
-    M.setSkipModuleByDistributedBackend();
-    WriteIndexToFile(M, *OS);
-    if (Config->ThinLTOEmitImportsFiles)
-      openFile(Path + ".imports");
-  }
+  ModuleSummaryIndex M(/*HaveGVs*/ false);
+  M.setSkipModuleByDistributedBackend();
+  WriteIndexToFile(M, *OS);
+
+  if (Config->ThinLTOEmitImportsFiles)
+    openFile(Path + ".imports");
 }
 
 // Merge all the bitcode files we have seen, codegen the result
@@ -246,13 +243,12 @@ std::vector<InputFile *> BitcodeCompiler::compile() {
                           Files[Task] = std::move(MB);
                         }));
 
-  if (!BitcodeFiles.empty())
-    checkError(LTOObj->run(
-        [&](size_t Task) {
-          return llvm::make_unique<lto::NativeObjectStream>(
-              llvm::make_unique<raw_svector_ostream>(Buf[Task]));
-        },
-        Cache));
+  checkError(LTOObj->run(
+      [&](size_t Task) {
+        return llvm::make_unique<lto::NativeObjectStream>(
+            llvm::make_unique<raw_svector_ostream>(Buf[Task]));
+      },
+      Cache));
 
   // Emit empty index files for non-indexed files
   for (StringRef S : ThinIndices) {
@@ -262,8 +258,13 @@ std::vector<InputFile *> BitcodeCompiler::compile() {
       openFile(Path + ".imports");
   }
 
+  // If LazyObjFile has not been added to link, emit empty index files.
+  // This is needed because this is what GNU gold plugin does and we have a
+  // distributed build system that depends on that behavior.
   if (Config->ThinLTOIndexOnly) {
-    thinLTOCreateEmptyIndexFiles();
+    for (LazyObjFile *F : LazyObjFiles)
+      if (!F->AddedToLink && isBitcode(F->MB))
+        createEmptyIndex(F->getName());
 
     if (!Config->LTOObjPath.empty())
       saveBuffer(Buf[0], Config->LTOObjPath);

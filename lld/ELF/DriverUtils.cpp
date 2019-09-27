@@ -132,14 +132,8 @@ opt::InputArgList ELFOptTable::parse(ArrayRef<const char *> Argv) {
   if (MissingCount)
     error(Twine(Args.getArgString(MissingIndex)) + ": missing argument");
 
-  for (auto *Arg : Args.filtered(OPT_UNKNOWN)) {
-    std::string Nearest;
-    if (findNearest(Arg->getAsString(Args), Nearest) > 1)
-      error("unknown argument '" + Arg->getSpelling() + "'");
-    else
-      error("unknown argument '" + Arg->getSpelling() + "', did you mean '" +
-            Nearest + "'");
-  }
+  for (auto *Arg : Args.filtered(OPT_UNKNOWN))
+    error("unknown argument: " + Arg->getSpelling());
   return Args;
 }
 
@@ -223,9 +217,12 @@ Optional<std::string> elf::findFromSearchPaths(StringRef Path) {
   return None;
 }
 
-// This is for -l<basename>. We'll look for lib<basename>.so or lib<basename>.a from
+// This is for -lfoo. We'll look for libfoo.so or libfoo.a from
 // search paths.
-Optional<std::string> elf::searchLibraryBaseName(StringRef Name) {
+Optional<std::string> elf::searchLibrary(StringRef Name) {
+  if (Name.startswith(":"))
+    return findFromSearchPaths(Name.substr(1));
+
   for (StringRef Dir : Config->SearchPaths) {
     if (!Config->Static)
       if (Optional<std::string> S = findFile(Dir, "lib" + Name + ".so"))
@@ -234,13 +231,6 @@ Optional<std::string> elf::searchLibraryBaseName(StringRef Name) {
       return S;
   }
   return None;
-}
-
-// This is for -l<namespec>.
-Optional<std::string> elf::searchLibrary(StringRef Name) {
-    if (Name.startswith(":"))
-        return findFromSearchPaths(Name.substr(1));
-    return searchLibraryBaseName (Name);
 }
 
 // If a linker/version script doesn't exist in the current directory, we also

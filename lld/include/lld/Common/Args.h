@@ -25,8 +25,7 @@ namespace args {
 
 llvm::CodeGenOpt::Level getCGOptLevel(int OptLevelLTO);
 
-int64_t getInteger(llvm::opt::InputArgList &Args, unsigned Key,
-                   int64_t Default);
+int getInteger(llvm::opt::InputArgList &Args, unsigned Key, int Default);
 
 std::vector<StringRef> getStrings(llvm::opt::InputArgList &Args, int Id);
 

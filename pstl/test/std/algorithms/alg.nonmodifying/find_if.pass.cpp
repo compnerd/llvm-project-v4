@@ -7,13 +7,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
-
 // Tests for find_if and find_if_not
 #include "support/pstl_test_config.h"
 
+#ifdef PSTL_STANDALONE_TESTS
+#include "pstl/execution"
+#include "pstl/algorithm"
+#else
 #include <execution>
 #include <algorithm>
+#endif // PSTL_STANDALONE_TESTS
 
 #include "support/utils.h"
 
@@ -21,8 +24,8 @@ using namespace TestUtils;
 
 struct test_find_if
 {
-#if _PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN ||                                                            \
-    _PSTL_ICC_16_VC14_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN //dummy specialization by policy type, in case of broken configuration
+#if __PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN ||                                                            \
+    __PSTL_ICC_16_VC14_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN //dummy specialization by policy type, in case of broken configuration
     template <typename Iterator, typename Predicate, typename NotPredicate>
     void
     operator()(pstl::execution::unsequenced_policy, Iterator first, Iterator last, Predicate pred,
@@ -92,7 +95,7 @@ struct test_non_const
 int32_t
 main()
 {
-#if !_PSTL_ICC_17_TEST_MAC_RELEASE_32_BROKEN
+#if !__PSTL_ICC_17_TEST_MAC_RELEASE_32_BROKEN
     // Note that the "hit" and "miss" functions here avoid overflow issues.
     test<Number>(IsMultiple(5, OddTag()), [](int32_t j) { return Number(j - j % 5, OddTag()); }, // hit
                  [](int32_t j) { return Number(j % 5 == 0 ? j ^ 1 : j, OddTag()); });            // miss

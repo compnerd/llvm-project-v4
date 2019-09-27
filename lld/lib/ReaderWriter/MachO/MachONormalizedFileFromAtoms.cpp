@@ -587,8 +587,7 @@ void Util::layoutSectionsInTextSegment(size_t hlcSize, SegmentInfo *seg,
 
 void Util::assignAddressesToSections(const NormalizedFile &file) {
   // NOTE!: Keep this in sync with organizeSections.
-  size_t hlcSize = headerAndLoadCommandsSize(file,
-                                      _ctx.generateFunctionStartsLoadCommand());
+  size_t hlcSize = headerAndLoadCommandsSize(file);
   uint64_t address = 0;
   for (SegmentInfo *seg : _segmentInfos) {
     if (seg->name.equals("__PAGEZERO")) {

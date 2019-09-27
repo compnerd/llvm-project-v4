@@ -12,7 +12,6 @@
 #include "InputEvent.h"
 #include "InputFiles.h"
 #include "InputGlobal.h"
-#include "OutputSections.h"
 #include "OutputSegment.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Strings.h"
@@ -28,7 +27,6 @@ DefinedFunction *WasmSym::CallCtors;
 DefinedFunction *WasmSym::ApplyRelocs;
 DefinedData *WasmSym::DsoHandle;
 DefinedData *WasmSym::DataEnd;
-DefinedData *WasmSym::GlobalBase;
 DefinedData *WasmSym::HeapBase;
 GlobalSymbol *WasmSym::StackPointer;
 UndefinedGlobal *WasmSym::TableBase;
@@ -43,7 +41,7 @@ WasmSymbolType Symbol::getWasmType() const {
     return WASM_SYMBOL_TYPE_GLOBAL;
   if (isa<EventSymbol>(this))
     return WASM_SYMBOL_TYPE_EVENT;
-  if (isa<SectionSymbol>(this) || isa<OutputSectionSymbol>(this))
+  if (isa<SectionSymbol>(this))
     return WASM_SYMBOL_TYPE_SECTION;
   llvm_unreachable("invalid symbol kind");
 }
@@ -64,12 +62,6 @@ InputChunk *Symbol::getChunk() const {
   return nullptr;
 }
 
-bool Symbol::isDiscarded() const {
-  if (InputChunk *C = getChunk())
-    return C->Discarded;
-  return false;
-}
-
 bool Symbol::isLive() const {
   if (auto *G = dyn_cast<DefinedGlobal>(this))
     return G->Global->Live;
@@ -81,7 +73,6 @@ bool Symbol::isLive() const {
 }
 
 void Symbol::markLive() {
-  assert(!isDiscarded());
   if (auto *G = dyn_cast<DefinedGlobal>(this))
     G->Global->Live = true;
   if (auto *E = dyn_cast<DefinedEvent>(this))
@@ -106,9 +97,6 @@ void Symbol::setOutputSymbolIndex(uint32_t Index) {
 void Symbol::setGOTIndex(uint32_t Index) {
   LLVM_DEBUG(dbgs() << "setGOTIndex " << Name << " -> " << Index << "\n");
   assert(GOTIndex == INVALID_INDEX);
-  // Any symbol that is assigned a GOT entry must be exported othewise the
-  // dynamic linker won't be able create the entry that contains it.
-  ForceExport = true;
   GOTIndex = Index;
 }
 
@@ -271,9 +259,17 @@ DefinedEvent::DefinedEvent(StringRef Name, uint32_t Flags, InputFile *File,
                   Event ? &Event->Signature : nullptr),
       Event(Event) {}
 
-const OutputSectionSymbol *SectionSymbol::getOutputSectionSymbol() const {
-  assert(Section->OutputSec && Section->OutputSec->SectionSym);
-  return Section->OutputSec->SectionSym;
+uint32_t SectionSymbol::getOutputSectionIndex() const {
+  LLVM_DEBUG(dbgs() << "getOutputSectionIndex: " << getName() << "\n");
+  assert(OutputSectionIndex != INVALID_INDEX);
+  return OutputSectionIndex;
+}
+
+void SectionSymbol::setOutputSectionIndex(uint32_t Index) {
+  LLVM_DEBUG(dbgs() << "setOutputSectionIndex: " << getName() << " -> " << Index
+                    << "\n");
+  assert(Index != INVALID_INDEX);
+  OutputSectionIndex = Index;
 }
 
 void LazySymbol::fetch() { cast<ArchiveFile>(File)->addMember(&ArchiveSymbol); }
@@ -309,31 +305,19 @@ std::string lld::toString(wasm::Symbol::Kind Kind) {
     return "LazyKind";
   case wasm::Symbol::SectionKind:
     return "SectionKind";
-  case wasm::Symbol::OutputSectionKind:
-    return "OutputSectionKind";
   }
   llvm_unreachable("invalid symbol kind");
 }
 
-
-void lld::wasm::printTraceSymbolUndefined(StringRef Name, const InputFile* File) {
-  message(toString(File) + ": reference to " + Name);
-}
-
 // Print out a log message for --trace-symbol.
 void lld::wasm::printTraceSymbol(Symbol *Sym) {
-  // Undefined symbols are traced via printTraceSymbolUndefined
-  if (Sym->isUndefined())
-    return;
-
   std::string S;
-  if (Sym->isLazy())
+  if (Sym->isUndefined())
+    S = ": reference to ";
+  else if (Sym->isLazy())
     S = ": lazy definition of ";
   else
     S = ": definition of ";
 
   message(toString(Sym->getFile()) + S + Sym->getName());
 }
-
-const char *lld::wasm::DefaultModule = "env";
-const char *lld::wasm::FunctionTableName = "__indirect_function_table";

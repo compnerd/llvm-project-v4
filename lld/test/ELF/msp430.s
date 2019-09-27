@@ -13,7 +13,6 @@ foo:
   jmp _start
 
 ; CHECK:      Disassembly of section .text:
-; CHECK-EMPTY:
 ; CHECK-NEXT: _start:
 ; CHECK-NEXT: 8000: {{.*}} nop
 ; CHECK:      foo:

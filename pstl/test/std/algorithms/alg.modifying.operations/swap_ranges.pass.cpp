@@ -7,13 +7,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
-
 #include "support/pstl_test_config.h"
 
+#ifdef PSTL_STANDALONE_TESTS
 #include <iterator>
+
+#include "pstl/execution"
+#include "pstl/algorithm"
+#else
 #include <execution>
 #include <algorithm>
+#endif // PSTL_STANDALONE_TESTS
 
 #include "support/utils.h"
 
@@ -52,7 +56,7 @@ template <typename T>
 struct check_swap
 {
     bool
-    operator()(T&)
+    operator()(T& a)
     {
         return true;
     }

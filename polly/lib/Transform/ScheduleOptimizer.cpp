@@ -50,7 +50,6 @@
 #include "polly/DependenceInfo.h"
 #include "polly/LinkAllPasses.h"
 #include "polly/Options.h"
-#include "polly/ScheduleTreeTransform.h"
 #include "polly/ScopInfo.h"
 #include "polly/ScopPass.h"
 #include "polly/Simplify.h"
@@ -845,10 +844,6 @@ isl::schedule_node ScheduleTreeOptimizer::createMacroKernel(
   Node = Node.parent().parent();
   Node = permuteBandNodeDimensions(Node, DimOutNum - 2, DimOutNum - 1);
   Node = permuteBandNodeDimensions(Node, DimOutNum - 3, DimOutNum - 1);
-
-  // Mark the outermost loop as parallelizable.
-  Node = Node.band_member_set_coincident(0, true);
-
   return Node.child(0).child(0);
 }
 
@@ -1371,6 +1366,8 @@ bool ScheduleTreeOptimizer::isProfitableSchedule(Scop &S,
   // optimizations, by comparing (yet to be defined) performance metrics
   // before/after the scheduling optimizer
   // (e.g., #stride-one accesses)
+  if (S.containsExtensionNode(NewSchedule))
+    return true;
   auto NewScheduleMap = NewSchedule.get_map();
   auto OldSchedule = S.getSchedule();
   assert(OldSchedule && "Only IslScheduleOptimizer can insert extension nodes "
@@ -1618,7 +1615,6 @@ bool IslScheduleOptimizer::runOnScop(Scop &S) {
   auto *TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
   const OptimizerAdditionalInfoTy OAI = {TTI, const_cast<Dependences *>(&D)};
   auto NewSchedule = ScheduleTreeOptimizer::optimizeSchedule(Schedule, &OAI);
-  NewSchedule = hoistExtensionNodes(NewSchedule);
   walkScheduleTreeForStatistics(NewSchedule, 2);
 
   if (!ScheduleTreeOptimizer::isProfitableSchedule(S, NewSchedule))

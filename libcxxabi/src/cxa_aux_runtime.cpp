@@ -6,7 +6,7 @@
 //
 //
 // This file implements the "Auxiliary Runtime APIs"
-// https://itanium-cxx-abi.github.io/cxx-abi/abi-eh.html#cxx-aux
+// http://mentorembedded.github.io/cxx-abi/abi-eh.html#cxx-aux
 //===----------------------------------------------------------------------===//
 
 #include "cxxabi.h"

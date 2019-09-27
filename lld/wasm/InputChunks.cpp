@@ -154,8 +154,15 @@ void InputChunk::writeRelocations(raw_ostream &OS) const {
     writeUleb128(OS, Rel.Offset + Off, "reloc offset");
     writeUleb128(OS, File->calcNewIndex(Rel), "reloc index");
 
-    if (relocTypeHasAddend(Rel.Type))
+    switch (Rel.Type) {
+    case R_WASM_MEMORY_ADDR_LEB:
+    case R_WASM_MEMORY_ADDR_SLEB:
+    case R_WASM_MEMORY_ADDR_I32:
+    case R_WASM_FUNCTION_OFFSET_I32:
+    case R_WASM_SECTION_OFFSET_I32:
       writeSleb128(OS, File->calcNewAddend(Rel), "reloc addend");
+      break;
+    }
   }
 }
 
@@ -294,19 +301,10 @@ void InputFunction::writeTo(uint8_t *Buf) const {
 // This is only called when generating shared libaries (PIC) where address are
 // not known at static link time.
 void InputSegment::generateRelocationCode(raw_ostream &OS) const {
-  LLVM_DEBUG(dbgs() << "generating runtime relocations: " << getName()
-                    << " count=" << Relocations.size() << "\n");
-
-  // TODO(sbc): Encode the relocations in the data section and write a loop
-  // here to apply them.
   uint32_t SegmentVA = OutputSeg->StartVA + OutputSegmentOffset;
   for (const WasmRelocation &Rel : Relocations) {
     uint32_t Offset = Rel.Offset - getInputSectionOffset();
-    uint32_t OutputOffset = SegmentVA + Offset;
-
-    LLVM_DEBUG(dbgs() << "gen reloc: type=" << relocTypeToString(Rel.Type)
-                      << " addend=" << Rel.Addend << " index=" << Rel.Index
-                      << " output offset=" << OutputOffset << "\n");
+    uint32_t OutputVA = SegmentVA + Offset;
 
     // Get __memory_base
     writeU8(OS, WASM_OPCODE_GLOBAL_GET, "GLOBAL_GET");
@@ -314,28 +312,37 @@ void InputSegment::generateRelocationCode(raw_ostream &OS) const {
 
     // Add the offset of the relocation
     writeU8(OS, WASM_OPCODE_I32_CONST, "I32_CONST");
-    writeSleb128(OS, OutputOffset, "offset");
+    writeSleb128(OS, OutputVA, "offset");
     writeU8(OS, WASM_OPCODE_I32_ADD, "ADD");
 
-    Symbol *Sym = File->getSymbol(Rel);
     // Now figure out what we want to store
-    if (Sym->hasGOTIndex()) {
+    switch (Rel.Type) {
+    case R_WASM_TABLE_INDEX_I32:
+      // Add the table index to the __table_base
       writeU8(OS, WASM_OPCODE_GLOBAL_GET, "GLOBAL_GET");
-      writeUleb128(OS, Sym->getGOTIndex(), "global index");
-      if (Rel.Addend) {
+      writeUleb128(OS, WasmSym::TableBase->getGlobalIndex(), "table_base");
+      writeU8(OS, WASM_OPCODE_I32_CONST, "CONST");
+      writeSleb128(OS, File->calcNewValue(Rel), "new table index");
+      writeU8(OS, WASM_OPCODE_I32_ADD, "ADD");
+      break;
+    case R_WASM_MEMORY_ADDR_I32: {
+      Symbol *Sym = File->getSymbol(Rel);
+      if (Sym->isUndefined()) {
+        // Undefined addresses are accessed via imported GOT globals
+        writeU8(OS, WASM_OPCODE_GLOBAL_GET, "GLOBAL_GET");
+        writeUleb128(OS, Sym->getGOTIndex(), "global index");
+      } else {
+        // Defined global data is accessed via known offset from __memory_base
+        writeU8(OS, WASM_OPCODE_GLOBAL_GET, "GLOBAL_GET");
+        writeUleb128(OS, WasmSym::MemoryBase->getGlobalIndex(), "memory_base");
         writeU8(OS, WASM_OPCODE_I32_CONST, "CONST");
-        writeSleb128(OS, Rel.Addend, "addend");
+        writeSleb128(OS, File->calcNewValue(Rel), "new memory offset");
         writeU8(OS, WASM_OPCODE_I32_ADD, "ADD");
       }
-    } else {
-      const GlobalSymbol* BaseSymbol = WasmSym::MemoryBase;
-      if (Rel.Type == R_WASM_TABLE_INDEX_I32)
-        BaseSymbol = WasmSym::TableBase;
-      writeU8(OS, WASM_OPCODE_GLOBAL_GET, "GLOBAL_GET");
-      writeUleb128(OS, BaseSymbol->getGlobalIndex(), "base");
-      writeU8(OS, WASM_OPCODE_I32_CONST, "CONST");
-      writeSleb128(OS, File->calcNewValue(Rel), "offset");
-      writeU8(OS, WASM_OPCODE_I32_ADD, "ADD");
+      break;
+    }
+    default:
+      llvm_unreachable("unexpected relocation type in data segment");
     }
 
     // Store that value at the virtual address

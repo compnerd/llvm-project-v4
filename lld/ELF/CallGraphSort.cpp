@@ -172,8 +172,8 @@ void CallGraphSort::groupClusters() {
     SecToCluster[I] = &Clusters[I];
   }
 
-  llvm::stable_sort(SortedSecs, [&](int A, int B) {
-    return Clusters[A].getDensity() > Clusters[B].getDensity();
+  std::stable_sort(SortedSecs.begin(), SortedSecs.end(), [&](int A, int B) {
+    return Clusters[B].getDensity() < Clusters[A].getDensity();
   });
 
   for (int SI : SortedSecs) {
@@ -209,9 +209,10 @@ void CallGraphSort::groupClusters() {
   });
 
   // Sort by density.
-  llvm::stable_sort(Clusters, [](const Cluster &A, const Cluster &B) {
-    return A.getDensity() > B.getDensity();
-  });
+  std::stable_sort(Clusters.begin(), Clusters.end(),
+                   [](const Cluster &A, const Cluster &B) {
+                     return A.getDensity() > B.getDensity();
+                   });
 }
 
 DenseMap<const InputSectionBase *, int> CallGraphSort::run() {

@@ -6,7 +6,7 @@
 //
 //
 // Implements C++ ABI Exception Handling Level 1 as documented at:
-//      https://itanium-cxx-abi.github.io/cxx-abi/abi-eh.html
+//      http://mentorembedded.github.io/cxx-abi/abi-eh.html
 // using libunwind
 //
 //===----------------------------------------------------------------------===//

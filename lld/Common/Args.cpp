@@ -26,13 +26,12 @@ CodeGenOpt::Level lld::args::getCGOptLevel(int OptLevelLTO) {
   return CodeGenOpt::Default;
 }
 
-int64_t lld::args::getInteger(opt::InputArgList &Args, unsigned Key,
-                              int64_t Default) {
+int lld::args::getInteger(opt::InputArgList &Args, unsigned Key, int Default) {
   auto *A = Args.getLastArg(Key);
   if (!A)
     return Default;
 
-  int64_t V;
+  int V;
   if (to_integer(A->getValue(), V, 10))
     return V;
 

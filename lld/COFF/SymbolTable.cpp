@@ -16,7 +16,6 @@
 #include "lld/Common/Memory.h"
 #include "lld/Common/Timer.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/Object/WindowsMachineFlag.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <utility>
@@ -79,11 +78,7 @@ static Symbol *getSymbol(SectionChunk *SC, uint32_t Addr) {
   return Candidate;
 }
 
-// Given a file and the index of a symbol in that file, returns a description
-// of all references to that symbol from that file. If no debug information is
-// available, returns just the name of the file, else one string per actual
-// reference as described in the debug info.
-std::vector<std::string> getSymbolLocations(ObjFile *File, uint32_t SymIndex) {
+std::string getSymbolLocations(ObjFile *File, uint32_t SymIndex) {
   struct Location {
     Symbol *Sym;
     std::pair<StringRef, uint32_t> FileLine;
@@ -94,7 +89,7 @@ std::vector<std::string> getSymbolLocations(ObjFile *File, uint32_t SymIndex) {
     auto *SC = dyn_cast<SectionChunk>(C);
     if (!SC)
       continue;
-    for (const coff_relocation &R : SC->getRelocs()) {
+    for (const coff_relocation &R : SC->Relocs) {
       if (R.SymbolTableIndex != SymIndex)
         continue;
       std::pair<StringRef, uint32_t> FileLine =
@@ -106,12 +101,11 @@ std::vector<std::string> getSymbolLocations(ObjFile *File, uint32_t SymIndex) {
   }
 
   if (Locations.empty())
-    return std::vector<std::string>({"\n>>> referenced by " + toString(File)});
+    return "\n>>> referenced by " + toString(File);
 
-  std::vector<std::string> SymbolLocations(Locations.size());
-  size_t I = 0;
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
   for (Location Loc : Locations) {
-    llvm::raw_string_ostream OS(SymbolLocations[I++]);
     OS << "\n>>> referenced by ";
     if (!Loc.FileLine.first.empty())
       OS << Loc.FileLine.first << ":" << Loc.FileLine.second
@@ -120,41 +114,7 @@ std::vector<std::string> getSymbolLocations(ObjFile *File, uint32_t SymIndex) {
     if (Loc.Sym)
       OS << ":(" << toString(*Loc.Sym) << ')';
   }
-  return SymbolLocations;
-}
-
-// For an undefined symbol, stores all files referencing it and the index of
-// the undefined symbol in each file.
-struct UndefinedDiag {
-  Symbol *Sym;
-  struct File {
-    ObjFile *File;
-    uint64_t SymIndex;
-  };
-  std::vector<File> Files;
-};
-
-static void reportUndefinedSymbol(const UndefinedDiag &UndefDiag) {
-  std::string Out;
-  llvm::raw_string_ostream OS(Out);
-  OS << "undefined symbol: " << toString(*UndefDiag.Sym);
-
-  const size_t MaxUndefReferences = 10;
-  size_t I = 0, NumRefs = 0;
-  for (const UndefinedDiag::File &Ref : UndefDiag.Files) {
-    std::vector<std::string> SymbolLocations =
-        getSymbolLocations(Ref.File, Ref.SymIndex);
-    NumRefs += SymbolLocations.size();
-    for (const std::string &S : SymbolLocations) {
-      if (I >= MaxUndefReferences)
-        break;
-      OS << S;
-      I++;
-    }
-  }
-  if (I < NumRefs)
-    OS << "\n>>> referenced " << NumRefs - I << " more times";
-  errorOrWarn(OS.str());
+  return OS.str();
 }
 
 void SymbolTable::loadMinGWAutomaticImports() {
@@ -223,7 +183,7 @@ bool SymbolTable::handleMinGWAutomaticImport(Symbol *Sym, StringRef Name) {
       dyn_cast_or_null<DefinedRegular>(find((".refptr." + Name).str()));
   if (Refptr && Refptr->getChunk()->getSize() == Config->Wordsize) {
     SectionChunk *SC = dyn_cast_or_null<SectionChunk>(Refptr->getChunk());
-    if (SC && SC->getRelocs().size() == 1 && *SC->symbols().begin() == Sym) {
+    if (SC && SC->Relocs.size() == 1 && *SC->symbols().begin() == Sym) {
       log("Replacing .refptr." + Name + " with " + Imp->getName());
       Refptr->getChunk()->Live = false;
       Refptr->replaceKeepingName(Imp, ImpSize);
@@ -302,24 +262,15 @@ void SymbolTable::reportRemainingUndefines() {
              " (defined in " + toString(Imp->getFile()) + ") [LNK4217]");
   }
 
-  std::vector<UndefinedDiag> UndefDiags;
-  DenseMap<Symbol *, int> FirstDiag;
-
   for (ObjFile *File : ObjFile::Instances) {
     size_t SymIndex = (size_t)-1;
     for (Symbol *Sym : File->getSymbols()) {
       ++SymIndex;
       if (!Sym)
         continue;
-      if (Undefs.count(Sym)) {
-        auto it = FirstDiag.find(Sym);
-        if (it == FirstDiag.end()) {
-          FirstDiag[Sym] = UndefDiags.size();
-          UndefDiags.push_back({Sym, {{File, SymIndex}}});
-        } else {
-          UndefDiags[it->second].Files.push_back({File, SymIndex});
-        }
-      }
+      if (Undefs.count(Sym))
+        errorOrWarn("undefined symbol: " + toString(*Sym) +
+                    getSymbolLocations(File, SymIndex));
       if (Config->WarnLocallyDefinedImported)
         if (Symbol *Imp = LocalImports.lookup(Sym))
           warn(toString(File) +
@@ -327,9 +278,6 @@ void SymbolTable::reportRemainingUndefines() {
                " (defined in " + toString(Imp->getFile()) + ") [LNK4217]");
     }
   }
-
-  for (const UndefinedDiag& UndefDiag : UndefDiags)
-    reportUndefinedSymbol(UndefDiag);
 }
 
 std::pair<Symbol *, bool> SymbolTable::insert(StringRef Name) {
@@ -524,56 +472,48 @@ Symbol *SymbolTable::findUnderscore(StringRef Name) {
   return find(Name);
 }
 
-// Return all symbols that start with Prefix, possibly ignoring the first
-// character of Prefix or the first character symbol.
-std::vector<Symbol *> SymbolTable::getSymsWithPrefix(StringRef Prefix) {
-  std::vector<Symbol *> Syms;
+StringRef SymbolTable::findByPrefix(StringRef Prefix) {
   for (auto Pair : SymMap) {
     StringRef Name = Pair.first.val();
-    if (Name.startswith(Prefix) || Name.startswith(Prefix.drop_front()) ||
-        Name.drop_front().startswith(Prefix) ||
-        Name.drop_front().startswith(Prefix.drop_front())) {
-      Syms.push_back(Pair.second);
-    }
+    if (Name.startswith(Prefix))
+      return Name;
   }
-  return Syms;
+  return "";
 }
 
-Symbol *SymbolTable::findMangle(StringRef Name) {
+StringRef SymbolTable::findMangle(StringRef Name) {
   if (Symbol *Sym = find(Name))
     if (!isa<Undefined>(Sym))
-      return Sym;
-
-  // Efficient fuzzy string lookup is impossible with a hash table, so iterate
-  // the symbol table once and collect all possibly matching symbols into this
-  // vector. Then compare each possibly matching symbol with each possible
-  // mangling.
-  std::vector<Symbol *> Syms = getSymsWithPrefix(Name);
-  auto FindByPrefix = [&Syms](const Twine &T) -> Symbol * {
-    std::string Prefix = T.str();
-    for (auto *S : Syms)
-      if (S->getName().startswith(Prefix))
-        return S;
-    return nullptr;
-  };
-
-  // For non-x86, just look for C++ functions.
+      return Name;
   if (Config->Machine != I386)
-    return FindByPrefix("?" + Name + "@@Y");
-
+    return findByPrefix(("?" + Name + "@@Y").str());
   if (!Name.startswith("_"))
-    return nullptr;
+    return "";
   // Search for x86 stdcall function.
-  if (Symbol *S = FindByPrefix(Name + "@"))
+  StringRef S = findByPrefix((Name + "@").str());
+  if (!S.empty())
     return S;
   // Search for x86 fastcall function.
-  if (Symbol *S = FindByPrefix("@" + Name.substr(1) + "@"))
+  S = findByPrefix(("@" + Name.substr(1) + "@").str());
+  if (!S.empty())
     return S;
   // Search for x86 vectorcall function.
-  if (Symbol *S = FindByPrefix(Name.substr(1) + "@@"))
+  S = findByPrefix((Name.substr(1) + "@@").str());
+  if (!S.empty())
     return S;
   // Search for x86 C++ non-member function.
-  return FindByPrefix("?" + Name.substr(1) + "@@Y");
+  return findByPrefix(("?" + Name.substr(1) + "@@Y").str());
+}
+
+void SymbolTable::mangleMaybe(Symbol *B) {
+  auto *U = dyn_cast<Undefined>(B);
+  if (!U || U->WeakAlias)
+    return;
+  StringRef Alias = findMangle(U->getName());
+  if (!Alias.empty()) {
+    log(U->getName() + " aliased to " + Alias);
+    U->WeakAlias = addUndefined(Alias);
+  }
 }
 
 Symbol *SymbolTable::addUndefined(StringRef Name) {

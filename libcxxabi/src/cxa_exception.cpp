@@ -6,7 +6,7 @@
 //
 //  
 //  This file implements the "Exception Handling APIs"
-//  https://itanium-cxx-abi.github.io/cxx-abi/abi-eh.html
+//  http://mentorembedded.github.io/cxx-abi/abi-eh.html
 //  
 //===----------------------------------------------------------------------===//
 

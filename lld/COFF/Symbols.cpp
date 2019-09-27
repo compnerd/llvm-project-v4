@@ -20,9 +20,6 @@ using namespace llvm::object;
 
 using namespace lld::coff;
 
-static_assert(sizeof(SymbolUnion) <= 48,
-              "symbols should be optimized for memory usage");
-
 // Returns a symbol name for an error message.
 std::string lld::toString(coff::Symbol &B) {
   if (Config->Demangle)
@@ -42,15 +39,11 @@ StringRef Symbol::getName() {
   // name. Object files contain lots of non-external symbols, and creating
   // StringRefs for them (which involves lots of strlen() on the string table)
   // is a waste of time.
-  if (NameData == nullptr) {
+  if (Name.empty()) {
     auto *D = cast<DefinedCOFF>(this);
-    StringRef NameStr;
-    cast<ObjFile>(D->File)->getCOFFObj()->getSymbolName(D->Sym, NameStr);
-    NameData = NameStr.data();
-    NameSize = NameStr.size();
-    assert(NameSize == NameStr.size() && "name length truncated");
+    cast<ObjFile>(D->File)->getCOFFObj()->getSymbolName(D->Sym, Name);
   }
-  return StringRef(NameData, NameSize);
+  return Name;
 }
 
 InputFile *Symbol::getFile() {
@@ -74,10 +67,9 @@ bool Symbol::isLive() const {
 
 // MinGW specific.
 void Symbol::replaceKeepingName(Symbol *Other, size_t Size) {
-  StringRef OrigName = getName();
+  StringRef OrigName = Name;
   memcpy(this, Other, Size);
-  NameData = OrigName.data();
-  NameSize = OrigName.size();
+  Name = OrigName;
 }
 
 COFFSymbolRef DefinedCOFF::getCOFFSymbol() {

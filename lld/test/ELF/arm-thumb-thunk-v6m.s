@@ -31,7 +31,6 @@ far:
  bx lr
 
 // CHECK: Disassembly of section .text_low:
-// CHECK-EMPTY:
 // CHECK-NEXT: _start:
 // CHECK-NEXT:       94:        00 f0 00 f8     bl      #0
 // CHECK: __Thumbv6MABSLongThunk_far:
@@ -41,12 +40,10 @@ far:
 // CHECK-NEXT:       9e:        01 bd   pop     {r0, pc}
 // CHECK:       a0:     01 00 00 02     .word   0x02000001
 // CHECK: Disassembly of section .text_high:
-// CHECK-EMPTY:
 // CHECK-NEXT: far:
 // CHECK-NEXT:  2000000:        70 47   bx      lr
 
 // CHECK-PI: Disassembly of section .text_low:
-// CHECK-PI-EMPTY:
 // CHECK-PI-NEXT: _start:
 // CHECK-PI-NEXT:      130:     00 f0 00 f8     bl      #0
 // CHECK-PI: __Thumbv6MPILongThunk_far:
@@ -60,6 +57,5 @@ far:
 // CHECK-PI:           140:     c1 fe ff 01     .word   0x01fffec1
 
 // CHECK-PI: Disassembly of section .text_high:
-// CHECK-PI-EMPTY:
 // CHECK-PI-NEXT: far:
 // CHECK-PI-NEXT:  2000000:     70 47   bx      lr

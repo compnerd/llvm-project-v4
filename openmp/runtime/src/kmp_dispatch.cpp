@@ -68,20 +68,6 @@ void __kmp_dispatch_dxo_error(int *gtid_ref, int *cid_ref, ident_t *loc_ref) {
   }
 }
 
-// Returns either SCHEDULE_MONOTONIC or SCHEDULE_NONMONOTONIC
-static inline int __kmp_get_monotonicity(enum sched_type schedule,
-                                         bool use_hier = false) {
-  // Pick up the nonmonotonic/monotonic bits from the scheduling type
-  int monotonicity;
-  // default to monotonic
-  monotonicity = SCHEDULE_MONOTONIC;
-  if (SCHEDULE_HAS_NONMONOTONIC(schedule))
-    monotonicity = SCHEDULE_NONMONOTONIC;
-  else if (SCHEDULE_HAS_MONOTONIC(schedule))
-    monotonicity = SCHEDULE_MONOTONIC;
-  return monotonicity;
-}
-
 // Initialize a dispatch_private_info_template<T> buffer for a particular
 // type of schedule,chunk.  The loop description is found in lb (lower bound),
 // ub (upper bound), and st (stride).  nproc is the number of threads relevant
@@ -109,8 +95,6 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
   T tc;
   kmp_info_t *th;
   kmp_team_t *team;
-  int monotonicity;
-  bool use_hier;
 
 #ifdef KMP_DEBUG
   typedef typename traits_t<T>::signed_t ST;
@@ -141,16 +125,13 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
 #endif
                                     team->t.t_active_level == 1;
 #endif
-
-#if KMP_USE_HIER_SCHED
-  use_hier = pr->flags.use_hier;
-#else
-  use_hier = false;
+#if (KMP_STATIC_STEAL_ENABLED)
+  if (SCHEDULE_HAS_NONMONOTONIC(schedule))
+    // AC: we now have only one implementation of stealing, so use it
+    schedule = kmp_sch_static_steal;
+  else
 #endif
-
-  /* Pick up the nonmonotonic/monotonic bits from the scheduling type */
-  monotonicity = __kmp_get_monotonicity(schedule, use_hier);
-  schedule = SCHEDULE_WITHOUT_MODIFIERS(schedule);
+    schedule = SCHEDULE_WITHOUT_MODIFIERS(schedule);
 
   /* Pick up the nomerge/ordered bits from the scheduling type */
   if ((schedule >= kmp_nm_lower) && (schedule < kmp_nm_upper)) {
@@ -168,10 +149,6 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
   } else {
     pr->flags.ordered = FALSE;
   }
-  // Ordered overrides nonmonotonic
-  if (pr->flags.ordered) {
-    monotonicity = SCHEDULE_MONOTONIC;
-  }
 
   if (schedule == kmp_sch_static) {
     schedule = __kmp_static;
@@ -180,8 +157,6 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
       // Use the scheduling specified by OMP_SCHEDULE (or __kmp_sch_default if
       // not specified)
       schedule = team->t.t_sched.r_sched_type;
-      monotonicity = __kmp_get_monotonicity(schedule, use_hier);
-      schedule = SCHEDULE_WITHOUT_MODIFIERS(schedule);
       // Detail the schedule if needed (global controls are differentiated
       // appropriately)
       if (schedule == kmp_sch_guided_chunked) {
@@ -232,13 +207,7 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
       }
 #endif
     }
-#if KMP_STATIC_STEAL_ENABLED
-    // map nonmonotonic:dynamic to static steal
-    if (schedule == kmp_sch_dynamic_chunked) {
-      if (monotonicity == SCHEDULE_NONMONOTONIC)
-        schedule = kmp_sch_static_steal;
-    }
-#endif
+
     /* guided analytical not safe for too many threads */
     if (schedule == kmp_sch_guided_analytical_chunked && nproc > 1 << 20) {
       schedule = kmp_sch_guided_iterative_chunked;
@@ -248,8 +217,6 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
     if (schedule == kmp_sch_runtime_simd) {
       // compiler provides simd_width in the chunk parameter
       schedule = team->t.t_sched.r_sched_type;
-      monotonicity = __kmp_get_monotonicity(schedule, use_hier);
-      schedule = SCHEDULE_WITHOUT_MODIFIERS(schedule);
       // Detail the schedule if needed (global controls are differentiated
       // appropriately)
       if (schedule == kmp_sch_static || schedule == kmp_sch_auto ||
@@ -269,10 +236,9 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
       {
         char *buff;
         // create format specifiers before the debug output
-        buff = __kmp_str_format(
-            "__kmp_dispatch_init_algorithm: T#%%d new: schedule:%%d"
-            " chunk:%%%s\n",
-            traits_t<ST>::spec);
+        buff = __kmp_str_format("__kmp_dispatch_init: T#%%d new: schedule:%%d"
+                                " chunk:%%%s\n",
+                                traits_t<ST>::spec);
         KD_TRACE(10, (buff, gtid, schedule, chunk));
         __kmp_str_free(&buff);
       }
@@ -365,10 +331,7 @@ void __kmp_dispatch_init_algorithm(ident_t *loc, int gtid,
       pr->u.p.ub = init + small_chunk + (id < extras ? 1 : 0);
 
       pr->u.p.parm2 = lb;
-      // parm3 is the number of times to attempt stealing which is
-      // proportional to the number of chunks per thread up until
-      // the maximum value of nproc.
-      pr->u.p.parm3 = KMP_MIN(small_chunk + extras, nproc);
+      // pr->pfields.parm3 = 0; // it's not used in static_steal
       pr->u.p.parm4 = (id + 1) % nproc; // remember neighbour tid
       pr->u.p.st = st;
       if (traits_t<T>::type_size > 4) {
@@ -1221,7 +1184,7 @@ int __kmp_dispatch_next_algorithm(int gtid,
       }
       if (!status) { // try to steal
         kmp_info_t **other_threads = team->t.t_threads;
-        int while_limit = pr->u.p.parm3;
+        int while_limit = nproc; // nproc attempts to find a victim
         int while_index = 0;
         // TODO: algorithm of searching for a victim
         // should be cleaned up and measured
@@ -1319,7 +1282,7 @@ int __kmp_dispatch_next_algorithm(int gtid,
 
       if (!status) {
         kmp_info_t **other_threads = team->t.t_threads;
-        int while_limit = pr->u.p.parm3;
+        int while_limit = nproc; // nproc attempts to find a victim
         int while_index = 0;
 
         // TODO: algorithm of searching for a victim

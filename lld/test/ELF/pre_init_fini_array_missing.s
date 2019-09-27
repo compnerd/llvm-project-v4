@@ -20,7 +20,6 @@ _start:
 // ...
 
 // CHECK: Disassembly of section .text:
-// CHECK-EMPTY:
 // CHECK-NEXT:  _start:
 // CHECK-NEXT:   201000:    e8 fb ff ff ff     callq    -5
 // CHECK-NEXT:   201005:    e8 f6 ff ff ff     callq    -10
@@ -32,7 +31,6 @@ _start:
 // In position-independent binaries, they resolve to .text too.
 
 // PIE:      Disassembly of section .text:
-// PIE-EMPTY:
 // PIE-NEXT: _start:
 // PIE-NEXT:     1000:  e8 fb ff ff ff  callq   -5
 // PIE-NEXT:     1005:  e8 f6 ff ff ff  callq   -10

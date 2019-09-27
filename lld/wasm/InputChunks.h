@@ -31,7 +31,6 @@ namespace wasm {
 
 class ObjFile;
 class OutputSegment;
-class OutputSection;
 
 class InputChunk {
 public:
@@ -64,12 +63,9 @@ public:
   // If GC is disabled, all sections start out as live by default.
   unsigned Live : 1;
 
-  // Signals the chunk was discarded by COMDAT handling.
-  unsigned Discarded : 1;
-
 protected:
   InputChunk(ObjFile *F, Kind K)
-      : File(F), Live(!Config->GcSections), Discarded(false), SectionKind(K) {}
+      : File(F), Live(!Config->GcSections), SectionKind(K) {}
   virtual ~InputChunk() = default;
   virtual ArrayRef<uint8_t> data() const = 0;
 
@@ -210,8 +206,6 @@ public:
   StringRef getName() const override { return Section.Name; }
   StringRef getDebugName() const override { return StringRef(); }
   uint32_t getComdat() const override { return UINT32_MAX; }
-
-  OutputSection *OutputSec = nullptr;
 
 protected:
   ArrayRef<uint8_t> data() const override { return Section.Content; }

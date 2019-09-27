@@ -6,6 +6,6 @@
 	.asciz	"abc"
 
         .data
-        .quad .rodata.str1.1 + 4
+        .long .rodata.str1.1 + 4
 
 // CHECK: merge-string-error.s.tmp.o:(.rodata.str1.1): offset is outside the section
